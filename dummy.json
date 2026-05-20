@@ -1,0 +1,1 @@
+{"aoa": 0.0, "u_inlet": 15.0, "p_outlet": 0.0, "chord": 1.0, "regime": "Estacionario (simpleFoam)", "tolerance": "1e-4", "turbulence": "kEpsilon"}

@@ -1,0 +1,40 @@
+{
+  "results": [
+    {
+      "aoa": 0.0,
+      "ok": true,
+      "Cl": null,
+      "Cd": null,
+      "Cm": null,
+      "solver_time_s": 2,
+      "plan": "A"
+    },
+    {
+      "aoa": 4.0,
+      "ok": true,
+      "Cl": 0.417065,
+      "Cd": 0.0165659,
+      "Cm": -0.00205524,
+      "solver_time_s": 34,
+      "plan": "B"
+    },
+    {
+      "aoa": 8.0,
+      "ok": true,
+      "Cl": 0.809345,
+      "Cd": 0.030507,
+      "Cm": -0.001199,
+      "solver_time_s": 34,
+      "plan": "B"
+    },
+    {
+      "aoa": 12.0,
+      "ok": true,
+      "Cl": 1.1728,
+      "Cd": 0.0557513,
+      "Cm": -0.00280442,
+      "solver_time_s": 40,
+      "plan": "B"
+    }
+  ]
+}

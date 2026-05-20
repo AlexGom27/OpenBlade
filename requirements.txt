@@ -1,0 +1,12 @@
+numpy
+matplotlib
+gmsh
+pyvista
+pyvistaqt
+qtpy
+PySide6
+gmshairfoil2d
+scipy
+pandas
+reportlab
+imageio-ffmpeg

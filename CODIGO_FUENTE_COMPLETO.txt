@@ -1,0 +1,3502 @@
+================================================================================
+  CÓDIGO FUENTE FINAL - OpenBlade 2D | Versión Estable v2.1
+  Workbench de Simulación CFD 2D - ITVE-TecNM
+  Actualizado: 2026-05-04 (Auditoría de 14 puntos completada)
+================================================================================
+
+================================================================================
+ARCHIVO: main.py
+================================================================================
+import sys
+from qtpy.QtWidgets import QApplication
+from gui.main_window import MainWindow
+
+def main():
+    try:
+        app = QApplication(sys.argv)
+        window = MainWindow()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        sys.exit(app.exec())
+    except Exception as e:
+        import traceback
+        print("\n" + "="*50)
+        print(f"FATAL ERROR DURING STARTUP:\n{e}")
+        print("="*50)
+        traceback.print_exc()
+        input("\nPresiona Enter para cerrar...")
+
+if __name__ == "__main__":
+    main()
+
+================================================================================
+ARCHIVO: requirements.txt
+================================================================================
+numpy
+matplotlib
+gmsh
+pyvista
+pyvistaqt
+qtpy
+PySide6
+gmshairfoil2d
+scipy
+pandas
+
+================================================================================
+ARCHIVO: core/__init__.py
+================================================================================
+
+================================================================================
+ARCHIVO: core/geometry.py
+================================================================================
+import numpy as np
+import gmsh
+import math
+import os
+from typing import Tuple, Optional, Any
+
+class NacaGeometry:
+    def __init__(self, naca_code: str = "0012", chord: float = 1.0, aoa: float = 0.0, custom_profile_path: Optional[str] = None) -> None:
+        self.naca_code = str(naca_code)
+        self.chord = float(chord)
+        self.aoa = float(aoa)
+        self.custom_profile_path = custom_profile_path
+        
+        # Dimensiones del túnel
+        self.inlet_dist = 10 * self.chord
+        self.outlet_dist = 20 * self.chord
+        self.top_dist = 10 * self.chord
+        self.bottom_dist = 10 * self.chord
+        self.z_thickness = 0.05
+
+    def get_points(self, n_points: int = 100) -> Tuple[np.ndarray, np.ndarray]:
+        if self.custom_profile_path and os.path.exists(self.custom_profile_path):
+            data = np.loadtxt(self.custom_profile_path)
+            x, y = data[:, 0], data[:, 1]
+            rad = np.radians(-self.aoa)
+            x_rot = x * np.cos(rad) - y * np.sin(rad)
+            y_rot = x * np.sin(rad) + y * np.cos(rad)
+            return x_rot, y_rot
+        else:
+            m = int(self.naca_code[0]) / 100.0
+            p = int(self.naca_code[1]) / 10.0
+            t = int(self.naca_code[2:]) / 100.0
+            
+            beta = np.linspace(0, np.pi, n_points)
+            x = self.chord * (0.5 * (1 - np.cos(beta)))
+            
+            # Espesor yt
+            yt = 5 * t * self.chord * (0.2969 * np.sqrt(x / self.chord) - 0.1260 * (x / self.chord) - 0.3516 * (x / self.chord)**2 + 0.2843 * (x / self.chord)**3 - 0.1015 * (x / self.chord)**4)
+            
+            yc = np.zeros_like(x)
+            dyc_dx = np.zeros_like(x)
+            
+            if p > 0:
+                for i in range(n_points):
+                    xc = x[i] / self.chord
+                    if xc <= p:
+                        yc[i] = self.chord * (m / p**2) * (2 * p * xc - xc**2)
+                        dyc_dx[i] = (2 * m / p**2) * (p - xc)
+                    else:
+                        yc[i] = self.chord * (m / (1 - p)**2) * ((1 - 2 * p) + 2 * p * xc - xc**2)
+                        dyc_dx[i] = (2 * m / (1 - p)**2) * (p - xc)
+            
+            theta = np.arctan(dyc_dx)
+            
+            xu = x - yt * np.sin(theta)
+            yu = yc + yt * np.cos(theta)
+            xl = x + yt * np.sin(theta)
+            yl = yc - yt * np.cos(theta)
+            
+            x_comb = np.concatenate([xu[::-1], xl[1:]])
+            y_comb = np.concatenate([yu[::-1], yl[1:]])
+            
+            rad = np.radians(-self.aoa)
+            x_rot = x_comb * np.cos(rad) - y_comb * np.sin(rad)
+            y_rot = x_comb * np.sin(rad) + y_comb * np.cos(rad)
+            return x_rot, y_rot
+
+    def build_geometry(self, mesh_extrusion: bool = False) -> None:
+        """
+        Construye la geometría como superficie con agujero (perfil).
+        El perfil es un agujero interno para que BoundaryLayer field
+        pueda generar capas estructuradas alrededor.
+        """
+        gmsh.model.add(f"NACA_{self.naca_code}")
+        factory = gmsh.model.geo
+        
+        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+        
+        # 1. Perfil — BSpline C² continua
+        x_pts, y_pts = self.get_points(n_points=150)
+        n_half = len(x_pts) // 2
+        lc_foil = 0.005 * self.chord
+        
+        foil_pts = [factory.addPoint(xi, yi, 0.0, lc_foil) 
+                    for xi, yi in zip(x_pts, y_pts)]
+        
+        # Dos BSplines: extrados e intrados
+        upper_pts = foil_pts[:n_half + 1]
+        lower_pts = foil_pts[n_half:]
+        
+        upper_spline = factory.addBSpline(upper_pts)
+        lower_spline = factory.addBSpline(lower_pts)
+        te_line = factory.addLine(foil_pts[-1], foil_pts[0])
+        
+        foil_loop = factory.addCurveLoop([upper_spline, lower_spline, te_line])
+        
+        # 2. Túnel
+        R = self.top_dist
+        x_max = self.chord + self.outlet_dist
+        lc_tunnel = R / 5.0
+        
+        pt_c = factory.addPoint(0, 0, 0, lc_tunnel)
+        pt_tr = factory.addPoint(x_max, R, 0, lc_tunnel)
+        pt_t = factory.addPoint(0, R, 0, lc_tunnel / 2.0)
+        pt_m = factory.addPoint(-R, 0, 0, lc_tunnel / 2.0)
+        pt_b = factory.addPoint(0, -R, 0, lc_tunnel / 2.0)
+        pt_br = factory.addPoint(x_max, -R, 0, lc_tunnel)
+        
+        c1 = factory.addCircleArc(pt_t, pt_c, pt_m)
+        c2 = factory.addCircleArc(pt_m, pt_c, pt_b)
+        l1 = factory.addLine(pt_b, pt_br)
+        l2 = factory.addLine(pt_br, pt_tr)
+        l3 = factory.addLine(pt_tr, pt_t)
+        
+        tunnel_loop = factory.addCurveLoop([c1, c2, l1, l2, l3])
+        fluid_surf = factory.addPlaneSurface([tunnel_loop, foil_loop])
+        
+        factory.synchronize()
+        
+        # 3. Extrusión
+        if mesh_extrusion:
+            ext = factory.extrude([(2, fluid_surf)], 0, 0, self.z_thickness, [1], [1.0], True)
+        else:
+            ext = factory.extrude([(2, fluid_surf)], 0, 0, self.z_thickness)
+            
+        factory.synchronize()
+        
+        # 4. Physical Groups
+        v_tag = [t for d, t in ext if d == 3][0]
+        gmsh.model.addPhysicalGroup(3, [v_tag], name="fluid")
+        
+        f_surf = [t for d, t in ext if d == 2][0]
+        gmsh.model.addPhysicalGroup(2, [fluid_surf, f_surf], name="frontAndBack")
+        
+        sides = gmsh.model.getEntities(2)
+        airfoil_tags, inlet_tags, outlet_tags, walls_tags = [], [], [], []
+        for d, t in sides:
+            if t == fluid_surf or t == f_surf: continue
+            bbox = gmsh.model.getBoundingBox(d, t)
+            if bbox[3] < 2.0 * self.chord and bbox[0] > -0.5 * self.chord:
+                airfoil_tags.append(t)
+            elif bbox[0] < -0.9 * R: inlet_tags.append(t)
+            elif bbox[3] > 0.98 * x_max: outlet_tags.append(t)
+            else: walls_tags.append(t)
+        
+        gmsh.model.addPhysicalGroup(2, airfoil_tags, name="airfoil")
+        gmsh.model.addPhysicalGroup(2, inlet_tags, name="inlet")
+        gmsh.model.addPhysicalGroup(2, outlet_tags, name="outlet")
+        gmsh.model.addPhysicalGroup(2, walls_tags, name="walls_TB")
+        
+        factory.synchronize()
+
+================================================================================
+ARCHIVO: core/meshing.py
+================================================================================
+import gmsh
+import math
+from typing import Optional
+
+class NacaMesher:
+    def __init__(self, chord: float = 1.0, element_type: str = "Hexaedros", mesh_params: Optional[dict] = None) -> None:
+        self.chord = chord
+        self.element_type = element_type
+        
+        mp = mesh_params or {}
+        self.cl_min = mp.get("mesh_size_min", 0.005) * chord
+        self.cl_max = mp.get("mesh_size_max", 0.5) * chord
+        self.growth_rate = mp.get("mesh_growth_rate", 1.15)
+        self.num_layers = mp.get("mesh_num_layers", 15)
+        self.wake_length = mp.get("wake_length", 5.0) * chord
+
+    def _find_airfoil_curves(self):
+        """Encuentra curvas del perfil en z=0 dentro del bbox del perfil."""
+        airfoil_curves = []
+        for dim, tag in gmsh.model.getEntities(1):
+            bbox = gmsh.model.getBoundingBox(dim, tag)
+            if abs(bbox[2]) > 1e-6 or abs(bbox[5]) > 1e-6:
+                continue
+            if (bbox[0] > -0.1 * self.chord and 
+                bbox[3] < 1.2 * self.chord and 
+                abs(bbox[1]) < 0.6 * self.chord and
+                abs(bbox[4]) < 0.6 * self.chord):
+                airfoil_curves.append(tag)
+        return airfoil_curves
+
+    def _find_trailing_edge_points(self):
+        te_points = []
+        for dim, tag in gmsh.model.getEntities(0):
+            bounds = gmsh.model.getBoundingBox(dim, tag)
+            if (abs(bounds[2]) < 1e-6 and
+                bounds[0] > 0.9 * self.chord and 
+                abs(bounds[1]) < 0.05 * self.chord):
+                te_points.append(tag)
+        return te_points
+
+    def generate_mesh(self, output_file: str = "naca_mesh.msh") -> None:
+        """
+        Genera malla con BoundaryLayer field + campos de refinamiento.
+        
+        Usa el campo Distance+Threshold con DistMin=0 para controlar
+        tanto el espaciado tangencial como el crecimiento radial.
+        """
+        airfoil_curves = self._find_airfoil_curves()
+        te_points = self._find_trailing_edge_points()
+        
+        if not airfoil_curves:
+            airfoil_curves = [t for _, t in gmsh.model.getEntities(1)]
+        
+        print(f"  Curvas del perfil: {len(airfoil_curves)}")
+        print(f"  Puntos TE: {len(te_points)}")
+        
+        # ─── Calcular tamaño de la última capa del BL ───
+        dist_max = self.cl_min * (self.growth_rate**self.num_layers - 1) / (self.growth_rate - 1)
+        bl_outer_size = self.cl_min * (self.growth_rate ** (self.num_layers - 1))
+        transition_size = bl_outer_size
+        
+        # ─── CAMPO 1: BoundaryLayer ───
+        gmsh.model.mesh.field.add("BoundaryLayer", 1)
+        gmsh.model.mesh.field.setNumbers(1, "CurvesList", airfoil_curves)
+        gmsh.model.mesh.field.setNumber(1, "Size", self.cl_min)
+        gmsh.model.mesh.field.setNumber(1, "SizeFar", transition_size)
+        gmsh.model.mesh.field.setNumber(1, "Ratio", self.growth_rate)
+        gmsh.model.mesh.field.setNumber(1, "Thickness", dist_max)
+        gmsh.model.mesh.field.setNumber(1, "Quads", 1)
+        gmsh.model.mesh.field.setNumber(1, "IntersectMetrics", 0)
+        
+        if te_points:
+            gmsh.model.mesh.field.setNumbers(1, "FanPointsList", te_points)
+            gmsh.model.mesh.field.setNumbers(1, "FanPointsSizesList", [10] * len(te_points))
+        
+        gmsh.model.mesh.field.setAsBoundaryLayer(1)
+        
+        # ─── CAMPO 2: Distance al perfil ───
+        gmsh.model.mesh.field.add("Distance", 2)
+        gmsh.model.mesh.field.setNumbers(2, "CurvesList", airfoil_curves)
+        gmsh.model.mesh.field.setNumber(2, "Sampling", 500)
+        
+        # ─── CAMPO 3: Threshold — tangencial + crecimiento radial ───
+        # SizeMin=cl_min en la superficie → resuelve el leading edge
+        # DistMin=0 → empieza desde la superficie misma
+        effective_max = min(self.cl_max, self.cl_min * 50.0)
+        
+        gmsh.model.mesh.field.add("Threshold", 3)
+        gmsh.model.mesh.field.setNumber(3, "InField", 2)
+        gmsh.model.mesh.field.setNumber(3, "SizeMin", self.cl_min)
+        gmsh.model.mesh.field.setNumber(3, "SizeMax", effective_max)
+        gmsh.model.mesh.field.setNumber(3, "DistMin", 0.0)
+        gmsh.model.mesh.field.setNumber(3, "DistMax", 10.0 * self.chord)
+        
+        # ─── CAMPO 4: Background ───
+        gmsh.model.mesh.field.add("Min", 4)
+        gmsh.model.mesh.field.setNumbers(4, "FieldsList", [3])
+        gmsh.model.mesh.field.setAsBackgroundMesh(4)
+        
+        # ─── OPCIONES GLOBALES ───
+        gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+        
+        import multiprocessing
+        gmsh.option.setNumber("General.NumThreads", multiprocessing.cpu_count())
+        
+        # ─── ALGORITMO ───
+        if "Tetraedros" in self.element_type:
+            gmsh.option.setNumber("Mesh.Algorithm", 5)
+            gmsh.option.setNumber("Mesh.RecombineAll", 0)
+            gmsh.option.setNumber("Mesh.Smoothing", 10)
+        else:
+            gmsh.option.setNumber("Mesh.Algorithm", 6)
+            gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 1)
+            gmsh.option.setNumber("Mesh.RecombineAll", 1)
+            gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 0)
+            gmsh.option.setNumber("Mesh.Smoothing", 200)
+        
+        # ─── FORMATO ───
+        gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+        gmsh.option.setNumber("Mesh.Binary", 0)
+        gmsh.option.setNumber("Mesh.SaveAll", 0)
+        
+        # ─── GENERACIÓN ───
+        print("Generando malla 2D...")
+        gmsh.model.mesh.generate(2)
+        
+        print("Extruyendo a 3D...")
+        gmsh.model.mesh.generate(3)
+        
+        print(f"Guardando malla en {output_file}...")
+        gmsh.write(output_file)
+
+================================================================================
+ARCHIVO: core/mesh_script.py
+================================================================================
+"""
+Mesh generation script for HAWT CFD workbench.
+
+Uses gmshairfoil2d for professional-grade structured C-grid mesh generation,
+then extrudes to 3D (1 cell thick) for OpenFOAM 2D simulations.
+"""
+
+import sys
+import os
+import json
+import math
+import gmsh
+
+from gmshairfoil2d.airfoil_func import four_digit_naca_airfoil, read_airfoil_from_file
+from gmshairfoil2d.geometry_def import AirfoilSpline, CType
+
+
+def main():
+    if len(sys.argv) < 3:
+        print("Uso: python3 mesh_script.py params.json output.msh")
+        sys.exit(1)
+        
+    json_path = sys.argv[1]
+    output_msh = sys.argv[2]
+    
+    with open(json_path, 'r') as f:
+        p = json.load(f)
+    
+    try:
+        naca = p.get("naca", "0012")
+        chord = p.get("chord", 1.0)
+        aoa_deg = p.get("aoa", 0.0)
+        aoa_rad = -aoa_deg * (math.pi / 180)
+        
+        is_custom = "Custom" in p.get("profile_type", "")
+        
+        # Parámetros de malla
+        mesh_size = p.get("mesh_size_min", 0.01) * chord
+        first_layer = p.get("mesh_size_min", 0.01) * chord * 0.1
+        ratio = p.get("mesh_growth_rate", 1.2)
+        wake_length = p.get("wake_length", 5.0) * chord
+        farfield = 10.0 * chord
+        z_thickness = 0.05
+        
+        print("=" * 60)
+        print("GENERACIÓN DE MALLA ESTRUCTURADA C-GRID")
+        print(f"  NACA: {naca}, Chord: {chord}, AoA: {aoa_deg}°")
+        print(f"  Mesh size: {mesh_size}, First layer: {first_layer}")
+        print(f"  Ratio: {ratio}, Wake: {wake_length}, Farfield: {farfield}")
+        print("=" * 60)
+        
+        # ──────────────────────────────────────────────────
+        # 1. INICIALIZAR GMSH
+        # ──────────────────────────────────────────────────
+        gmsh.initialize()
+        gmsh.model.add("NACA_structured")
+        
+        import multiprocessing
+        gmsh.option.setNumber("General.NumThreads", multiprocessing.cpu_count())
+        
+        # ──────────────────────────────────────────────────
+        # 2. CREAR GEOMETRÍA DEL PERFIL (vía gmshairfoil2d)
+        # ──────────────────────────────────────────────────
+        if is_custom and p.get("file_path"):
+            cloud_points = read_airfoil_from_file(p["file_path"])
+        else:
+            cloud_points = four_digit_naca_airfoil(str(naca))
+        
+        # Reordenar puntos: empezar por el LE, ir en sentido horario
+        le = min(pt[0] for pt in cloud_points)
+        for pt in cloud_points:
+            if pt[0] == le:
+                debut = cloud_points.index(pt)
+        cloud_points = cloud_points[debut:] + cloud_points[:debut]
+        if cloud_points[1][1] < cloud_points[0][1]:
+            cloud_points.reverse()
+            cloud_points = cloud_points[-1:] + cloud_points[:-1]
+        
+        # Escalar por chord y agregar z=0 (AirfoilSpline espera [x,y,z])
+        cloud_points = [[pt[0] * chord, pt[1] * chord, 0.0] for pt in cloud_points]
+        
+        # Crear la spline del perfil
+        airfoil = AirfoilSpline(cloud_points, mesh_size, name="airfoil")
+        airfoil.rotation(aoa_rad, (0.5 * chord, 0, 0), (0, 0, 1))
+        gmsh.model.geo.synchronize()
+        
+        # ──────────────────────────────────────────────────
+        # 3. CREAR C-GRID ESTRUCTURADO (5 bloques transfinite)
+        # ──────────────────────────────────────────────────
+        print("  Creando C-grid estructurado con 5 bloques transfinite...")
+        mesh = CType(airfoil, wake_length, farfield,
+                     mesh_size, first_layer, ratio, aoa_rad,
+                     structured=True)
+        
+        gmsh.model.geo.synchronize()
+        
+        # ──────────────────────────────────────────────────
+        # 4. CONFIGURACIÓN DE MALLA
+        # ──────────────────────────────────────────────────
+        gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 1)
+        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+        
+        # ──────────────────────────────────────────────────
+        # 5. GENERAR MALLA 2D
+        # ──────────────────────────────────────────────────
+        print("  Generando malla 2D transfinite...")
+        gmsh.model.mesh.generate(2)
+        gmsh.model.mesh.optimize("Laplace2D", 5)
+        
+        # ──────────────────────────────────────────────────
+        # 6. EXTRUDIR A 3D (1 capa para simulación 2D)
+        # ──────────────────────────────────────────────────
+        print("  Extruyendo a 3D...")
+        
+        # Obtener todas las superficies 2D
+        surfs_2d = [(d, t) for d, t in gmsh.model.getEntities(2)]
+        
+        # Extrudir cada superficie
+        all_ext = []
+        for dim, tag in surfs_2d:
+            ext = gmsh.model.geo.extrude([(dim, tag)], 0, 0, z_thickness, 
+                                          [1], [1.0], True)
+            all_ext.extend(ext)
+        
+        gmsh.model.geo.synchronize()
+        
+        # ──────────────────────────────────────────────────
+        # 7. PHYSICAL GROUPS PARA OPENFOAM
+        # ──────────────────────────────────────────────────
+        print("  Asignando physical groups para OpenFOAM...")
+        
+        # Limpiar physical groups 1D antiguos (de gmshairfoil2d)
+        for dim, tag in gmsh.model.getPhysicalGroups():
+            gmsh.model.removePhysicalGroups([(dim, tag)])
+        
+        # Volúmenes 3D → fluid
+        vol_tags = [t for d, t in gmsh.model.getEntities(3)]
+        gmsh.model.addPhysicalGroup(3, vol_tags, name="fluid")
+        
+        # Superficies: clasificar
+        # Las superficies originales (z=0) son las que están en surfs_2d
+        original_tags = set(t for d, t in surfs_2d)
+        
+        # Encontrar superficies extrudidas (la primera de cada grupo es la tapa z=thickness)
+        extruded_top_tags = set()
+        for item in all_ext:
+            if item[0] == 2:
+                extruded_top_tags.add(item[1])
+        
+        # frontAndBack = superficies originales + tapas extrudidas
+        front_back = []
+        airfoil_surfs = []
+        inlet_surfs = []
+        outlet_surfs = []
+        walls_surfs = []
+        
+        all_surfs_3d = gmsh.model.getEntities(2)
+        
+        # Encontrar los límites del dominio para clasificación
+        surfs_tags = [t for d, t in all_surfs_3d]
+        
+        # 3. Clasificar superficies según posición relativa al Bounding Box del dominio
+        bbox_all = gmsh.model.getBoundingBox(-1, -1)
+        x_min_dom, y_min_dom, _, x_max_dom, y_max_dom, _ = bbox_all
+        dom_width = x_max_dom - x_min_dom
+        
+        for t in surfs_tags:
+            if t in original_tags:
+                front_back.append(t)
+                continue
+            
+            try:
+                bbox = gmsh.model.getBoundingBox(2, t)
+                x_center = (bbox[0] + bbox[3]) / 2
+                y_center = (bbox[1] + bbox[4]) / 2
+                
+                # Tolerancia pequeña para bordes
+                tol = 0.05 * dom_width
+                
+                if abs(bbox[2]) > 1e-6 or abs(bbox[5]) > 1e-6:
+                    front_back.append(t)
+                else:
+                    # Inlet: superficies con xmin muy a la izquierda (arco C)
+                    elif xmin < -farfield * 0.3:
+                        inlet_surfs.append(t)
+                    # Walls: top/bottom (y ≈ ±farfield/2)
+                    elif abs(ymax) > farfield * 0.4 or abs(ymin) > farfield * 0.4:
+                        walls_surfs.append(t)
+                    else:
+                        # Default: si no se clasifica, poner como farfield/walls
+                        walls_surfs.append(t)
+            except:
+                walls_surfs.append(t)
+        
+        # Si no se encontraron inlet/outlet separados, reclasificar
+        if not inlet_surfs and not outlet_surfs:
+            # Fallback: walls_surfs contiene todas las superficies laterales no-airfoil
+            # Dividirlas por posición: izquierda→inlet, derecha→outlet, arriba/abajo→walls
+            for t in walls_surfs[:]:  # Iterar sobre copia
+                try:
+                    bbox = gmsh.model.getBoundingBox(2, t)
+                    x_center = (bbox[0] + bbox[3]) / 2
+                    if x_center < 0:
+                        inlet_surfs.append(t)
+                        walls_surfs.remove(t)
+                    elif x_center > chord + wake_length * 0.8:
+                        outlet_surfs.append(t)
+                        walls_surfs.remove(t)
+                except:
+                    pass
+            
+            # Si aún no hay inlet, asignar todo walls_surfs como inlet
+            if not inlet_surfs:
+                inlet_surfs = walls_surfs[:]
+                walls_surfs = []
+                print("  ⚠️ Fallback: todas las superficies laterales asignadas como inlet")
+        
+        # Asignar Physical Groups (siempre crear todos para evitar crash en OpenFOAM)
+        if front_back:
+            gmsh.model.addPhysicalGroup(2, front_back, name="frontAndBack")
+        if airfoil_surfs:
+            gmsh.model.addPhysicalGroup(2, airfoil_surfs, name="airfoil")
+        if inlet_surfs:
+            gmsh.model.addPhysicalGroup(2, inlet_surfs, name="inlet")
+        if outlet_surfs:
+            gmsh.model.addPhysicalGroup(2, outlet_surfs, name="outlet")
+        if walls_surfs:
+            gmsh.model.addPhysicalGroup(2, walls_surfs, name="walls_TB")
+        
+        print(f"  Physical groups: fluid={len(vol_tags)}, frontAndBack={len(front_back)}, "
+              f"airfoil={len(airfoil_surfs)}, inlet={len(inlet_surfs)}, "
+              f"outlet={len(outlet_surfs)}, walls_TB={len(walls_surfs)}")
+        
+        # ──────────────────────────────────────────────────
+        # 8. GENERAR MALLA 3D Y EXPORTAR
+        # ──────────────────────────────────────────────────
+        print("  Generando malla 3D...")
+        gmsh.model.mesh.generate(3)
+        
+        gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+        gmsh.option.setNumber("Mesh.Binary", 0)
+        gmsh.option.setNumber("Mesh.SaveAll", 0)
+        
+        gmsh.write(output_msh)
+        
+        vtk_name = output_msh.replace(".msh", ".vtk")
+        gmsh.write(vtk_name)
+        
+        gmsh.finalize()
+        print("SUCCESS")
+        
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Fallback a método original
+        try:
+            if gmsh.isInitialized():
+                gmsh.finalize()
+            print("\nIntentando fallback con método original...")
+            # Agregar directorio padre al path para importar core.*
+            parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+            fallback_mesh(p, output_msh)
+            print("SUCCESS")
+        except Exception as e2:
+            print(f"ERROR en fallback: {e2}")
+            traceback.print_exc()
+            sys.exit(1)
+
+
+def fallback_mesh(p, output_msh):
+    """Fallback: usa geometría propia + BoundaryLayer si gmshairfoil2d falla."""
+    from core.geometry import NacaGeometry
+    from core.meshing import NacaMesher
+    
+    gmsh.initialize()
+    
+    import multiprocessing
+    gmsh.option.setNumber("General.NumThreads", multiprocessing.cpu_count())
+    
+    is_custom = "Custom" in p.get("profile_type", "")
+    naca_val = p["naca"] if not is_custom else "custom"
+    file_path = p.get("file_path", None) if is_custom else None
+    
+    geom = NacaGeometry(naca_code=naca_val, chord=p["chord"], aoa=p["aoa"], 
+                        custom_profile_path=file_path)
+    geom.build_geometry(mesh_extrusion=True)
+    
+    mesher = NacaMesher(chord=p["chord"], element_type=p.get("element_type", "Hexaedros"), 
+                        mesh_params=p)
+    mesher.generate_mesh(output_msh)
+    
+    vtk_name = output_msh.replace(".msh", ".vtk")
+    gmsh.write(vtk_name)
+    gmsh.finalize()
+
+
+if __name__ == "__main__":
+    main()
+
+================================================================================
+ARCHIVO: core/geom_script.py
+================================================================================
+import sys
+import gmsh
+from core.geometry import NacaGeometry
+
+def main():
+    if len(sys.argv) < 5:
+        print("Uso: python3 geom_script.py naca chord aoa output.stl")
+        sys.exit(1)
+        
+    naca = sys.argv[1]
+    chord = float(sys.argv[2])
+    aoa = float(sys.argv[3])
+    output_stl = sys.argv[4]
+    
+    try:
+        # Iniciar sesión única para este script
+        gmsh.initialize()
+        
+        geom = NacaGeometry(naca_code=naca, chord=chord, aoa=aoa)
+        geom.build_geometry(mesh_extrusion=False)
+        
+        # Generar malla ligera solo para previsualización (no es la malla CFD)
+        gmsh.model.mesh.generate(2)
+        
+        # Exportar y finalizar
+        gmsh.write(output_stl)
+        gmsh.finalize()
+        print("SUCCESS")
+    except Exception as e:
+        print(f"ERROR: {e}")
+        if gmsh.isInitialized():
+            gmsh.finalize()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+================================================================================
+ARCHIVO: core/openfoam_setup.py
+================================================================================
+import os
+import shutil
+
+class OpenFoamSetup:
+    def __init__(self, case_dir: str = "openfoam_case") -> None:
+        self.case_dir = case_dir
+        
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0) -> None:
+        # Create directories
+        for d in ["0", "constant", "system"]:
+            os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
+            
+        # Limpiar carpetas de simulaciones viejas (pasos de tiempo como '100', '200')
+        # para que PyVista no trate de cruzar campos viejos con mallas nuevas
+        if os.path.exists(self.case_dir):
+            for item in os.listdir(self.case_dir):
+                if item != "0":
+                    try:
+                        float(item) # Revisa si el nombre es numérico
+                        item_path = os.path.join(self.case_dir, item)
+                        if os.path.isdir(item_path):
+                            import shutil
+                            shutil.rmtree(item_path)
+                    except Exception:
+                        pass
+
+        
+        # Calcular viscosidad cinemática a partir de Reynolds: nu = U * L / Re
+        nu = (float(u_inlet) * float(chord)) / float(reynolds)
+            
+        self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co)
+        self._write_constant(turbulence, nu)
+        self._write_0(u_inlet, p_outlet, chord, turbulence, nu)
+        
+    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0) -> None:
+        app_name = "pimpleFoam" if transient else "simpleFoam"
+        delta_t  = delta_t if transient else "1"
+        endTime  = end_time if transient else "1000"
+        writeControl = "adjustableRunTime" if transient else "timeStep"
+        writeInterval = write_interval if transient else "100"
+        maxCoStr = f"adjustTimeStep  yes;\nmaxCo           {max_co};\nmaxDeltaT       0.05;" if transient else ""
+        
+        controlDict = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2206                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      controlDict;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+application     {app_name};
+startFrom       startTime;
+startTime       0;
+stopAt          endTime;
+endTime         {endTime};
+deltaT          {delta_t};
+writeControl    {writeControl};
+writeInterval   {writeInterval};
+purgeWrite      0;
+{maxCoStr}
+writeFormat     ascii;
+writePrecision  6;
+writeCompression off;
+timeFormat      general;
+timePrecision   6;
+runTimeModifiable true;
+
+functions
+{{
+    forceCoeffs
+    {{
+        type            forceCoeffs;
+        libs            ("libforces.so");
+        writeControl    timeStep;
+        writeInterval   1;
+
+        patches         (airfoil);
+        rho             rhoInf;
+        log             true;
+        rhoInf          1.225;
+        liftDir         (0 1 0);
+        dragDir         (1 0 0);
+        CofR            ({0.25 * chord} 0 0);
+        pitchAxis       (0 0 1);
+        magUInf         {float(u_inlet)};
+        lRef            {chord};
+        Aref            {chord * (0.1 * chord)};
+    }}
+}}
+"""
+        with open(os.path.join(self.case_dir, "system", "controlDict"), "w") as f:
+            f.write(controlDict)
+
+        is_laminar = "Laminar" in turbulence_ui
+        is_transition = "SST-LM" in turbulence_ui or "gamma-ReTheta" in turbulence_ui
+        
+        div_turb = ""
+        if not is_laminar:
+            if is_transition:
+                # Modelos de transición necesitan esquemas para gamma y ReThetat
+                div_turb = """\n    div(phi,k)      bounded Gauss linearUpwind grad(k);
+    div(phi,omega)  bounded Gauss linearUpwind grad(omega);
+    div(phi,gammaInt) bounded Gauss linearUpwind grad(gammaInt);
+    div(phi,ReThetat) bounded Gauss linearUpwind grad(ReThetat);"""
+            elif "Epsilon" in turbulence_ui:
+                div_turb = """\n    div(phi,k)      bounded Gauss linearUpwind grad(k);
+    div(phi,epsilon) bounded Gauss linearUpwind grad(epsilon);"""
+            elif "Omega" in turbulence_ui:
+                div_turb = """\n    div(phi,k)      bounded Gauss linearUpwind grad(k);
+    div(phi,omega)  bounded Gauss linearUpwind grad(omega);"""
+            elif "Spalart" in turbulence_ui:
+                div_turb = """\n    div(phi,nuTilda) bounded Gauss linearUpwind grad(nuTilda);"""
+
+        ddt = "Euler" if transient else "steadyState"
+        fvSchemes = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object fvSchemes; }}
+ddtSchemes {{ default {ddt}; }}
+gradSchemes {{ default cellMDLimited Gauss linear 1; }}
+divSchemes {{
+    default         none;
+    div(phi,U)      bounded Gauss linearUpwind grad(U);{div_turb}
+    div((nuEff*dev2(T(grad(U))))) Gauss linear;
+    div(div(phi,U)) Gauss linear;
+}}
+laplacianSchemes {{
+    default Gauss linear limited corrected 0.5;
+    laplacian(1,Phi) Gauss linear corrected;
+}}
+interpolationSchemes {{ default linear; }}
+snGradSchemes {{ default limited corrected 0.5; }}
+wallDist {{ method meshWave; }}
+"""
+        with open(os.path.join(self.case_dir, "system", "fvSchemes"), "w") as f:
+            f.write(fvSchemes)
+
+        alg = "PIMPLE" if transient else "SIMPLE"
+        p_solver = "GAMG"
+        
+        # Dinamic fields for solvers
+        field_names = "U"
+        if not is_laminar:
+            if is_transition:
+                field_names = "(U|k|omega|gammaInt|ReThetat)"
+            elif "Epsilon" in turbulence_ui: field_names = "(U|k|epsilon)"
+            elif "Omega" in turbulence_ui: field_names = "(U|k|omega)"
+            elif "Spalart" in turbulence_ui: field_names = "(U|nuTilda)"
+
+        fv_solve_algo = f"""
+{alg} {{
+    nNonOrthogonalCorrectors 3;
+    residualControl {{
+        p               {tolerance};
+        U               {tolerance};
+        "(k|omega|epsilon|nuTilda|gammaInt|ReThetat)" {tolerance};
+    }}
+}}
+relaxationFactors {{
+    fields {{ p 0.3; }}
+    equations {{ U 0.7; k 0.7; omega 0.7; epsilon 0.7; nuTilda 0.7; gammaInt 0.7; ReThetat 0.7; }}
+}}
+""" if not transient else f"""
+{alg} {{
+    nNonOrthogonalCorrectors 3;
+    nCorrectors     2;
+    nOuterCorrectors 3;
+    residualControl {{
+        p               {{ tolerance {tolerance}; relTol 0; }}
+        U               {{ tolerance {tolerance}; relTol 0; }}
+    }}
+}}
+"""
+
+        fvSolution = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object fvSolution; }}
+solvers {{
+    p {{
+        solver          {p_solver};
+        tolerance       1e-6;
+        relTol          0.1;
+        smoother        GaussSeidel;
+    }}
+    pFinal {{
+        $p;
+        relTol 0;
+    }}
+    "{field_names}" {{
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-6;
+        relTol          0.1;
+    }}
+    "{field_names}Final" {{
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-6;
+        relTol          0;
+    }}
+    Phi {{
+        solver          GAMG;
+        smoother        DIC;
+        tolerance       1e-6;
+        relTol          0.01;
+    }}
+}}
+{fv_solve_algo}
+"""
+        with open(os.path.join(self.case_dir, "system", "fvSolution"), "w") as f:
+            f.write(fvSolution)
+
+    def _write_constant(self, turbulence_ui: str, nu: float = 1.5e-5) -> None:
+        transport = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object transportProperties; }}
+transportModel  Newtonian;
+nu              [0 2 -1 0 0 0 0] {nu:.6e};
+"""
+        with open(os.path.join(self.case_dir, "constant", "transportProperties"), "w") as f:
+            f.write(transport)
+
+        sim_type = "laminar" if "Laminar" in turbulence_ui else "RAS"
+        model = "kOmegaSST"
+        if "SST-LM" in turbulence_ui:
+            model = "kOmegaSSTLM"
+        elif "gamma-ReTheta" in turbulence_ui:
+            model = "gammaReThetatSST"  
+        elif "Epsilon" in turbulence_ui: model = "kEpsilon"
+        elif "Omega" in turbulence_ui and "SST" not in turbulence_ui: model = "kOmega"
+        elif "Spalart" in turbulence_ui: model = "SpalartAllmaras"
+
+        turbulence = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object turbulenceProperties; }}
+simulationType  {sim_type};
+RAS {{
+    RASModel        {model};
+    turbulence      on;
+    printCoeffs     on;
+}}
+"""
+        with open(os.path.join(self.case_dir, "constant", "turbulenceProperties"), "w") as f:
+            f.write(turbulence)
+
+    def _write_0(self, u_inlet: float, p_outlet: float, chord: float, turbulence_ui: str, nu: float = 1.5e-5) -> None:
+        is_laminar = "Laminar" in turbulence_ui
+        
+        # Boundary/Initial Conditions for U and p (common)
+        U_content = f"""FoamFile {{ version 2.0; format ascii; class volVectorField; object U; }}
+dimensions      [0 1 -1 0 0 0 0];
+internalField   uniform ({u_inlet} 0 0);
+boundaryField {{
+    inlet {{ type fixedValue; value uniform ({u_inlet} 0 0); }}
+    outlet {{ type zeroGradient; }}
+    walls_TB {{ type slip; }}
+    airfoil {{ type noSlip; }}
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
+"""
+        with open(os.path.join(self.case_dir, "0", "U"), "w") as f: f.write(U_content)
+
+        P_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object p; }}
+dimensions      [0 2 -2 0 0 0 0];
+internalField   uniform 0;
+boundaryField {{
+    inlet {{ type zeroGradient; }}
+    outlet {{ type fixedValue; value uniform {p_outlet}; }}
+    walls_TB {{ type zeroGradient; }}
+    airfoil {{ type zeroGradient; }}
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
+"""
+        with open(os.path.join(self.case_dir, "0", "p"), "w") as f: f.write(P_content)
+
+        if is_laminar: return
+
+        # Turbulence estimations using the calculated nu
+        u_flt = float(u_inlet)
+        I = 0.01
+        k_val = max(1.5 * (u_flt * I)**2, 1e-5)
+        omega_val = max(k_val / (10.0 * nu), 1e-3)
+        epsilon_val = max(0.09 * (k_val**1.5) / (0.07 * chord), 1e-4)
+        nuTilda_val = 3.0 * nu
+        is_transition = "SST-LM" in turbulence_ui or "gamma-ReTheta" in turbulence_ui
+
+        # Write fields based on model
+        if "Epsilon" in turbulence_ui or "Omega" in turbulence_ui or is_transition:
+            # k is used in k-epsilon, k-omega, and transition models
+            k_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object k; }}
+dimensions      [0 2 -2 0 0 0 0];
+internalField   uniform {k_val:.6f};
+boundaryField {{
+    inlet {{ type fixedValue; value uniform {k_val:.6f}; }}
+    outlet {{ type zeroGradient; }}
+    walls_TB {{ type zeroGradient; }}
+    airfoil {{ type kqRWallFunction; value uniform {k_val:.6f}; }}
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
+"""
+            with open(os.path.join(self.case_dir, "0", "k"), "w") as f: f.write(k_content)
+
+        if "Epsilon" in turbulence_ui:
+            eps_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object epsilon; }}
+dimensions      [0 2 -3 0 0 0 0];
+internalField   uniform {epsilon_val:.6f};
+boundaryField {{
+    inlet {{ type fixedValue; value uniform {epsilon_val:.6f}; }}
+    outlet {{ type zeroGradient; }}
+    walls_TB {{ type zeroGradient; }}
+    airfoil {{ type epsilonWallFunction; value uniform {epsilon_val:.6f}; }}
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
+"""
+            with open(os.path.join(self.case_dir, "0", "epsilon"), "w") as f: f.write(eps_content)
+
+        if "Omega" in turbulence_ui or is_transition:
+            om_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object omega; }}
+dimensions      [0 0 -1 0 0 0 0];
+internalField   uniform {omega_val:.6f};
+boundaryField {{
+    inlet {{ type fixedValue; value uniform {omega_val:.6f}; }}
+    outlet {{ type zeroGradient; }}
+    walls_TB {{ type zeroGradient; }}
+    airfoil {{ type omegaWallFunction; value uniform {omega_val:.6f}; }}
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
+"""
+            with open(os.path.join(self.case_dir, "0", "omega"), "w") as f: f.write(om_content)
+
+        if "Spalart" in turbulence_ui:
+            nt_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object nuTilda; }}
+dimensions      [0 2 -1 0 0 0 0];
+internalField   uniform {nuTilda_val:.6f};
+boundaryField {{
+    inlet {{ type fixedValue; value uniform {nuTilda_val:.6f}; }}
+    outlet {{ type zeroGradient; }}
+    walls_TB {{ type zeroGradient; }}
+    airfoil {{ type fixedValue; value uniform 0; }} 
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
+"""
+            with open(os.path.join(self.case_dir, "0", "nuTilda"), "w") as f: f.write(nt_content)
+
+        # Campos de transición (gammaInt y ReThetat)
+        if is_transition:
+            gamma_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object gammaInt; }}
+dimensions      [0 0 0 0 0 0 0];
+internalField   uniform 1;
+boundaryField {{
+    inlet {{ type fixedValue; value uniform 1; }}
+    outlet {{ type zeroGradient; }}
+    walls_TB {{ type zeroGradient; }}
+    airfoil {{ type zeroGradient; }}
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
+"""
+            with open(os.path.join(self.case_dir, "0", "gammaInt"), "w") as f: f.write(gamma_content)
+
+            # ReThetat: estimación a partir de correlación empírica
+            Re_theta = max(100.0, 1173.51 - 589.428 * (I * 100) + 0.2196 / ((I * 100)**2))
+            re_theta_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object ReThetat; }}
+dimensions      [0 0 0 0 0 0 0];
+internalField   uniform {Re_theta:.1f};
+boundaryField {{
+    inlet {{ type fixedValue; value uniform {Re_theta:.1f}; }}
+    outlet {{ type zeroGradient; }}
+    walls_TB {{ type zeroGradient; }}
+    airfoil {{ type zeroGradient; }}
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
+"""
+            with open(os.path.join(self.case_dir, "0", "ReThetat"), "w") as f: f.write(re_theta_content)
+
+        # nut is always needed for RAS
+        nut_content = """FoamFile { version 2.0; format ascii; class volScalarField; object nut; }
+dimensions      [0 2 -1 0 0 0 0];
+internalField   uniform 0;
+boundaryField {
+    inlet { type calculated; value uniform 0; }
+    outlet { type calculated; value uniform 0; }
+    walls_TB { type calculated; value uniform 0; }
+    airfoil { type nutkWallFunction; value uniform 0; }
+    frontAndBack { type empty; }
+    defaultFaces { type empty; }
+}
+"""
+        with open(os.path.join(self.case_dir, "0", "nut"), "w") as f: f.write(nut_content)
+
+================================================================================
+ARCHIVO: core/postprocessing.py
+================================================================================
+import pyvista as pv
+import os
+import numpy as np
+
+from typing import List, Optional, Any
+
+class PostProcessor:
+    def __init__(self, case_dir: str = "openfoam_case") -> None:
+        self.case_dir = case_dir
+        self.foam_file = os.path.join(self.case_dir, "case.foam")
+        
+        # OpenFOAMReader requires a .foam file
+        if not os.path.exists(self.case_dir):
+            os.makedirs(self.case_dir, exist_ok=True)
+        with open(self.foam_file, "w") as f:
+            pass
+            
+        self.reader = None
+
+    def _ensure_reader(self) -> bool:
+        if not os.path.exists(os.path.join(self.case_dir, "system", "controlDict")):
+            return False
+        if self.reader is None:
+            try:
+                self.reader = pv.OpenFOAMReader(self.foam_file)
+            except Exception as e:
+                print(f"Error initializing PyVista OpenFOAMReader: {e}")
+                return False
+        return True
+
+    def get_time_values(self) -> List[float]:
+        if not self._ensure_reader():
+            return []
+        return self.reader.time_values
+
+    def get_mesh_at_index(self, index: int) -> Any:
+        if not self._ensure_reader():
+            return None
+        try:
+            if self.reader.time_values:
+                idx = max(0, min(index, len(self.reader.time_values) - 1))
+                self.reader.set_active_time_value(self.reader.time_values[idx])
+            
+            mesh = self.reader.read()
+            internal = mesh["internalMesh"]
+            
+            # Since it's a 2D simulation extruded in Z, we slice in the middle of Z
+            bounds = internal.bounds
+            z_mid = (bounds[4] + bounds[5]) / 2.0
+            
+            slice_2d = internal.slice(normal='z', origin=(0, 0, z_mid))
+            return slice_2d
+            
+        except Exception as e:
+            print(f"Error loading OpenFOAM results at index {index}: {e}")
+            return None
+
+    def get_latest_mesh(self) -> Any:
+        """
+        Reads the OpenFOAM case and returns a 2D slice 
+        of the internal mesh for the latest time step.
+        """
+        time_vals = self.get_time_values()
+        idx = len(time_vals) - 1 if time_vals else 0
+        return self.get_mesh_at_index(idx)
+
+    def get_cp_on_surface(self, u_inf: float = 15.0, rho: float = 1.225) -> Optional[tuple]:
+        """
+        Extracts pressure on the airfoil surface and calculates Cp.
+        Returns (x_upper, cp_upper, x_lower, cp_lower).
+        """
+        if not self._ensure_reader():
+            return None
+            
+        try:
+            # Set latest time
+            times = self.reader.time_values
+            if times:
+                self.reader.set_active_time_value(times[-1])
+            
+            # Read only the airfoil patch to be efficient
+            self.reader.disable_all_patch_arrays()
+            if "airfoil" in self.reader.patch_array_names:
+                self.reader.enable_patch_array("airfoil")
+            else:
+                # Fallback to internal mesh if patch not found (though less accurate for surface)
+                mesh = self.reader.read()
+                return None
+
+            full_mesh = self.reader.read()
+            # Extract the airfoil surface from the multi-block dataset
+            # PyVista OpenFOAMReader returns a MultiBlock
+            airfoil = None
+            for i in range(full_mesh.n_blocks):
+                block = full_mesh.get_block(i)
+                # In PyVista 0.44+, some versions return blocks with names
+                if "airfoil" in full_mesh.get_block_name(i).lower():
+                    airfoil = block
+                    break
+            
+            if airfoil is None:
+                # If block names are not available or don't match, try to find 2D surface
+                for i in range(full_mesh.n_blocks):
+                    block = full_mesh.get_block(i)
+                    if block.n_points > 0:
+                        airfoil = block
+                        break
+            
+            if airfoil is None: return None
+
+            # OpenFOAM pressure for simpleFoam is p/rho (m^2/s^2)
+            # Cp = (p - p_inf) / (0.5 * rho * U_inf^2)
+            # If p is kinematic: Cp = (p_kin - p_kin_inf) / (0.5 * U_inf^2)
+            p_kin = airfoil.point_data["p"]
+            dyn_head = 0.5 * (u_inf ** 2)
+            cp = p_kin / dyn_head if dyn_head > 0 else p_kin
+            
+            points = airfoil.points
+            x = points[:, 0]
+            y = points[:, 1]
+            
+            # Basic sorting into upper and lower surfaces
+            # Assume chord from x=0 to x=c
+            # Find the leading edge (roughly min x)
+            le_idx = np.argmin(x)
+            
+            # This is a bit simplified: split by y relative to chord line
+            # For a better approach, split at LE
+            # Upper surface: points from LE to TE with higher y
+            # Lower surface: points from LE to TE with lower y
+            
+            # Shift x to be x/c (normalized by max x)
+            c = np.max(x) - np.min(x)
+            x_norm = (x - np.min(x)) / c if c > 0 else x
+            
+            upper_mask = y >= 0
+            lower_mask = y < 0
+            
+            x_up = x_norm[upper_mask]
+            cp_up = cp[upper_mask]
+            x_low = x_norm[lower_mask]
+            cp_low = cp[lower_mask]
+            
+            # Sort by x
+            idx_up = np.argsort(x_up)
+            idx_low = np.argsort(x_low)
+            
+            return x_up[idx_up], cp_up[idx_up], x_low[idx_low], cp_low[idx_low]
+            
+        except Exception as e:
+            print(f"Error extracting Cp: {e}")
+            return None
+
+================================================================================
+ARCHIVO: core/solver.py
+================================================================================
+import subprocess
+import os
+import threading
+from typing import Optional, Callable
+
+class SolverRunner:
+    def __init__(self, case_dir: str = "openfoam_case", docker_image: str = "opencfd/openfoam-default", native: bool = False) -> None:
+        self.case_dir = case_dir
+        self.docker_image = docker_image
+        self.native = native
+        self.process = None
+        # No ejecutar limpieza automática en hilo para evitar conflictos con el GIL al arrancar
+
+    def is_docker_ready(self) -> bool:
+        """Verifica si el daemon de Docker está respondiendo"""
+        try:
+            # -t 2 para que no se quede colgado si Docker está muerto
+            subprocess.run(["docker", "version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=3)
+            return True
+        except Exception:
+            return False
+
+    def _get_docker_exec(self) -> str:
+        """Localiza el ejecutable de Docker de forma robusta."""
+        import shutil
+        docker = shutil.which("docker")
+        if not docker:
+            for p in ['/usr/local/bin/docker', '/usr/bin/docker', 
+                      '/opt/homebrew/bin/docker', 
+                      '/Applications/Docker.app/Contents/Resources/bin/docker']:
+                if os.path.exists(p):
+                    return p
+        return docker or "docker"
+
+    def _force_cleanup(self, log_callback: Optional[Callable] = None) -> None:
+        """Elimina contenedores huérfanos de la imagen de OpenFOAM para liberar recursos"""
+        if log_callback: log_callback("🔍 Limpiando procesos de Docker previos para evitar saturación...")
+        try:
+            # Buscar IDs de contenedores que usan nuestra imagen
+            out = subprocess.check_output(["docker", "ps", "-q", "--filter", f"ancestor={self.docker_image}"], text=True)
+            ids = out.strip().split()
+            if ids:
+                if log_callback: log_callback(f"🛑 Deteniendo {len(ids)} contenedores residuales...")
+                subprocess.run(["docker", "kill"] + ids, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if log_callback: log_callback("✅ Limpieza completada.")
+            else:
+                if log_callback: log_callback("✨ No se detectaron procesos residuales.")
+        except Exception as e:
+            if log_callback: log_callback(f"⚠️ Aviso: Error durante la limpieza: {e}")
+
+    def run_gmshToFoam(self, msh_file: str, log_callback: Optional[Callable] = None) -> None:
+        """Converts Gmsh mesh to OpenFOAM format using Docker or local installation"""
+        # 0. Verificación de Salud
+        if not self.native and not self.is_docker_ready():
+            msg = "❌ ERROR: El motor de Docker no responde y el modo Nativo está deshabilitado."
+            if log_callback: log_callback(msg)
+            return
+        
+        # 0. Limpieza Preventiva
+        if not self.native:
+            self._force_cleanup(log_callback=log_callback)
+        
+        if log_callback: log_callback("Preparando conversión de malla (gmshToFoam)...")
+        log_file = os.path.join(self.case_dir, "log.gmshToFoam")
+        
+        try:
+            # 1. Copiar archivo .msh dentro de la carpeta del caso para simplificar montaje
+            import shutil
+            msh_basename = os.path.basename(msh_file)
+            local_msh = os.path.join(self.case_dir, msh_basename)
+            if os.path.abspath(msh_file) != os.path.abspath(local_msh):
+                if log_callback: log_callback(f"Copiando malla {msh_basename} a la carpeta del caso...")
+                shutil.copy2(msh_file, local_msh)
+            
+            # 2. Configurar rutas para Docker (montar SOLO la carpeta openfoam_case)
+            case_abs_path = os.path.abspath(self.case_dir)
+            
+            if self.native:
+                docker_cmd = ["gmshToFoam", local_msh, "-case", case_abs_path]
+                exec_name = "NATIVO"
+            else:
+                docker_exec = self._get_docker_exec()
+                docker_cmd = [
+                    docker_exec, "run", "--rm", "-i",
+                    "-v", f"{case_abs_path}:/data",
+                    self.docker_image,
+                    "gmshToFoam", f"/data/{msh_basename}", "-case", "/data"
+                ]
+                exec_name = f"Docker ({docker_exec})"
+            
+            if log_callback: log_callback(f"Ejecutando gmshToFoam en modo {exec_name}...")
+            
+            # Ejecutar con streaming de salida
+            process = subprocess.Popen(
+                docker_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                errors='replace'
+            )
+
+            
+            with open(log_file, "w") as f:
+                for line in process.stdout:
+                    f.write(line)
+                    # Silenciamos el log_callback aquí porque gmshToFoam escupe millones de líneas 
+                    # y satura la memoria RAM del QProcess en Mac, provocando un SIGKILL
+            
+            process.wait()
+            
+            # PAUSA CRÍTICA para Mac (Permite que Docker libere los archivos)
+            import time
+            time.sleep(1.0)
+            
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, docker_cmd)
+
+            # Ajustar boundary file para compatibilidad OpenFOAM 2D
+            boundary_file = os.path.join(self.case_dir, "constant", "polyMesh", "boundary")
+            if os.path.exists(boundary_file):
+                try:
+                    with open(boundary_file, 'r') as f:
+                        content = f.read()
+                    
+                    # Corregir frontAndBack a empty (simulación 2D)
+                    content = content.replace(
+                        "frontAndBack\n    {\n        type            patch;",
+                        "frontAndBack\n    {\n        type            empty;"
+                    )
+                    # Corregir airfoil a wall (funciones de pared)
+                    content = content.replace(
+                        "airfoil\n    {\n        type            patch;",
+                        "airfoil\n    {\n        type            wall;"
+                    )
+                    # Corregir defaultFaces a empty (caras internas sin asignar, crítico para 2D)
+                    content = content.replace(
+                        "defaultFaces\n    {\n        type            patch;",
+                        "defaultFaces\n    {\n        type            empty;"
+                    )
+                    
+                    with open(boundary_file, 'w') as f:
+                        f.write(content)
+                    
+                    if log_callback:
+                        log_callback("🔧 Parches de frontera corregidos (frontAndBack→empty, airfoil→wall, defaultFaces→empty).")
+                except Exception as e:
+                    if log_callback: log_callback(f"⚠️ Aviso: No se pudo actualizar el archivo boundary: {e}")
+            
+            if log_callback:
+                log_callback("✅ gmshToFoam finalizó correctamente.")
+                
+        except FileNotFoundError as e:
+            if "docker" in str(e).lower():
+                msg = "❌ ERROR: Comando 'docker' no encontrado en el sistema."
+            else:
+                msg = f"❌ ERROR: Archivo no encontrado: {str(e)}"
+            if log_callback: log_callback(msg)
+        except subprocess.CalledProcessError as e:
+            msg = f"❌ ERROR: gmshToFoam falló (Código {e.returncode}). Revisa el log detallado."
+            if log_callback: log_callback(msg)
+        except Exception as e:
+            msg = f"❌ Error inesperado: {str(e)}"
+            if log_callback: log_callback(msg)
+
+    def run_potentialFoam(self, log_callback: Optional[Callable] = None, done_callback: Optional[Callable] = None) -> None:
+        """Ejecuta potentialFoam para inicializar el campo de flujo potencial"""
+        # Verificación
+        if not self.native and not self.is_docker_ready():
+            msg = "❌ ERROR: El motor de Docker no responde. Activa el modo Nativo."
+            if log_callback: log_callback(msg)
+            if done_callback: done_callback(1)
+            return
+        
+        if log_callback: log_callback("🌊 Inicializando flujo potencial (potentialFoam)...")
+        
+        def run():
+            try:
+                root_dir = os.path.abspath(os.path.join(self.case_dir, ".."))
+                case_name = os.path.basename(os.path.normpath(self.case_dir))
+                case_abs_path = os.path.abspath(self.case_dir)
+                
+                if self.native:
+                    cmd = ["potentialFoam", "-case", case_abs_path, "-writep"]
+                else:
+                    docker_exec = self._get_docker_exec()
+                    cmd = [
+                        docker_exec, "run", "--rm",
+                        "-v", f"{root_dir}:/data",
+                        "opencfd/openfoam-default",
+                        "potentialFoam", "-case", f"/data/{case_name}", "-writep"
+                    ]
+                
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1
+                )
+                
+                for line in process.stdout:
+                    clean = line.strip()
+                    if log_callback and clean:
+                        log_callback(clean)
+                
+                process.wait()
+                
+                # PAUSA CRÍTICA para Mac
+                import time
+                time.sleep(1.0)
+                
+                if process.returncode == 0:
+                    if log_callback: log_callback("✅ Flujo potencial inicializado correctamente. Los campos U y p ahora tienen una distribución suave.")
+                else:
+                    if log_callback: log_callback(f"⚠️ potentialFoam terminó con código {process.returncode}. La simulación aún puede continuar.")
+                
+                if done_callback:
+                    done_callback(process.returncode)
+                    
+            except Exception as e:
+                if log_callback: log_callback(f"❌ Error en potentialFoam: {str(e)}")
+                if done_callback: done_callback(1)
+        
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+
+    def run_solver(self, algo_name: str = "simpleFoam", log_callback: Optional[Callable] = None, force_callback: Optional[Callable] = None, residual_callback: Optional[Callable] = None, done_callback: Optional[Callable] = None) -> None:
+        """Runs the CFD solver asynchronously via Docker or Native"""
+        # 0. Verificación
+        if not self.native and not self.is_docker_ready():
+            msg = "❌ ERROR: El motor de Docker no responde. Activa modo Nativo."
+            if log_callback: log_callback(msg)
+            return
+            
+        # 0. Limpieza Preventiva
+        if not self.native:
+            self._force_cleanup(log_callback=log_callback)
+        
+        print(f"Ejecutando {algo_name} en modo {'Nativo' if self.native else 'Docker'}...")
+        
+        def run():
+            import re
+            import time
+            try:
+                case_abs_path = os.path.abspath(self.case_dir)
+                root_dir = os.path.abspath(os.path.join(self.case_dir, ".."))
+                case_name = os.path.basename(os.path.normpath(self.case_dir))
+                
+                if self.native:
+                    cmd = [algo_name, "-case", case_abs_path]
+                else:
+                    docker_exec = self._get_docker_exec()
+                    cmd = [
+                        docker_exec, "run", "--rm",
+                        "-v", f"{root_dir}:/data",
+                        "opencfd/openfoam-default",
+                        algo_name, "-case", f"/data/{case_name}"
+                    ]
+                
+                self.process = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    errors='replace'
+                )
+                self.process_started = True
+
+
+                
+                # Read line by line to send to UI
+                current_time = 0
+                last_flush_time = time.time()
+                log_buffer = []
+                
+                def flush_logs():
+                    if log_buffer and log_callback:
+                        log_callback("\n".join(log_buffer))
+                        log_buffer.clear()
+
+                for line in self.process.stdout:
+                    clean_line = line.strip()
+                    if log_callback:
+                        log_buffer.append(clean_line)
+                    
+                    time_match = re.search(r"^Time = ([0-9\.]+)", clean_line)
+                    if time_match:
+                        current_time = float(time_match.group(1))
+                        
+                    if residual_callback and current_time > 0:
+                        res_match = re.search(r"Solving for (\w+), Initial residual = ([0-9eE\.\+\-]+)", clean_line)
+                        if res_match:
+                            field_name = res_match.group(1)
+                            val = float(res_match.group(2))
+                            residual_callback(field_name, val, current_time)
+                    
+                    if force_callback:
+                        cd_match = re.search(r"^\s*Cd\s*[:=]\s*([0-9eE\.\+\-]+)", clean_line)
+                        if cd_match:
+                            force_callback("Cd", cd_match.group(1))
+                        
+                        cl_match = re.search(r"^\s*Cl\s*[:=]\s*([0-9eE\.\+\-]+)", clean_line)
+                        if cl_match:
+                            force_callback("Cl", cl_match.group(1))
+                            
+                        cm_match = re.search(r"^\s*CmPitch\s*[:=]\s*([0-9eE\.\+\-]+)", clean_line)
+                        if cm_match:
+                            force_callback("Cm", cm_match.group(1))
+                            
+                    # Flush logs periodically
+                    if time.time() - last_flush_time > 0.1 or len(log_buffer) > 100:
+                        try:
+                            flush_logs()
+                        except Exception:
+                            pass
+                        last_flush_time = time.time()
+                
+                flush_logs()
+                self.process.wait()
+                
+                # PAUSA CRÍTICA para Mac
+                time.sleep(1.0)
+                
+                if done_callback:
+                    done_callback(self.process.returncode)
+            except Exception as e:
+                msg = f"ERROR CRÍTICO: No se pudo iniciar el proceso: {str(e)}"
+                print(msg)
+                if log_callback: log_callback(msg)
+                if done_callback: done_callback(1)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+    def stop(self) -> None:
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+
+================================================================================
+ARCHIVO: core/solve_script.py
+================================================================================
+import sys
+import os
+import json
+import time
+from core.solver import SolverRunner
+from core.openfoam_setup import OpenFoamSetup
+
+def main():
+    if len(sys.argv) < 3:
+        print("Uso: python3 solve_script.py params.json mesh_file.msh")
+        sys.exit(1)
+        
+    json_path = sys.argv[1]
+    msh_file = sys.argv[2]
+    
+    with open(json_path, 'r') as f:
+        p = json.load(f)
+        
+    case_dir = "openfoam_case"
+    
+    try:
+        # 1. Configuración del caso
+        print("📝 Configurando túnel de viento...")
+        setup = OpenFoamSetup(case_dir)
+        is_transient = "pimpleFoam" in p.get("regime", "")
+        setup.create_case(
+            u_inlet=p["u_inlet"],
+            p_outlet=p["p_outlet"],
+            chord=p["chord"],
+            transient=is_transient,
+            tolerance=p.get("tolerance", "1e-4"),
+            turbulence=p.get("turbulence", "kEpsilon")
+        )
+        
+        # 2. Inicialización del Solver
+        solver = SolverRunner(case_dir=case_dir)
+        
+        # 3. gmshToFoam
+        print("🔄 Convirtiendo malla...")
+        solver.run_gmshToFoam(msh_file, log_callback=print)
+        
+        # 4. Ejecución del Solver principal
+        algo = "pimpleFoam" if is_transient else "simpleFoam"
+        print(f"🚀 Iniciando solucionador {algo}...")
+        
+        solver.run_solver(
+            algo_name=algo,
+            log_callback=print,
+            force_callback=lambda f, v: print(f"FORCE_DATA|{f}|{v}"),
+            residual_callback=lambda f, v, t: print(f"RESIDUAL_DATA|{f}|{v}|{t}"),
+            done_callback=lambda c: print(f"SIM_DONE|{c}")
+        )
+        
+        # Espera activa y segura a que el proceso arranque y termine
+        time.sleep(1.0) # Margen inicial
+        
+        # Esperar a que el proceso se asigne
+        max_wait = 10
+        waited = 0
+        while solver.process is None and waited < max_wait:
+            time.sleep(0.5)
+            waited += 1
+            
+        if solver.process is None:
+            print("ERROR: El proceso del solucionador no arrancó en el tiempo esperado.")
+            sys.exit(1)
+
+        # Monitorizar ejecución
+        while solver.process and solver.process.poll() is None:
+            time.sleep(0.5)
+            
+        print(f"✅ Simulación finalizada (Código {solver.process.returncode}).")
+        
+    except Exception as e:
+        print(f"ERROR_CRITICAL: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+================================================================================
+ARCHIVO: core/blockmesh_writer.py
+================================================================================
+import os
+import numpy as np
+from core.geometry import NacaGeometry
+
+class BlockMeshGenerator:
+    def __init__(self, case_dir: str, naca_code: str, chord: float, aoa: float) -> None:
+        self.case_dir = case_dir
+        self.naca_code = naca_code
+        self.chord = chord
+        self.aoa = aoa
+        self.dict_path = os.path.join(self.case_dir, "system", "blockMeshDict")
+
+    def write_dict(self, radius: float = 10.0) -> None:
+        """
+        Crea un blockMeshDict sintácticamente válido para OpenFOAM.
+        Genera un dominio rectangular simple (Inlet, Outlet, Walls).
+        NOTA: Para mallas de alta fidelidad sobre el perfil, usar el motor de Gmsh.
+        Este generador es para simulaciones de caja negra rápidas.
+        """
+        z1, z2 = 0, 0.05
+        x_min, x_max = -radius, radius + self.chord
+        y_min, y_max = -radius, radius
+
+        content = f"""FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}}
+
+vertices
+(
+    ({x_min} {y_min} {z1})  // 0
+    ({x_max} {y_min} {z1})  // 1
+    ({x_max} {y_max} {z1})  // 2
+    ({x_min} {y_max} {z1})  // 3
+    ({x_min} {y_min} {z2})  // 4
+    ({x_max} {y_min} {z2})  // 5
+    ({x_max} {y_max} {z2})  // 6
+    ({x_min} {y_max} {z2})  // 7
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7) (50 40 1) simpleGrading (1 1 1)
+);
+
+edges
+(
+);
+
+boundary
+(
+    inlet
+    {{
+        type patch;
+        faces
+        (
+            (0 3 7 4)
+        );
+    }}
+    outlet
+    {{
+        type patch;
+        faces
+        (
+            (1 5 6 2)
+        );
+    }}
+    walls_TB
+    {{
+        type patch;
+        faces
+        (
+            (0 4 5 1)
+            (3 2 6 7)
+        );
+    }}
+    frontAndBack
+    {{
+        type empty;
+        faces
+        (
+            (0 1 2 3)
+            (4 7 6 5)
+        );
+    }}
+);
+
+mergePatchPairs
+(
+);
+"""
+        os.makedirs(os.path.dirname(self.dict_path), exist_ok=True)
+        with open(self.dict_path, "w") as f:
+            f.write(content)
+
+================================================================================
+ARCHIVO: gui/__init__.py
+================================================================================
+
+================================================================================
+ARCHIVO: gui/main_window.py
+================================================================================
+from qtpy.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+    QSplitter, QTextEdit, QLabel, QLineEdit, QScrollArea, QTabWidget, QFileDialog, 
+    QMenuBar, QMenu, QAction, QMessageBox)
+from qtpy.QtCore import Qt, Signal, QTimer, QCoreApplication, QMutex
+from qtpy.QtGui import QCloseEvent
+from typing import Optional, Dict, Any
+import json
+import os
+import pyvista as pv
+import numpy as np
+import gmsh
+
+from .input_panel import InputPanel
+from .results_panel import ResultsPanel
+from .plots import ResidualPlot, AeroPlot, PressurePlot
+from .workers import MeshWorker, SweepWorker
+
+from core.geometry import NacaGeometry
+from core.meshing import NacaMesher
+
+class MainWindow(QMainWindow):
+    log_signal = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("OpenBlade 2D CFD Workbench")
+        self.resize(1400, 900)
+        
+        self.case_dir = os.path.join(os.getcwd(), "openfoam_case")
+        if not os.path.exists(self.case_dir):
+            os.makedirs(self.case_dir)
+            
+        self._has_unsaved_work = False
+        self.mesh_worker = None
+        self.sweep_worker = None
+        
+        self.mesh_lock = QMutex()
+        
+        # Datos de fuerza para simulación en punto único
+        self._last_cl = 0.0
+        self._last_cd = 0.0
+        self._last_cm = 0.0
+
+        
+        # Inicializar Solver
+        from core.solver import SolverRunner
+        self.solver_runner = SolverRunner(case_dir=self.case_dir)
+        
+        self.init_ui()
+        self.log_signal.connect(self.log)
+        
+        # Temporizador para redibujado suave de gráficas (Evita saturación en Mac)
+        self.plot_timer = QTimer(self)
+        self.plot_timer.timeout.connect(self.refresh_plots)
+        self.plot_timer.start(100) # 10 FPS es suficiente y seguro
+
+
+    def init_ui(self) -> None:
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu("&Archivo")
+        
+        open_action = QAction("Abrir Proyecto", self)
+        open_action.triggered.connect(self.load_project)
+        file_menu.addAction(open_action)
+        
+        save_action = QAction("Guardar Proyecto", self)
+        save_action.triggered.connect(self.save_project)
+        file_menu.addAction(save_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("Salir", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QHBoxLayout(main_widget)
+
+        splitter = QSplitter(Qt.Horizontal)
+        
+        self.input_panel = InputPanel()
+        self.input_panel.setMinimumWidth(380)
+        self.input_panel.setMaximumWidth(450)
+        splitter.addWidget(self.input_panel)
+
+
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        
+        self.tabs = QTabWidget()
+        self.results_panel = ResultsPanel(self.case_dir)
+        self.res_plot = ResidualPlot()
+        self.aero_plot = AeroPlot()
+        self.cp_plot = PressurePlot()
+        
+        self.tabs.addTab(self.results_panel, "Visualización 3D")
+        self.tabs.addTab(self.res_plot, "Residuales")
+        self.tabs.addTab(self.aero_plot, "Cl / Cd")
+        self.tabs.addTab(self.cp_plot, "Presión (Cp)")
+        
+        right_layout.addWidget(self.tabs, 7)
+        
+        self.log_console = QTextEdit()
+        self.log_console.setReadOnly(True)
+        self.log_console.document().setMaximumBlockCount(300) # Previene saturación nativamente
+        self.log_console.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; font-family: 'Courier New';")
+        right_layout.addWidget(self.log_console, 3)
+        
+        splitter.addWidget(right_widget)
+        layout.addWidget(splitter)
+
+        self.input_panel.btn_geom.clicked.connect(self.on_build_geom)
+        self.input_panel.btn_mesh.clicked.connect(self.on_build_mesh)
+        self.input_panel.btn_run.clicked.connect(self.on_run_sim)
+        self.input_panel.btn_results.clicked.connect(self.on_results)
+
+    def log(self, text: str) -> None:
+        self.log_console.append(text)
+        self.log_console.moveCursor(self.log_console.textCursor().End)
+
+
+    def _safe_get_params(self) -> Optional[Dict[str, Any]]:
+        try:
+            return self.input_panel.get_params()
+        except ValueError as e:
+            QMessageBox.warning(self, "Error de Validación", str(e))
+            return None
+        except Exception as e:
+            QMessageBox.critical(self, "Error Crítico", f"Error inesperado al leer parámetros: {e}")
+            return None
+
+    def on_build_geom(self) -> None:
+        p = self._safe_get_params()
+        if not p: return
+        
+        is_custom = "Custom" in p.get("profile_type", "")
+        file_path = p.get("file_path", None) if is_custom else None
+        naca_val = p["naca"] if not is_custom else "custom"
+        
+        self.log(f"Construyendo geometría (NACA {naca_val})...")
+        
+        try:
+            # Usar subproceso para evitar conflictos de OpenGL/Gmsh en Mac
+            import subprocess
+            cmd = ["python3", "-m", "core.geom_script", str(naca_val), str(p['chord']), str(p['aoa']), "temp_geom.vtk"]
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            
+            if result.returncode == 0:
+                self.log("Geometría generada. Proyectando...")
+                self._has_unsaved_work = True
+                QTimer.singleShot(200, self._delayed_preview_update)
+            else:
+                self.log(f"Error en script: {result.stderr}")
+        except Exception as e:
+            self.log(f"Error generando geometría: {e}")
+
+
+    def _delayed_preview_update(self) -> None:
+        try:
+            if os.path.exists("temp_geom.vtk"):
+                mesh = pv.read("temp_geom.vtk")
+                self.results_panel.update_visual_preview(mesh)
+        except Exception as e:
+            self.log(f"Error de visualización: {e}")
+
+    def on_build_mesh(self) -> None:
+        p = self._safe_get_params()
+        if not p: return
+        
+        msh_file = f"perfil_{p['naca']}.msh"
+        self.log(f"Iniciando mallado de alta fidelidad...")
+        
+        self.mesh_worker = MeshWorker(p, msh_file, self.case_dir)
+        self.mesh_worker.finished.connect(self.on_mesh_done)
+        self.mesh_worker.error.connect(self.log)
+        self.mesh_worker.log_msg.connect(self.log)
+        self.mesh_worker.start()
+
+    def on_mesh_done(self, msh_file: str, stl_file: str) -> None:
+        if os.path.exists(msh_file):
+            self.log("Cargando vista previa de la malla...")
+            try:
+                # Usar el STL para una vista más ligera de la superficie
+                if os.path.exists(stl_file):
+                    mesh = pv.read(stl_file)
+                    self.results_panel.update_visual_preview(mesh, show_edges=True)
+                else:
+                    mesh = pv.read(msh_file)
+                    self.results_panel.update_visual_preview(mesh, show_edges=True)
+            except Exception as e:
+                self.log(f"Aviso visualización: {e}")
+
+    def on_run_sim(self) -> None:
+        p = self._safe_get_params()
+        if not p: return
+        
+        # Verificar si es modo barrido
+        if "Barrido" in p.get("analysis_mode", ""):
+            self._run_sweep(p)
+            return
+        
+        msh_file = f"perfil_{p['naca']}.msh"
+        if not os.path.exists(msh_file):
+            self.log("❌ Error: Debes generar la malla antes de iniciar el análisis.")
+            return
+
+        self._has_unsaved_work = True
+        self.log(f"Iniciando simulación CFD (Modo Rendimiento)...")
+
+        from .workers import SimWorker
+        self.sim_worker = SimWorker(self.solver_runner, p, msh_file)
+        self.sim_worker.log_msg.connect(self.log)
+        self.sim_worker.residual_data.connect(self.on_residual_data)
+        self.sim_worker.force_data.connect(self.on_force_data)
+        self.sim_worker.finished.connect(self.on_sim_done)
+        self.sim_worker.error.connect(self.log)
+        self.sim_worker.start_sim()
+    
+    def _run_sweep(self, p: Dict[str, Any]) -> None:
+        """Ejecuta un barrido paramétrico de ángulos de ataque (polar)."""
+        self._has_unsaved_work = True
+        self.log("📊 Iniciando barrido de ángulos...")
+        
+        from .workers import SweepWorker
+        self.sweep_worker = SweepWorker(p, self.case_dir)
+        self.sweep_worker.log_msg.connect(self.log)
+        self.sweep_worker.error.connect(self.log)
+        self.sweep_worker.progress.connect(self._on_sweep_progress)
+        self.sweep_worker.finished.connect(self._on_sweep_done)
+        self.sweep_worker.start()
+    
+    def _on_sweep_progress(self, current: int, total: int) -> None:
+        self.log(f"  Progreso: {current}/{total}")
+    
+    def _on_sweep_done(self, aoa_list, cl_list, cd_list, cm_list) -> None:
+        self.log(f"✅ Barrido completado: {len(aoa_list)} puntos")
+        if hasattr(self, 'aero_plot') and aoa_list:
+            self.aero_plot.update_plots(aoa_list, cl_list, cd_list, cm_list)
+            self.tabs.setCurrentWidget(self.aero_plot)
+            self.log("📈 Gráfica polar actualizada en pestaña Cl/Cd.")
+
+    def on_sim_done(self, code: int) -> None:
+        self.log(f"🏁 Simulación finalizada (Código {code})")
+        self.results_panel.setEnabled(True)
+        # Sugerir cargar resultados
+        self.log("💡 Puedes pulsar 'Ver Resultados' para visualizar el flujo.")
+
+
+
+    def on_residual_data(self, field: str, val: float, time: float) -> None:
+        if hasattr(self, 'res_plot'):
+            try:
+                self.res_plot.update_plot(field, val, time)
+            except Exception as e:
+                print(f"Error plot residual: {e}")
+
+    def refresh_plots(self) -> None:
+        # Solo redibujar si hay cambios pendientes y no estamos saturando
+        try:
+            if hasattr(self, 'res_plot') and self.res_plot._pending_redraw:
+                self.res_plot.redraw()
+            if hasattr(self, 'aero_plot') and self.aero_plot._pending_redraw:
+                self.aero_plot.redraw()
+        except Exception as e:
+            # Silenciar errores asíncronos de matplotlib (como desajuste de dimensiones temporal)
+            pass
+
+
+
+
+    def on_force_data(self, name: str, val: str) -> None:
+        try:
+            v_float = float(val)
+            name_lower = name.lower()
+            if "cl" in name_lower:
+                self._last_cl = v_float
+            elif "cd" in name_lower:
+                self._last_cd = v_float
+            elif "cm" in name_lower:
+                self._last_cm = v_float
+            
+            # Actualizar gráfica Cl/Cd en tiempo real (punto único)
+            if hasattr(self, 'aero_plot'):
+                p = self._safe_get_params()
+                aoa = p.get("aoa", 0.0) if p else 0.0
+                self.aero_plot.update_plots(
+                    [aoa], [self._last_cl], [self._last_cd], [self._last_cm]
+                )
+        except (ValueError, TypeError):
+            pass
+
+    def on_results(self) -> None:
+        p = self._safe_get_params()
+        is_transient = False
+        if p and "Transitorio" in p.get("regime", ""):
+            is_transient = True
+        self.results_panel.load_results(is_transient=is_transient)
+
+    def save_project(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(self, "Guardar Proyecto", "", "OpenBlade (*.obp)")
+        if not filename:
+            return
+        if not filename.endswith(".obp"):
+            filename += ".obp"
+        try:
+            p = self._safe_get_params()
+            if p is None:
+                return
+            project_data = {
+                "version": "2.0",
+                "app": "OpenBlade 2D",
+                "params": p,
+                "case_dir": self.case_dir
+            }
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(project_data, f, indent=2, ensure_ascii=False)
+            self._has_unsaved_work = False
+            self.log(f"✅ Proyecto guardado en {filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo guardar el proyecto:\n{e}")
+
+    def load_project(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(self, "Abrir Proyecto", "", "OpenBlade (*.obp)")
+        if not filename:
+            return
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                project_data = json.load(f)
+            
+            params = project_data.get("params", {})
+            if params:
+                self.input_panel.set_params(params)
+                self.log(f"✅ Proyecto cargado desde {filename}")
+                self._has_unsaved_work = False
+            else:
+                self.log("⚠️ El archivo no contiene parámetros válidos.")
+        except json.JSONDecodeError:
+            QMessageBox.critical(self, "Error", "El archivo no es un proyecto OpenBlade válido.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo abrir el proyecto:\n{e}")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._has_unsaved_work:
+            reply = QMessageBox.question(
+                self, "Confirmar Salida",
+                "Hay trabajo sin guardar. ¿Deseas guardar antes de salir?",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Save
+            )
+            if reply == QMessageBox.Save:
+                self.save_project()
+                event.accept()
+            elif reply == QMessageBox.Discard:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
+
+================================================================================
+ARCHIVO: gui/input_panel.py
+================================================================================
+from qtpy.QtWidgets import (QWidget, QFormLayout, QLineEdit, QDoubleSpinBox, 
+    QVBoxLayout, QGroupBox, QComboBox, QPushButton, QFileDialog, QHBoxLayout,
+    QToolButton, QSizePolicy, QFrame, QLayout, QDialog, QDialogButtonBox, QCheckBox, QSpinBox)
+from qtpy.QtCore import Qt, QPropertyAnimation, QParallelAnimationGroup
+from typing import Optional, Dict, Any
+
+
+class CollapsibleBox(QWidget):
+    """Sección colapsable con título clickeable y animación suave."""
+    def __init__(self, title: str = "", parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        
+        self.toggle_button = QToolButton(text=title, checkable=True, checked=True)
+        self.toggle_button.setStyleSheet("""
+            QToolButton {
+                border: none;
+                background-color: #2a2a2a;
+                color: #e0e0e0;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 12px;
+                text-align: left;
+                border-radius: 5px;
+            }
+            QToolButton:hover { background-color: #333333; }
+            QToolButton:checked { border-bottom: 2px solid #0e639c; }
+        """)
+        self.toggle_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.toggle_button.setArrowType(Qt.DownArrow)
+        self.toggle_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.toggle_button.clicked.connect(self._toggle)
+        
+        self.content_area = QWidget()
+        self.content_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 4)
+        main_layout.addWidget(self.toggle_button)
+        main_layout.addWidget(self.content_area)
+    
+    def _toggle(self, checked: bool) -> None:
+        self.toggle_button.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+        self.content_area.setVisible(checked)
+    
+    def setContentLayout(self, layout: QLayout) -> None:
+        self.content_area.setLayout(layout)
+
+
+class InputPanel(QWidget):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        from qtpy.QtWidgets import QScrollArea
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        
+        self.scroll_content = QWidget()
+        layout = QVBoxLayout(self.scroll_content)
+        layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.scroll_area.setWidget(self.scroll_content)
+        main_layout.addWidget(self.scroll_area, 1)
+
+        
+        # ═══════════════════════════════════════════
+        # Sección 1: Geometría del Perfil (Colapsable)
+        # ═══════════════════════════════════════════
+        geom_box = CollapsibleBox("▸ Geometría del Perfil")
+        geom_layout = QFormLayout()
+        geom_layout.setContentsMargins(8, 8, 8, 8)
+        
+        self.profile_type = QComboBox()
+        self.profile_type.addItems(["NACA 4-dígitos", "Archivo Custom (.txt, .csv)"])
+        
+        self.naca_input = QLineEdit("0012")
+        
+        self.file_picker_btn = QPushButton("Seleccionar Archivo...")
+        self.file_path_label = QLineEdit("")
+        self.file_path_label.setReadOnly(True)
+        
+        file_box = QHBoxLayout()
+        file_box.addWidget(self.file_picker_btn)
+        file_box.addWidget(self.file_path_label)
+        file_box.setContentsMargins(0, 0, 0, 0)
+        self.file_widget = QWidget()
+        self.file_widget.setLayout(file_box)
+        self.file_widget.setVisible(False)
+        
+        self.chord_input = QDoubleSpinBox()
+        self.chord_input.setRange(0.01, 1000.0)
+        self.chord_input.setValue(1.0)
+        self.chord_input.setDecimals(3)
+        self.chord_input.setSuffix(" m")
+        
+        self.aoa_input = QDoubleSpinBox()
+        self.aoa_input.setRange(-45, 45)
+        self.aoa_input.setValue(0.0)
+        self.aoa_input.setSuffix(" °")
+
+        # Modo de Análisis
+        self.analysis_mode = QComboBox()
+        self.analysis_mode.addItems(["Punto Único", "Barrido de Ángulos"])
+        
+        self.aoa_min = QDoubleSpinBox()
+        self.aoa_min.setRange(-45, 45)
+        self.aoa_min.setValue(-4.0)
+        self.aoa_max = QDoubleSpinBox()
+        self.aoa_max.setRange(-45, 45)
+        self.aoa_max.setValue(24.0)
+        self.aoa_step = QDoubleSpinBox()
+        self.aoa_step.setRange(0.1, 45)
+        self.aoa_step.setValue(2.0)
+        
+        self.sweep_widget = QWidget()
+        sweep_layout = QHBoxLayout(self.sweep_widget)
+        sweep_layout.setContentsMargins(0, 0, 0, 0)
+        sweep_layout.addWidget(self.aoa_min)
+        sweep_layout.addWidget(self.aoa_max)
+        sweep_layout.addWidget(self.aoa_step)
+        self.sweep_widget.setVisible(False)
+        
+        # UI Connections
+        self.profile_type.currentIndexChanged.connect(self._toggle_profile_input)
+        self.analysis_mode.currentIndexChanged.connect(self._toggle_analysis_mode)
+        self.file_picker_btn.clicked.connect(self._pick_file)
+        
+        geom_layout.addRow("Tipo:", self.profile_type)
+        geom_layout.addRow("Código NACA:", self.naca_input)
+        geom_layout.addRow("Archivo:", self.file_widget)
+        geom_layout.addRow("Cuerda (c):", self.chord_input)
+        geom_layout.addRow("Análisis:", self.analysis_mode)
+        self.aoa_row = geom_layout.addRow("Ángulo AoA:", self.aoa_input)
+        self.sweep_row = geom_layout.addRow("Min/Máx/Paso:", self.sweep_widget)
+        geom_box.setContentLayout(geom_layout)
+        
+        # ═══════════════════════════════════════════
+        # Sección 2: Control de Malla (Colapsable)
+        # ═══════════════════════════════════════════
+        mesh_box = CollapsibleBox("▸ Control de Malla")
+        mesh_box.toggle_button.setChecked(False)
+        mesh_box.content_area.setVisible(False)
+        mesh_box.toggle_button.setArrowType(Qt.RightArrow)
+        mesh_layout = QFormLayout()
+        mesh_layout.setContentsMargins(8, 8, 8, 8)
+        
+        self.element_type = QComboBox()
+        self.element_type.addItems(["Quads (Gmsh)", "Hexaedros (Gmsh)", "Tetraedros (Gmsh)", "Automático (Mixto)", "Estructurada (O-Grid blockMesh)"])
+
+        
+        self.mesh_size_min = QDoubleSpinBox()
+        self.mesh_size_min.setRange(0.001, 1.0)
+        self.mesh_size_min.setValue(0.02) # Más grueso para cálculo rápido
+        self.mesh_size_min.setDecimals(4)
+        self.mesh_size_min.setSingleStep(0.001)
+        self.mesh_size_min.setSuffix(" c")
+        self.mesh_size_min.setToolTip("En fracciones de cuerda")
+        
+        self.mesh_size_max = QDoubleSpinBox()
+        self.mesh_size_max.setRange(0.01, 10.0)
+        self.mesh_size_max.setValue(1.0) # Más grueso para cálculo rápido
+        self.mesh_size_max.setDecimals(3)
+        self.mesh_size_max.setSuffix(" c")
+        
+        self.bl_dist_min = QDoubleSpinBox()
+        self.bl_dist_min.setRange(0.00001, 1.0)
+        self.bl_dist_min.setValue(0.05) # Capa límite más gruesa
+        self.bl_dist_min.setDecimals(5)
+        self.bl_dist_min.setSingleStep(0.001)
+        self.bl_dist_min.setSuffix(" c")
+        
+        self.mesh_num_layers = QSpinBox()
+        self.mesh_num_layers.setRange(1, 100)
+        self.mesh_num_layers.setValue(5) # Menos capas para cálculo rápido
+
+        
+        self.mesh_growth_rate = QDoubleSpinBox()
+        self.mesh_growth_rate.setRange(1.01, 2.0)
+        self.mesh_growth_rate.setValue(1.15)
+        self.mesh_growth_rate.setSingleStep(0.05)
+        
+        self.mesh_curvature = QSpinBox()
+        self.mesh_curvature.setRange(0, 500)
+        self.mesh_curvature.setValue(100)
+        self.mesh_curvature.setSuffix(" p")
+        self.mesh_curvature.setToolTip("Número de puntos por círculo completo (curvatura).")
+        
+        self.btn_yplus = QPushButton("🧮 Evaluar y+")
+        self.btn_yplus.setToolTip("Estima la altura inicial basándose en el Re y modelo turbulento.")
+        self.btn_yplus.clicked.connect(self._show_yplus_calculator)
+        
+        bl_min_layout = QHBoxLayout()
+        bl_min_layout.addWidget(self.bl_dist_min)
+        bl_min_layout.addWidget(self.btn_yplus)
+        
+        self.wake_length = QDoubleSpinBox()
+        self.wake_length.setRange(1.0, 30.0)
+        self.wake_length.setValue(5.0)
+        self.wake_length.setDecimals(1)
+        self.wake_length.setSuffix(" c")
+        
+        self.wake_refine = QDoubleSpinBox()
+        self.wake_refine.setRange(0.5, 5.0)
+        self.wake_refine.setValue(1.0)
+        self.wake_refine.setDecimals(1)
+        self.wake_refine.setToolTip("Multiplicador del tamaño mínimo en la estela (1.0 = 3x cl_min)")
+        
+        mesh_layout.addRow("Tipo Elemento:", self.element_type)
+        mesh_layout.addRow("Tamaño Mín Elemento:", self.mesh_size_min)
+        mesh_layout.addRow("Tamaño Máx Elemento:", self.mesh_size_max)
+        mesh_layout.addRow("Capa Límite (dist mín):", bl_min_layout)
+        mesh_layout.addRow("Número de Capas:", self.mesh_num_layers)
+        mesh_layout.addRow("Tasa Crecimiento:", self.mesh_growth_rate)
+        mesh_layout.addRow("Ref. Curvatura:", self.mesh_curvature)
+        mesh_layout.addRow("Longitud Estela:", self.wake_length)
+        mesh_layout.addRow("Factor Refin. Estela:", self.wake_refine)
+        mesh_box.setContentLayout(mesh_layout)
+        
+        # ═══════════════════════════════════════════
+        # Sección 3: Condiciones de Frontera (Colapsable)
+        # ═══════════════════════════════════════════
+        cf_box = CollapsibleBox("▸ Condiciones de Frontera")
+        cf_layout = QFormLayout()
+        cf_layout.setContentsMargins(8, 8, 8, 8)
+        
+        self.vel_input = QDoubleSpinBox()
+        self.vel_input.setRange(0.1, 500)
+        self.vel_input.setValue(15.0)
+        self.vel_input.setSuffix(" m/s")
+        self.pres_input = QDoubleSpinBox()
+        self.pres_input.setRange(-100000, 100000)
+        self.pres_input.setValue(0.0)
+        self.pres_input.setSuffix(" Pa")
+        
+        self.reynolds_input = QDoubleSpinBox()
+        self.reynolds_input.setRange(100, 50000000)
+        self.reynolds_input.setValue(1000000)
+        self.reynolds_input.setDecimals(0)
+        self.reynolds_input.setSingleStep(100000)
+        self.reynolds_input.setGroupSeparatorShown(True)
+        
+        self.regime_selector = QComboBox()
+        self.regime_selector.addItems(["Estacionario (simpleFoam)", "Transitorio (pimpleFoam)"])
+        
+        # Parámetros de Transitorio (visibles solo en modo pimpleFoam)
+        self.transient_widget = QWidget()
+        trans_layout = QFormLayout(self.transient_widget)
+        trans_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.delta_t_input = QLineEdit("1e-3")
+        self.end_time_input = QLineEdit("0.5")
+        self.write_interval_input = QLineEdit("0.01")
+        self.max_co_input = QDoubleSpinBox()
+        self.max_co_input.setRange(0.1, 10.0)
+        self.max_co_input.setValue(2.0)
+        self.max_co_input.setDecimals(1)
+        
+        trans_layout.addRow("Paso de Tiempo (Δt):", self.delta_t_input)
+        trans_layout.addRow("Tiempo Final (s):", self.end_time_input)
+        trans_layout.addRow("Intervalo Escritura (s):", self.write_interval_input)
+        trans_layout.addRow("Courant Máximo:", self.max_co_input)
+        self.transient_widget.setVisible(False)
+        
+        self.regime_selector.currentIndexChanged.connect(self._toggle_transient)
+        
+        self.turbulence_model = QComboBox()
+        self.turbulence_model.addItems([
+            "Laminar", 
+            "k-Omega SST (RAS)",
+            "k-Omega SST-LM Transición (RAS)",
+            "gamma-ReTheta Transición (RAS)",
+            "k-Epsilon (RAS)", 
+            "k-Omega (RAS)", 
+            "Spalart-Allmaras (RAS)"
+        ])
+        self.turbulence_model.setCurrentText("k-Omega SST (RAS)")
+        
+        self.tol_input = QLineEdit("1e-4")
+        
+        self.native_foam_cb = QCheckBox("Usar OpenFOAM Nativo (Sin Docker)")
+        self.native_foam_cb.setChecked(False)
+        self.native_foam_cb.setToolTip("Habilita esto si tienes 'simpleFoam' etc. instalados en el sistema principal y no quieres usar Docker.")
+        
+        cf_layout.addRow("Régimen de Flujo:", self.regime_selector)
+        cf_layout.addRow("", self.transient_widget)
+        cf_layout.addRow("Modelo Turbulencia:", self.turbulence_model)
+        cf_layout.addRow("Nº de Reynolds:", self.reynolds_input)
+        cf_layout.addRow("Velocidad de Entrada:", self.vel_input)
+        cf_layout.addRow("Presión de Salida:", self.pres_input)
+        cf_layout.addRow("Tolerancia Residual:", self.tol_input)
+        cf_layout.addRow("", self.native_foam_cb)
+        cf_box.setContentLayout(cf_layout)
+        
+        layout.addWidget(geom_box)
+        layout.addWidget(mesh_box)
+        layout.addWidget(cf_box)
+        layout.addStretch()
+        
+        # Botones de Acción (Fijos en la parte inferior fuera del scroll)
+        btn_layout = QVBoxLayout()
+        btn_layout.setContentsMargins(8, 8, 8, 8)
+        
+        self.btn_geom = QPushButton("📐 Generar Geometría")
+        self.btn_mesh = QPushButton("🕸️ Generar Malla")
+        self.btn_run = QPushButton("🚀 Iniciar Análisis")
+        self.btn_results = QPushButton("📊 Ver Resultados")
+        
+        self.btn_run.setStyleSheet("background-color: #0e639c; color: white; font-weight: bold; padding: 10px;")
+        
+        btn_layout.addWidget(self.btn_geom)
+        btn_layout.addWidget(self.btn_mesh)
+        btn_layout.addWidget(self.btn_run)
+        btn_layout.addWidget(self.btn_results)
+        
+        main_layout.addLayout(btn_layout)
+
+
+
+    def _toggle_profile_input(self) -> None:
+        is_custom = self.profile_type.currentIndex() == 1
+        self.naca_input.setVisible(not is_custom)
+        self.file_widget.setVisible(is_custom)
+        
+    def _toggle_analysis_mode(self) -> None:
+        is_sweep = self.analysis_mode.currentIndex() == 1
+        self.aoa_input.setVisible(not is_sweep)
+        self.sweep_widget.setVisible(is_sweep)
+
+    def _toggle_transient(self) -> None:
+        is_transient = self.regime_selector.currentIndex() == 1
+        self.transient_widget.setVisible(is_transient)
+    def _show_yplus_calculator(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Calculadora y+")
+        layout = QFormLayout(dialog)
+        
+        re_spin = QDoubleSpinBox()
+        re_spin.setRange(1e4, 1e9)
+        re_spin.setValue(self.reynolds_input.value())
+        re_spin.setDecimals(0)
+        
+        yplus_target = QDoubleSpinBox()
+        yplus_target.setRange(0.1, 500)
+        yplus_target.setValue(1.0 if "SST" in self.turbulence_model.currentText() else 30.0)
+        
+        chord_spin = QDoubleSpinBox()
+        chord_spin.setValue(self.chord_input.value())
+        
+        layout.addRow("Número de Reynolds:", re_spin)
+        layout.addRow("Cuerda (m):", chord_spin)
+        layout.addRow("y+ Objetivo:", yplus_target)
+        
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addRow(btn_box)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            re = re_spin.value()
+            c = chord_spin.value()
+            yp = yplus_target.value()
+            # Empirical flat plate Cf
+            cf = 0.026 / (re ** (1/7))
+            # tau_w approx = 0.5 * rho * U^2 * Cf -> U* = U * sqrt(Cf / 2)
+            # U = Re * nu / c. Re = U*c/nu -> U/nu = Re/c
+            # delta_s = y+ * nu / U* = y+ * nu / (U * sqrt(Cf/2)) 
+            # delta_s / c = y+ / (Re * sqrt(Cf/2))
+            
+            delta_s_c = yp / (re * ((cf / 2) ** 0.5))
+            # limit delta_s_c to avoid weird spinbox rounding error out of bounds
+            self.bl_dist_min.setValue(max(0.00001, min(delta_s_c, 1.0)))
+
+    def _pick_file(self) -> None:
+        file_name, _ = QFileDialog.getOpenFileName(self, "Seleccionar Perfil 2D", "", "Text Files (*.txt *.csv);;All Files (*)")
+        if file_name:
+            self.file_path_label.setText(file_name)
+
+    def get_params(self) -> Dict[str, Any]:
+        p_type = self.profile_type.currentText()
+        naca = self.naca_input.text().strip()
+        if "Custom" not in p_type:
+            if not naca.isdigit():
+                raise ValueError(f"El código NACA debe contener solo dígitos numéricos.\nValor incorrecto: '{naca}'")
+            if len(naca) == 4:
+                # NACA 4-dígitos: MPXX
+                # M = máxima curvatura (0-9 → 0%-9% del chord)
+                # P = posición de la curvatura (0-9 → 0%-90% del chord)
+                # XX = espesor máximo (01-40 → 1%-40% del chord)
+                thickness = int(naca[2:])
+                camber = int(naca[0])
+                camber_pos = int(naca[1])
+                if thickness < 1 or thickness > 40:
+                    raise ValueError(f"El espesor NACA (últimos 2 dígitos) debe estar entre 01 y 40.\nValor: '{naca[2:]}' → {thickness}% del chord.")
+                if camber > 0 and camber_pos == 0:
+                    raise ValueError(f"Si la curvatura máxima (1er dígito) es > 0, la posición (2do dígito) no puede ser 0.\nCódigo: '{naca}'")
+            elif len(naca) == 5:
+                # NACA 5-dígitos: validación básica
+                cl_design = int(naca[0])
+                if cl_design < 1 or cl_design > 6:
+                    raise ValueError(f"Para NACA 5-dígitos, el primer dígito (Cl diseño) debe estar entre 1 y 6.\nValor: '{naca}'")
+            else:
+                raise ValueError(f"El código NACA debe tener 4 o 5 dígitos.\nValor incorrecto: '{naca}' ({len(naca)} dígitos)")
+        else:
+            # Validar que existe el archivo custom
+            file_path = self.file_path_label.text().strip()
+            if not file_path:
+                raise ValueError("Debes seleccionar un archivo de perfil (.txt, .csv, .dat).")
+            import os
+            if not os.path.exists(file_path):
+                raise ValueError(f"El archivo de perfil no existe:\n{file_path}")
+                
+        a_mode = self.analysis_mode.currentText()
+        if "Barrido" in a_mode:
+            if self.aoa_min.value() >= self.aoa_max.value():
+                raise ValueError("En 'Barrido de Ángulos', el valor mínimo de AoA debe ser menor al máximo.")
+                
+        if self.mesh_size_min.value() >= self.mesh_size_max.value():
+            raise ValueError("El tamaño MÍNIMO de malla no puede ser mayor o igual al MÁXIMO.")
+
+
+        return {
+            "profile_type": self.profile_type.currentText(),
+            "naca": self.naca_input.text(),
+            "file_path": self.file_path_label.text(),
+            "chord": self.chord_input.value(),
+            "element_type": self.element_type.currentText(),
+            "analysis_mode": self.analysis_mode.currentText(),
+            "aoa": self.aoa_input.value(),
+            "aoa_min": self.aoa_min.value(),
+            "aoa_max": self.aoa_max.value(),
+            "aoa_step": self.aoa_step.value(),
+            "mesh_size_min": self.mesh_size_min.value(),
+            "mesh_size_max": self.mesh_size_max.value(),
+            "bl_dist_min": self.bl_dist_min.value(),
+            "mesh_num_layers": self.mesh_num_layers.value(),
+            "mesh_growth_rate": self.mesh_growth_rate.value(),
+            "mesh_curvature": self.mesh_curvature.value(),
+            "wake_length": self.wake_length.value(),
+            "wake_refine": self.wake_refine.value(),
+            "regime": self.regime_selector.currentText(),
+            "reynolds": self.reynolds_input.value(),
+            "u_inlet": self.vel_input.value(),
+            "p_outlet": self.pres_input.value(),
+            "tolerance": self.tol_input.text(),
+            "turbulence": self.turbulence_model.currentText(),
+            "delta_t": self.delta_t_input.text(),
+            "end_time": self.end_time_input.text(),
+            "write_interval": self.write_interval_input.text(),
+            "max_co": self.max_co_input.value(),
+            "native_foam": self.native_foam_cb.isChecked()
+        }
+
+    def set_params(self, p: Dict[str, Any]) -> None:
+        """Restaurar todos los parámetros de la interfaz desde un diccionario."""
+        if "profile_type" in p:
+            idx = self.profile_type.findText(p["profile_type"])
+            if idx >= 0: self.profile_type.setCurrentIndex(idx)
+        if "naca" in p:
+            self.naca_input.setText(str(p["naca"]))
+        if "file_path" in p:
+            self.file_path_label.setText(str(p["file_path"]))
+        if "chord" in p:
+            self.chord_input.setValue(float(p["chord"]))
+        if "element_type" in p:
+            idx = self.element_type.findText(p["element_type"])
+            if idx >= 0: self.element_type.setCurrentIndex(idx)
+        if "analysis_mode" in p:
+            idx = self.analysis_mode.findText(p["analysis_mode"])
+            if idx >= 0: self.analysis_mode.setCurrentIndex(idx)
+        if "aoa" in p:
+            self.aoa_input.setValue(float(p["aoa"]))
+        if "aoa_min" in p:
+            self.aoa_min.setValue(float(p["aoa_min"]))
+        if "aoa_max" in p:
+            self.aoa_max.setValue(float(p["aoa_max"]))
+        if "aoa_step" in p:
+            self.aoa_step.setValue(float(p["aoa_step"]))
+        if "mesh_size_min" in p:
+            self.mesh_size_min.setValue(float(p["mesh_size_min"]))
+        if "mesh_size_max" in p:
+            self.mesh_size_max.setValue(float(p["mesh_size_max"]))
+        if "bl_dist_min" in p:
+            self.bl_dist_min.setValue(float(p["bl_dist_min"]))
+        if "mesh_num_layers" in p:
+            self.mesh_num_layers.setValue(int(p["mesh_num_layers"]))
+        if "mesh_growth_rate" in p:
+            self.mesh_growth_rate.setValue(float(p["mesh_growth_rate"]))
+        if "mesh_curvature" in p:
+            self.mesh_curvature.setValue(int(p["mesh_curvature"]))
+        if "wake_length" in p:
+            self.wake_length.setValue(float(p["wake_length"]))
+        if "wake_refine" in p:
+            self.wake_refine.setValue(float(p["wake_refine"]))
+        if "regime" in p:
+            idx = self.regime_selector.findText(p["regime"])
+            if idx >= 0: self.regime_selector.setCurrentIndex(idx)
+        if "reynolds" in p:
+            self.reynolds_input.setValue(float(p["reynolds"]))
+        if "u_inlet" in p:
+            self.vel_input.setValue(float(p["u_inlet"]))
+        if "p_outlet" in p:
+            self.pres_input.setValue(float(p["p_outlet"]))
+        if "tolerance" in p:
+            self.tol_input.setText(str(p["tolerance"]))
+        if "turbulence" in p:
+            idx = self.turbulence_model.findText(p["turbulence"])
+            if idx >= 0: self.turbulence_model.setCurrentIndex(idx)
+        if "delta_t" in p:
+            self.delta_t_input.setText(str(p["delta_t"]))
+        if "end_time" in p:
+            self.end_time_input.setText(str(p["end_time"]))
+        if "write_interval" in p:
+            self.write_interval_input.setText(str(p["write_interval"]))
+        if "max_co" in p:
+            self.max_co_input.setValue(float(p["max_co"]))
+        if "native_foam" in p:
+            self.native_foam_cb.setChecked(bool(p["native_foam"]))
+
+================================================================================
+ARCHIVO: gui/results_panel.py
+================================================================================
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox, QSlider, QDoubleSpinBox
+from qtpy.QtCore import Qt, QTimer, Signal
+import pyvista as pv
+try:
+    from pyvistaqt import QtInteractor
+except ImportError:
+    QtInteractor = None
+from core.postprocessing import PostProcessor
+from typing import Optional, Any
+import os
+
+class ResultsPanel(QWidget):
+    log_signal = Signal(str)
+
+    def __init__(self, case_dir: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        
+        # Redirigir errores de VTK a un archivo usando PyVista nativo (sin importar vtk directo que causa SIGKILL en Mac)
+        pv.set_error_output_file("vtk_errors.log")
+        
+        self.case_dir = case_dir
+        self.post_processor = None
+        self.time_values = []
+        self.current_time_idx = 0
+        
+        main_layout = QVBoxLayout(self)
+        
+        # --- Top Controls Toolbar ---
+        controls_layout = QHBoxLayout()
+        
+        self.lbl_var = QLabel("Campo mostrado:")
+        self.lbl_var.setStyleSheet("font-weight: bold; color: white;")
+        self.var_selector = QComboBox()
+        self.var_selector.addItems([
+            "Velocidad (U) [m/s]", 
+            "Presión Relativa (p) [Pa/kg/m³]", 
+            "Turbulencia (k)", 
+            "Viscosidad Turbulenta (nut)", 
+            "Tasa Disipación (omega)",
+            "Disipación (epsilon)",
+            "Viscosidad Spalart (nuTilda)"
+        ])
+        self.var_selector.currentIndexChanged.connect(self.update_results_plot)
+        self.var_selector.setEnabled(False)
+        
+        self.btn_screenshot = QPushButton("📸 Guardar Imagen")
+        self.btn_screenshot.setStyleSheet("background-color: #3b3b3b; color: white; border-radius: 4px; padding: 6px;")
+        self.btn_screenshot.clicked.connect(self.take_screenshot)
+        
+        controls_layout.addWidget(self.lbl_var)
+        controls_layout.addWidget(self.var_selector)
+        controls_layout.addStretch()
+        controls_layout.addWidget(self.btn_screenshot)
+        
+        main_layout.addLayout(controls_layout)
+        
+        # --- PyVista 3D View ---
+        self.view_container = QWidget()
+        view_layout = QVBoxLayout(self.view_container)
+        view_layout.setContentsMargins(0, 0, 0, 0)
+        
+        if QtInteractor is not None:
+            try:
+                self.plotter = QtInteractor(self.view_container)
+                self.plotter.set_background('#121212')
+                self.plotter.enable_parallel_projection()
+                self.plotter.view_xy()
+                view_layout.addWidget(self.plotter)
+                self.add_watermark()
+            except Exception as e:
+                self.plotter = None
+                view_layout.addWidget(QLabel(f"Error al iniciar motor 3D: {e}"))
+        else:
+            self.plotter = None
+            view_layout.addWidget(QLabel("PyVista no disponible"))
+            
+        main_layout.addWidget(self.view_container, stretch=1)
+        
+        # --- Bottom Transient Player ---
+        self.player_widget = QWidget()
+        player_layout = QHBoxLayout(self.player_widget)
+        player_layout.setContentsMargins(0, 5, 0, 0)
+        
+        self.lbl_player = QLabel("Reproductor Transitorio:")
+        self.lbl_player.setStyleSheet("font-weight: bold; color: white;")
+        
+        self.time_slider = QSlider(Qt.Horizontal)
+        self.time_slider.setMinimum(0)
+        self.time_slider.setMaximum(0)
+        self.time_slider.setEnabled(False)
+        self.time_slider.valueChanged.connect(self.on_slider_changed)
+        
+        self.lbl_time = QLabel("t = 0.00s")
+        self.lbl_time.setMinimumWidth(80)
+        self.lbl_time.setAlignment(Qt.AlignCenter)
+        self.lbl_time.setStyleSheet("color: white;")
+        
+        self.btn_first = QPushButton("⏮")
+        self.btn_prev = QPushButton("⏪")
+        self.btn_play = QPushButton("▶")
+        self.btn_next = QPushButton("⏩")
+        self.btn_last = QPushButton("⏭")
+        
+        self.btn_first.clicked.connect(self.on_play_first)
+        self.btn_prev.clicked.connect(self.on_play_prev)
+        self.btn_play.clicked.connect(self.on_play_toggle)
+        self.btn_next.clicked.connect(self.on_play_next)
+        self.btn_last.clicked.connect(self.on_play_last)
+        
+        for b in [self.btn_first, self.btn_prev, self.btn_play, self.btn_next, self.btn_last]:
+            b.setStyleSheet("background-color: #3b3b3b; color: white; border-radius: 4px; padding: 4px; font-size: 14px;")
+            player_layout.addWidget(b)
+            
+        self.speed_spin = QDoubleSpinBox()
+        self.speed_spin.setRange(0.1, 10.0)
+        self.speed_spin.setValue(1.0)
+        self.speed_spin.setSingleStep(0.5)
+        self.speed_spin.setPrefix("x")
+        self.speed_spin.setMaximumWidth(60)
+        self.speed_spin.setStyleSheet("background-color: #2d2d2d; color: white;")
+        self.speed_spin.valueChanged.connect(self.update_timer_speed)
+        
+        player_layout.insertWidget(0, self.lbl_player)
+        player_layout.insertWidget(1, self.time_slider)
+        player_layout.insertWidget(2, self.lbl_time)
+        player_layout.insertWidget(8, self.speed_spin)
+        
+        self.player_widget.setVisible(False)
+        main_layout.addWidget(self.player_widget)
+        
+        self.play_timer = QTimer(self)
+        self.play_timer.timeout.connect(self.on_play_next)
+
+    def log(self, text: str) -> None:
+        self.log_signal.emit(text)
+
+    def add_watermark(self) -> None:
+        if isinstance(self.plotter, QtInteractor):
+            self.plotter.add_text("OpenBlade 2D | ITVE-TecNM", 
+                                 position='upper_left', 
+                                 font_size=10, 
+                                 color='#555555', 
+                                 name='watermark')
+
+    def load_results(self, is_transient: bool = False) -> bool:
+        try:
+            self.post_processor = PostProcessor(self.case_dir)
+            
+            if is_transient:
+                times = self.post_processor.get_time_values()
+                if not times:
+                    self.log("⚠️ No se encontraron tiempos transitorios en la malla.")
+                    return False
+                
+                self.time_values = times
+                self.time_slider.setMaximum(len(times) - 1)
+                self.time_slider.setValue(len(times) - 1)
+                self.time_slider.setEnabled(True)
+                self.player_widget.setVisible(True)
+                self.current_time_idx = len(times) - 1
+            else:
+                self.player_widget.setVisible(False)
+                self.time_slider.setEnabled(False)
+                self.time_values = [0]
+                self.current_time_idx = 0
+                
+            self.var_selector.setEnabled(True)
+            self.update_results_plot()
+            return True
+            
+        except Exception as e:
+            self.log(f"❌ Error al cargar resultados: {e}")
+            return False
+
+    def update_visual_preview(self, mesh: Any, show_edges: bool = False) -> None:
+        if self.plotter:
+            self.plotter.clear()
+            self.plotter.add_mesh(mesh, color='#a0a0a0', show_edges=show_edges, edge_color='#333333')
+            self.plotter.view_xy()
+            self.add_watermark()
+
+    def update_results_plot(self) -> None:
+        if not self.post_processor or not self.plotter:
+            return
+            
+        field_map = {
+            0: 'U',
+            1: 'p',
+            2: 'k',
+            3: 'nut',
+            4: 'omega',
+            5: 'epsilon',
+            6: 'nuTilda'
+        }
+        
+        idx = self.var_selector.currentIndex()
+        field_name = field_map.get(idx, 'U')
+        
+        time_repr = "latestTime"
+        if self.player_widget.isVisible() and self.time_values:
+            time_repr = str(self.time_values[self.current_time_idx])
+            
+        try:
+            if self.player_widget.isVisible():
+                mesh = self.post_processor.get_mesh_at_index(self.current_time_idx)
+            else:
+                mesh = self.post_processor.get_latest_mesh()
+                
+            if mesh:
+                self.plotter.clear()
+                
+                if field_name == 'U':
+                    # Intentar obtener velocidad de point_data o cell_data
+                    velocity = mesh.point_data.get('U')
+                    if velocity is None:
+                        velocity = mesh.cell_data.get('U')
+                        if velocity is not None:
+                            # Convertir cell_data a point_data
+                            mesh = mesh.cell_data_to_point_data()
+                            velocity = mesh.point_data.get('U')
+                    
+                    if velocity is not None:
+                        try:
+                            # Calcular magnitud con numpy (más robusto que pv.mag)
+                            import numpy as np
+                            if velocity.ndim == 2 and velocity.shape[1] >= 3:
+                                mag_U = np.sqrt(velocity[:, 0]**2 + velocity[:, 1]**2 + velocity[:, 2]**2)
+                            elif velocity.ndim == 2 and velocity.shape[1] == 2:
+                                mag_U = np.sqrt(velocity[:, 0]**2 + velocity[:, 1]**2)
+                            else:
+                                mag_U = np.abs(velocity)
+                            
+                            mesh.point_data['U_mag'] = mag_U
+                            self.plotter.add_mesh(mesh, scalars='U_mag', cmap='jet', 
+                                                  show_scalar_bar=True, 
+                                                  scalar_bar_args={'title': 'Velocidad (m/s)'})
+                        except Exception as e_mag:
+                            self.log(f"⚠️ Error calculando magnitud de velocidad: {e_mag}")
+                            self.plotter.add_mesh(mesh, color='white')
+                    else:
+                        self.log("⚠️ Campo 'U' no encontrado en los resultados.")
+                        # Mostrar las variables disponibles para debug
+                        available = list(mesh.point_data.keys()) + list(mesh.cell_data.keys())
+                        self.log(f"  Variables disponibles: {available}")
+                        self.plotter.add_mesh(mesh, color='white')
+                else:
+                    # Para campos escalares (p, k, nut, omega, epsilon, nuTilda)
+                    scalar_data = mesh.point_data.get(field_name)
+                    if scalar_data is None:
+                        scalar_data = mesh.cell_data.get(field_name)
+                        if scalar_data is not None:
+                            mesh = mesh.cell_data_to_point_data()
+                    
+                    if field_name in mesh.point_data:
+                        self.plotter.add_mesh(mesh, scalars=field_name, cmap='jet', 
+                                              show_scalar_bar=True, 
+                                              scalar_bar_args={'title': field_name})
+                    else:
+                        self.log(f"⚠️ Campo '{field_name}' no encontrado.")
+                        self.plotter.add_mesh(mesh, color='white')
+                        
+                self.plotter.view_xy()
+                self.add_watermark()
+        except Exception as e:
+            self.log(f"⚠️ Error visualizando campo en t={time_repr}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_slider_changed(self, value: int) -> None:
+        if 0 <= value < len(self.time_values):
+            self.current_time_idx = value
+            t_val = self.time_values[value]
+            self.lbl_time.setText(f"t = {t_val}s")
+            # Update plot only if not playing rapidly (debouncing in real app, but direct here)
+            self.update_results_plot()
+
+    def on_play_first(self) -> None:
+        self.time_slider.setValue(0)
+
+    def on_play_prev(self) -> None:
+        val = self.time_slider.value()
+        if val > 0: self.time_slider.setValue(val - 1)
+
+    def on_play_next(self) -> None:
+        val = self.time_slider.value()
+        if val < self.time_slider.maximum():
+            self.time_slider.setValue(val + 1)
+        else:
+            if self.play_timer.isActive():
+                self.play_timer.stop()
+                self.btn_play.setText("▶")
+
+    def on_play_last(self) -> None:
+        self.time_slider.setValue(self.time_slider.maximum())
+
+    def on_play_toggle(self) -> None:
+        if self.play_timer.isActive():
+            self.play_timer.stop()
+            self.btn_play.setText("▶")
+        else:
+            if self.time_slider.value() == self.time_slider.maximum():
+                self.time_slider.setValue(0)
+            self.play_timer.start(int(500 / self.speed_spin.value()))
+            self.btn_play.setText("⏸")
+
+    def update_timer_speed(self) -> None:
+        if self.play_timer.isActive():
+            self.play_timer.setInterval(int(500 / self.speed_spin.value()))
+
+    def take_screenshot(self) -> None:
+        if not self.plotter: return
+        try:
+            self.plotter.screenshot("resultados.png", transparent_background=True, window_size=(1920, 1080))
+            self.log("✅ Captura guardada como 'resultados.png' (1920x1080).")
+        except Exception as e:
+            self.log(f"Error al guardar captura: {e}")
+
+================================================================================
+ARCHIVO: gui/plots.py
+================================================================================
+import matplotlib
+matplotlib.use('QtAgg')
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from typing import Optional, List, Dict
+import csv
+import numpy as np
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QFileDialog
+
+class ResidualPlot(QWidget):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.fig = Figure(figsize=(4, 2.5), dpi=80)
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+        
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_yscale('log')
+        self.ax.set_title("Monitor de Convergencia (Residuos)", color='white', fontsize=12, pad=10)
+        self.ax.set_xlabel("Iteración / Tiempo", color='white')
+        self.ax.set_ylabel("Residuo Inicial (Log)", color='white')
+        
+        self.fig.patch.set_facecolor('#1e1e1e')
+        self.ax.set_facecolor('#1e1e1e')
+        self.ax.xaxis.label.set_color('white')
+        self.ax.yaxis.label.set_color('white')
+        self.ax.tick_params(colors='white', labelsize=8)
+        self.ax.spines['bottom'].set_color('#555555')
+        self.ax.spines['top'].set_color('#555555') 
+        self.ax.spines['right'].set_color('#555555')
+        self.ax.spines['left'].set_color('#555555')
+        self.ax.grid(True, which="both", ls="--", alpha=0.3, color='#888888')
+        self.fig.subplots_adjust(left=0.15, right=0.95, top=0.9, bottom=0.2)
+        
+        self.res_data = {}
+        self.res_iters = []
+        self.res_lines = {}
+        self._pending_redraw = False
+        
+    def reset(self) -> None:
+        self.res_data = {}
+        self.res_iters = []
+        for line in self.res_lines.values():
+            line.remove()
+        self.res_lines = {}
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.canvas.draw()
+        
+    def update_plot(self, field: str, value: float, time_val: float) -> None:
+        if not self.res_iters or self.res_iters[-1] != time_val:
+            self.res_iters.append(time_val)
+            for f in self.res_data:
+                while len(self.res_data[f]) < len(self.res_iters) - 1:
+                    self.res_data[f].append(self.res_data[f][-1] if self.res_data[f] else 1.0)
+                    
+        if field not in self.res_data:
+            self.res_data[field] = [1.0] * (len(self.res_iters) - 1)
+            
+        if len(self.res_data[field]) == len(self.res_iters):
+            # Ya tenemos un valor para esta iteración (ej. sub-iteraciones de p), lo actualizamos
+            self.res_data[field][-1] = value
+        else:
+            self.res_data[field].append(value)
+            
+        self._pending_redraw = True
+        
+    def redraw(self) -> None:
+        if not self._pending_redraw:
+            return
+            
+        for f, data in self.res_data.items():
+            if len(data) != len(self.res_iters):
+                continue
+                
+            if f not in self.res_lines:
+                lw = 2.0 if f == 'p' else 1.2
+                self.res_lines[f], = self.ax.plot(self.res_iters, data, label=f, linewidth=lw)
+            else:
+                self.res_lines[f].set_data(self.res_iters, data)
+                
+        if len(self.res_lines) > 0 and len(self.ax.get_legend_handles_labels()[1]) != len(self.res_lines):
+            self.ax.legend(facecolor='#1e1e1e', edgecolor='#333333', labelcolor='white', fontsize=8, loc='upper right')
+            
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.canvas.draw_idle() 
+        self._pending_redraw = False
+
+
+
+class AeroPlot(QWidget):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.fig = Figure(figsize=(5, 5), dpi=80)
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+        
+        self.fig.patch.set_facecolor('#1e1e1e')
+        self.ax_cl = self.fig.add_subplot(311)
+        self.ax_cd = self.fig.add_subplot(312)
+        self.ax_cm = self.fig.add_subplot(313)
+        
+        for ax in [self.ax_cl, self.ax_cd, self.ax_cm]:
+            ax.set_facecolor('#1e1e1e')
+            ax.xaxis.label.set_color('white')
+            ax.yaxis.label.set_color('white')
+            ax.tick_params(colors='white', labelsize=8)
+            for spine in ax.spines.values():
+                spine.set_color('#555555')
+            ax.grid(True, ls="--", alpha=0.3, color='#888888')
+            
+        self.ax_cl.set_title("Coeficiente de Sustentación (Cl) vs AoA", color='white', fontsize=10)
+        self.ax_cl.set_ylabel("Cl [-]", color='white')
+        
+        self.ax_cd.set_title("Coeficiente de Arrastre (Cd) vs AoA", color='white', fontsize=10)
+        self.ax_cd.set_ylabel("Cd [-]", color='white')
+        
+        self.ax_cm.set_title("Coeficiente de Momento (Cm) vs AoA", color='white', fontsize=10)
+        self.ax_cm.set_xlabel("Ángulo de Ataque (AoA) [°]", color='white')
+        self.ax_cm.set_ylabel("Cm [-]", color='white')
+        
+        self.fig.subplots_adjust(hspace=0.6, bottom=0.15, top=0.9, left=0.15, right=0.95)
+        
+        self.line_cl, = self.ax_cl.plot([], [], 'o-', color='#4CAF50', linewidth=2, markersize=5)
+        self.line_cd, = self.ax_cd.plot([], [], 'o-', color='#F44336', linewidth=2, markersize=5)
+        self.line_cm, = self.ax_cm.plot([], [], 'o-', color='#FFC107', linewidth=2, markersize=5)
+        
+        self.aoas = []
+        self.cls = []
+        self.cds = []
+        self.cms = []
+        
+        # Botón de exportación
+        btn_layout = QHBoxLayout()
+        self.btn_export = QPushButton("📤 Exportar resultados a CSV")
+        self.btn_export.clicked.connect(self.export_to_csv)
+        self.btn_export.setStyleSheet("""
+            QPushButton {
+                background-color: #2e7d32;
+                color: white;
+                font-weight: bold;
+                padding: 10px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #388e3c;
+            }
+        """)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_export)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        
+    def update_plots(self, aoas: List[float], cls: List[float], cds: List[float], cms: Optional[List[float]] = None) -> None:
+        self.aoas = aoas
+        self.cls = cls
+        self.cds = cds
+        self.cms = cms if cms is not None else [0.0] * len(aoas)
+
+        self.line_cl.set_data(self.aoas, self.cls)
+        self.ax_cl.relim()
+        self.ax_cl.autoscale_view()
+        
+        self.line_cd.set_data(self.aoas, self.cds)
+        self.ax_cd.relim()
+        self.ax_cd.autoscale_view()
+
+        self.line_cm.set_data(self.aoas, self.cms)
+        self.ax_cm.relim()
+        self.ax_cm.autoscale_view()
+        
+        self.canvas.draw()
+
+    def export_to_csv(self) -> None:
+        if not self.aoas:
+            return
+            
+        filename, _ = QFileDialog.getSaveFileName(self, "Exportar Resultados", "", "CSV Files (*.csv)")
+        if filename:
+            try:
+                with open(filename, mode='w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["AoA [deg]", "Cl [-]", "Cd [-]", "Cm [-]", "L/D"])
+                    for i in range(len(self.aoas)):
+                        ld = self.cls[i] / self.cds[i] if self.cds[i] != 0 else 0
+                        writer.writerow([self.aoas[i], self.cls[i], self.cds[i], self.cms[i], ld])
+            except Exception as e:
+                print(f"Error al exportar: {e}")
+
+class PressurePlot(QWidget):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.fig = Figure(figsize=(5, 4), dpi=80)
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+        
+        self.fig.patch.set_facecolor('#1e1e1e')
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_facecolor('#1e1e1e')
+        self.ax.xaxis.label.set_color('white')
+        self.ax.yaxis.label.set_color('white')
+        self.ax.tick_params(colors='white', labelsize=8)
+        for spine in self.ax.spines.values():
+            spine.set_color('#555555')
+        self.ax.grid(True, ls="--", alpha=0.3, color='#888888')
+        
+        self.ax.set_title("Distribución de Coeficiente de Presión (Cp)", color='white', fontsize=12)
+        self.ax.set_xlabel("x/c", color='white')
+        self.ax.set_ylabel("-Cp", color='white') # Common to plot -Cp
+        self.ax.invert_yaxis()
+        
+        self.line_upper, = self.ax.plot([], [], 'o-', color='#4CAF50', label='Extradós', markersize=3)
+        self.line_lower, = self.ax.plot([], [], 'o-', color='#2196F3', label='Intradós', markersize=3)
+        self.ax.legend(facecolor='#1e1e1e', edgecolor='#333333', labelcolor='white', fontsize=10)
+        
+    def update_cp(self, x_upper: np.ndarray, cp_upper: np.ndarray, x_lower: np.ndarray, cp_lower: np.ndarray) -> None:
+        self.line_upper.set_data(x_upper, cp_upper)
+        self.line_lower.set_data(x_lower, cp_lower)
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.canvas.draw()
+
+================================================================================
+ARCHIVO: gui/workers.py
+================================================================================
+from qtpy.QtCore import QThread, Signal, QProcess, QObject
+import os
+import sys
+import json
+import time
+import subprocess
+import numpy as np
+from typing import Dict, Any, List
+
+
+class MeshWorker(QThread):
+    finished = Signal(str, str)
+    error = Signal(str)
+    log_msg = Signal(str)
+    
+    def __init__(self, params: Dict[str, Any], msh_file: str, case_dir: str) -> None:
+        super().__init__()
+        self.p = params
+        self.msh_file = msh_file
+        self.case_dir = case_dir
+        
+    def run(self) -> None:
+        try:
+            self.log_msg.emit("⏳ Iniciando mallado aislado...")
+            json_path = "temp_params_mesh.json"
+            with open(json_path, 'w') as f:
+                json.dump(self.p, f)
+            
+            cmd = [sys.executable, "-m", "core.mesh_script", json_path, self.msh_file]
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            self.log_msg.emit(res.stdout)
+            if res.returncode == 0:
+                self.finished.emit(self.msh_file, self.msh_file.replace(".msh", ".vtk"))
+            else:
+                self.error.emit(res.stderr)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class SimWorker(QObject):
+    """
+    Ejecuta el solver CFD usando QProcess (event-loop based).
+    No hereda QThread porque QProcess ya es asíncrono y necesita
+    correr en el hilo principal del event loop de Qt.
+    """
+    finished = Signal(int)
+    error = Signal(str)
+    log_msg = Signal(str)
+    force_data = Signal(str, str)
+    residual_data = Signal(str, float, float)
+    
+    def __init__(self, solver_runner, params: Dict[str, Any], msh_file: str, parent=None) -> None:
+        super().__init__(parent)
+        self.p = params
+        self.msh_file = msh_file
+        self.process = None
+
+    def start_sim(self):
+        json_path = "temp_params_solve.json"
+        with open(json_path, 'w') as f:
+            json.dump(self.p, f)
+            
+        self.process = QProcess()
+        self.process.setProcessChannelMode(QProcess.MergedChannels)
+        self.process.readyReadStandardOutput.connect(self.on_output)
+        self.process.finished.connect(self.on_finished)
+        
+        cmd = sys.executable
+        args = ["-m", "core.solve_script", json_path, self.msh_file]
+        self.log_msg.emit("🚀 Lanzando simulador nativo (QProcess)...")
+        self.process.start(cmd, args)
+
+    def on_output(self):
+        data = self.process.readAllStandardOutput().data().decode(errors='replace')
+        for line in data.splitlines():
+            clean = line.strip()
+            try:
+                if clean.startswith("RESIDUAL_DATA|"):
+                    p = clean.split("|")
+                    if len(p) == 4: self.residual_data.emit(p[1], float(p[2]), float(p[3]))
+                elif clean.startswith("FORCE_DATA|"):
+                    p = clean.split("|")
+                    if len(p) == 3: self.force_data.emit(p[1], p[2])
+                elif "Time =" in clean or "Iter" in clean or "solving" in clean.lower():
+                    self.log_msg.emit(clean)
+            except Exception as e:
+                print(f"Error parseando linea del solver: {e}")
+
+    def on_finished(self, exit_code):
+        self.finished.emit(exit_code)
+        if os.path.exists("temp_params_solve.json"):
+            os.remove("temp_params_solve.json")
+
+
+class SweepWorker(QThread):
+    """
+    Ejecuta un barrido paramétrico de ángulos de ataque (polar).
+    Para cada ángulo:
+      1. Genera una nueva malla con el ángulo actual
+      2. Configura el caso OpenFOAM
+      3. Ejecuta la simulación en estado estacionario
+      4. Extrae Cl y Cd del postprocessing
+    
+    Emite finished(aoa_list, cl_list, cd_list, cm_list) al terminar.
+    """
+    finished = Signal(list, list, list, list)
+    error = Signal(str)
+    log_msg = Signal(str)
+    progress = Signal(int, int)  # (current, total)
+    
+    def __init__(self, params: Dict[str, Any], case_dir: str) -> None:
+        super().__init__()
+        self.p = params.copy()
+        self.case_dir = case_dir
+        self._stop_requested = False
+        
+    def request_stop(self):
+        """Solicitar detención segura del barrido."""
+        self._stop_requested = True
+        
+    def run(self) -> None:
+        aoa_min = self.p.get("aoa_min", -4.0)
+        aoa_max = self.p.get("aoa_max", 24.0)
+        aoa_step = self.p.get("aoa_step", 2.0)
+        
+        # Generar lista de ángulos
+        angles = []
+        aoa = aoa_min
+        while aoa <= aoa_max + 1e-6:
+            angles.append(round(aoa, 2))
+            aoa += aoa_step
+        
+        total = len(angles)
+        self.log_msg.emit(f"📊 Barrido de ángulos: {total} puntos de {aoa_min}° a {aoa_max}° (paso {aoa_step}°)")
+        
+        aoa_results = []
+        cl_results = []
+        cd_results = []
+        cm_results = []
+        
+        naca = self.p.get("naca", "0012")
+        
+        for i, angle in enumerate(angles):
+            if self._stop_requested:
+                self.log_msg.emit("⚠️ Barrido detenido por el usuario.")
+                break
+                
+            self.progress.emit(i + 1, total)
+            self.log_msg.emit(f"━━━ [{i+1}/{total}] AoA = {angle}° ━━━")
+            
+            # Actualizar AoA en parámetros
+            sweep_params = self.p.copy()
+            sweep_params["aoa"] = angle
+            # Forzar estacionario para barrido
+            sweep_params["regime"] = "Estacionario (simpleFoam)"
+            
+            try:
+                # Paso 1: Generar malla con nuevo AoA
+                msh_file = f"perfil_{naca}_sweep.msh"
+                self.log_msg.emit(f"  🔧 Generando malla (AoA={angle}°)...")
+                
+                json_path = "temp_params_sweep.json"
+                with open(json_path, 'w') as f:
+                    json.dump(sweep_params, f)
+                
+                result = subprocess.run(
+                    [sys.executable, "-m", "core.mesh_script", json_path, msh_file],
+                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                    timeout=300
+                )
+                
+                if result.returncode != 0:
+                    self.log_msg.emit(f"  ❌ Error en malla: {result.stderr[:200]}")
+                    continue
+                
+                # Paso 2: Configurar y ejecutar simulación
+                self.log_msg.emit(f"  🚀 Simulando...")
+                
+                result = subprocess.run(
+                    [sys.executable, "-m", "core.solve_script", json_path, msh_file],
+                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                    timeout=600
+                )
+                
+                # Paso 3: Extraer Cl y Cd de la salida
+                cl, cd, cm = self._extract_coefficients(result.stdout)
+                
+                if cl is not None and cd is not None:
+                    aoa_results.append(angle)
+                    cl_results.append(cl)
+                    cd_results.append(cd)
+                    cm_results.append(cm if cm is not None else 0.0)
+                    self.log_msg.emit(f"  ✅ AoA={angle}°: Cl={cl:.4f}, Cd={cd:.4f}")
+                else:
+                    # Intentar extraer desde archivos de postprocessing
+                    cl, cd, cm = self._extract_from_postprocessing()
+                    if cl is not None:
+                        aoa_results.append(angle)
+                        cl_results.append(cl)
+                        cd_results.append(cd)
+                        cm_results.append(cm if cm is not None else 0.0)
+                        self.log_msg.emit(f"  ✅ (postprocess) AoA={angle}°: Cl={cl:.4f}, Cd={cd:.4f}")
+                    else:
+                        self.log_msg.emit(f"  ⚠️ No se pudieron extraer coeficientes para AoA={angle}°")
+                        
+            except subprocess.TimeoutExpired:
+                self.log_msg.emit(f"  ⏱️ Timeout en AoA={angle}°, saltando...")
+                continue
+            except Exception as e:
+                self.log_msg.emit(f"  ❌ Error en AoA={angle}°: {e}")
+                continue
+        
+        # Limpiar archivos temporales
+        for f in ["temp_params_sweep.json", f"perfil_{naca}_sweep.msh", 
+                   f"perfil_{naca}_sweep.vtk"]:
+            if os.path.exists(f):
+                try: os.remove(f)
+                except: pass
+        
+        self.log_msg.emit(f"📊 Barrido completado: {len(aoa_results)}/{total} puntos exitosos")
+        self.finished.emit(aoa_results, cl_results, cd_results, cm_results)
+    
+    def _extract_coefficients(self, output: str):
+        """Extrae Cl, Cd, Cm de la salida del solver (FORCE_DATA lines)."""
+        cl, cd, cm = None, None, None
+        for line in output.splitlines():
+            clean = line.strip()
+            if clean.startswith("FORCE_DATA|"):
+                parts = clean.split("|")
+                if len(parts) >= 3:
+                    name = parts[1].lower()
+                    try:
+                        val = float(parts[2])
+                        if "cl" in name: cl = val
+                        elif "cd" in name: cd = val
+                        elif "cm" in name: cm = val
+                    except ValueError:
+                        pass
+        return cl, cd, cm
+    
+    def _extract_from_postprocessing(self):
+        """Extrae coeficientes del directorio de postprocessing de OpenFOAM."""
+        try:
+            coeff_dir = os.path.join(self.case_dir, "postProcessing", "forceCoeffs")
+            if not os.path.exists(coeff_dir):
+                return None, None, None
+                
+            # Encontrar el último directorio de tiempo
+            time_dirs = sorted([d for d in os.listdir(coeff_dir) 
+                              if os.path.isdir(os.path.join(coeff_dir, d))],
+                             key=lambda x: float(x) if x.replace('.', '').isdigit() else 0)
+            
+            if not time_dirs:
+                return None, None, None
+                
+            coeff_file = os.path.join(coeff_dir, time_dirs[-1], "coefficient.dat")
+            if not os.path.exists(coeff_file):
+                coeff_file = os.path.join(coeff_dir, time_dirs[-1], "forceCoeffs.dat")
+            
+            if not os.path.exists(coeff_file):
+                return None, None, None
+            
+            # Leer la última línea de datos
+            with open(coeff_file, 'r') as f:
+                lines = [l.strip() for l in f.readlines() if l.strip() and not l.startswith('#')]
+            
+            if lines:
+                parts = lines[-1].split()
+                if len(parts) >= 4:
+                    # Formato típico: Time Cm Cd Cl CmFront CmRear
+                    cm = float(parts[1])
+                    cd = float(parts[2])
+                    cl = float(parts[3])
+                    return cl, cd, cm
+                    
+        except Exception as e:
+            print(f"Error leyendo postprocessing: {e}")
+        
+        return None, None, None

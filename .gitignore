@@ -1,0 +1,26 @@
+# Archivos generados por simulaciones
+openfoam_case/
+*.msh
+*.stl
+vtk_errors.log
+stderr.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# macOS
+.DS_Store
+*.app
+
+# Windows
+*.exe
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

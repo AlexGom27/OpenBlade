@@ -1,0 +1,1 @@
+{"naca": "0012", "chord": 1.0, "profile_type": "NACA 4-digit", "mesh_size_min": 0.01, "mesh_size_max": 0.5, "bl_dist_min": 0.0005, "mesh_growth_rate": 1.15, "mesh_num_layers": 25, "mesh_nb_points": 300, "wake_length": 5.0, "aoa": 12.0}
