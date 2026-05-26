@@ -1,0 +1,5 @@
+label,naca,aoa,u_inlet,reynolds,turbulence,transient,Cl,Cd,Cm,status,error,wall_time_s
+Re_500k,2412,5.0,15.0,500000,k-Omega SST (RAS),False,1.122066,0.1629217,-0.2622652,OK,,10.1
+Re_1M,2412,5.0,15.0,1000000,k-Omega SST (RAS),False,1.117934,0.1605698,-0.2613941,OK,,8.5
+Re_2M,2412,5.0,15.0,2000000,k-Omega SST (RAS),False,1.115651,0.1599944,-0.2608346,OK,,8.6
+Re_5M,2412,5.0,15.0,5000000,k-Omega SST (RAS),False,1.113958,0.1591251,-0.2604208,OK,,8.5
