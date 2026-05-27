@@ -1,5 +1,0 @@
-label,naca,aoa,u_inlet,reynolds,turbulence,transient,Cl,Cd,Cm,status,error,wall_time_s
-Laminar,2412,5.0,15.0,1000000,Laminar,False,1.109447,0.1566212,-0.2592825,OK,,9.4
-k-Omega_SST,2412,5.0,15.0,1000000,k-Omega SST (RAS),False,1.117934,0.1605698,-0.2613941,OK,,8.4
-SST-LM_Trans,2412,5.0,15.0,1000000,k-Omega SST-LM Transición (RAS),False,1.117843,0.1603897,-0.2614212,OK,,8.4
-k-Epsilon,2412,5.0,15.0,1000000,k-Epsilon (RAS),False,1.247476,0.1763523,-0.2899659,OK,,8.3

@@ -1,4 +1,0 @@
-label,naca,aoa,u_inlet,reynolds,turbulence,transient,mesh_size_min,mesh_num_layers,mesh_nodes,Cl,Cd,Cm,status,error,wall_time_s
-Gruesa,2412,5.0,15.0,1000000,k-Omega SST (RAS),False,0.05,5,,0.701464,0.04007843,-0.05862173,OK,,8.8
-Media,2412,5.0,15.0,1000000,k-Omega SST (RAS),False,0.02,10,,1.12268,0.1606845,-0.2615561,OK,,8.3
-Fina,2412,5.0,15.0,1000000,k-Omega SST (RAS),False,0.008,20,,0.9463954,0.150664,-0.2237864,OK,,8.3
