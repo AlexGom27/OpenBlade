@@ -5,7 +5,7 @@ class OpenFoamSetup:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
         self.case_dir = case_dir
         
-    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0) -> None:
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500) -> None:
         # Create directories
         for d in ["0", "constant", "system"]:
             os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
@@ -40,14 +40,14 @@ class OpenFoamSetup:
         # Calcular viscosidad cinemática a partir de Reynolds: nu = U * L / Re
         nu = (float(u_inlet) * float(chord)) / float(reynolds)
             
-        self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co)
+        self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co, max_iters)
         self._write_constant(turbulence, nu)
         self._write_0(u_inlet, p_outlet, chord, turbulence, nu)
         
-    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0) -> None:
+    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500) -> None:
         app_name = "pimpleFoam" if transient else "simpleFoam"
         initial_dt = delta_t if transient else "1"
-        endTime  = end_time if transient else "500"
+        endTime  = end_time if transient else str(max_iters)
         writeControl = "adjustableRunTime" if transient else "timeStep"
         writeInterval = write_interval if transient else "50"
         purgeWrite = "0" if transient else "2"

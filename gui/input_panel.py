@@ -248,6 +248,16 @@ class InputPanel(QWidget):
         self.regime_selector = QComboBox()
         self.regime_selector.addItems(["Estacionario (simpleFoam)", "Transitorio (pimpleFoam)"])
         
+        # Parámetros de Estacionario (visibles solo en modo simpleFoam)
+        self.steady_widget = QWidget()
+        steady_layout = QFormLayout(self.steady_widget)
+        steady_layout.setContentsMargins(0, 0, 0, 0)
+        self.max_iters_input = QSpinBox()
+        self.max_iters_input.setRange(10, 100000)
+        self.max_iters_input.setValue(500)
+        self.max_iters_input.setSingleStep(50)
+        steady_layout.addRow("Iteraciones Máximas:", self.max_iters_input)
+
         # Parámetros de Transitorio (visibles solo en modo pimpleFoam)
         self.transient_widget = QWidget()
         trans_layout = QFormLayout(self.transient_widget)
@@ -288,6 +298,7 @@ class InputPanel(QWidget):
         self.native_foam_cb.setToolTip("Habilita esto si tienes 'simpleFoam' etc. instalados en el sistema principal y no quieres usar Docker.")
         
         cf_layout.addRow("Régimen de Flujo:", self.regime_selector)
+        cf_layout.addRow("", self.steady_widget)
         cf_layout.addRow("", self.transient_widget)
         cf_layout.addRow("Modelo Turbulencia:", self.turbulence_model)
         cf_layout.addRow("Nº de Reynolds:", self.reynolds_input)
@@ -334,6 +345,7 @@ class InputPanel(QWidget):
     def _toggle_transient(self) -> None:
         is_transient = self.regime_selector.currentIndex() == 1
         self.transient_widget.setVisible(is_transient)
+        self.steady_widget.setVisible(not is_transient)
     def _show_yplus_calculator(self) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle("Calculadora y+")
@@ -453,6 +465,7 @@ class InputPanel(QWidget):
             "end_time": self.end_time_input.text(),
             "write_interval": self.write_interval_input.text(),
             "max_co": self.max_co_input.value(),
+            "max_iters": self.max_iters_input.value(),
             "native_foam": self.native_foam_cb.isChecked()
         }
 
@@ -519,5 +532,7 @@ class InputPanel(QWidget):
             self.write_interval_input.setText(str(p["write_interval"]))
         if "max_co" in p:
             self.max_co_input.setValue(float(p["max_co"]))
+        if "max_iters" in p:
+            self.max_iters_input.setValue(int(p["max_iters"]))
         if "native_foam" in p:
             self.native_foam_cb.setChecked(bool(p["native_foam"]))

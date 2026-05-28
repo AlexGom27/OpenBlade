@@ -30,7 +30,8 @@ def main():
             chord=p["chord"],
             transient=is_transient,
             tolerance=p.get("tolerance", "1e-4"),
-            turbulence=p.get("turbulence", "kEpsilon")
+            turbulence=p.get("turbulence", "kEpsilon"),
+            max_iters=p.get("max_iters", 500)
         )
         
         # 2. Inicialización del Solver
