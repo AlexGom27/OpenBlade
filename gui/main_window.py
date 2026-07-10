@@ -124,7 +124,8 @@ class MainWindow(QMainWindow):
 
     def log(self, text: str) -> None:
         self.log_console.append(text)
-        self.log_console.moveCursor(self.log_console.textCursor().End)
+        from PySide6.QtGui import QTextCursor
+        self.log_console.moveCursor(QTextCursor.MoveOperation.End)
 
 
     def _safe_get_params(self) -> Optional[Dict[str, Any]]:
