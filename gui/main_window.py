@@ -2,7 +2,7 @@ from qtpy.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPus
     QSplitter, QTextEdit, QLabel, QLineEdit, QScrollArea, QTabWidget, QFileDialog, 
     QMenuBar, QMenu, QAction, QMessageBox, QToolBar)
 from qtpy.QtCore import Qt, Signal, QTimer, QCoreApplication, QMutex
-from qtpy.QtGui import QCloseEvent
+from qtpy.QtGui import QCloseEvent, QTextCursor
 from typing import Optional, Dict, Any
 import json
 import os
@@ -124,7 +124,6 @@ class MainWindow(QMainWindow):
 
     def log(self, text: str) -> None:
         self.log_console.append(text)
-        from PySide6.QtGui import QTextCursor
         self.log_console.moveCursor(QTextCursor.MoveOperation.End)
 
 
@@ -150,8 +149,12 @@ class MainWindow(QMainWindow):
         
         try:
             # Usar subproceso para evitar conflictos de OpenGL/Gmsh en Mac
+            # sys.executable garantiza el mismo intérprete (y sus paquetes) que la GUI
             import subprocess
-            cmd = ["python3", "-m", "core.geom_script", str(naca_val), str(p['chord']), str(p['aoa']), "temp_geom.vtk"]
+            import sys
+            cmd = [sys.executable, "-m", "core.geom_script", str(naca_val), str(p['chord']), str(p['aoa']), "temp_geom.vtk"]
+            if is_custom and file_path:
+                cmd.append(str(file_path))
             result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
             
             if result.returncode == 0:

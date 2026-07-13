@@ -188,7 +188,7 @@ class SolverRunner:
                     cmd = [
                         docker_exec, "run", "--rm",
                         "-v", f"{root_dir}:/data",
-                        "opencfd/openfoam-default",
+                        self.docker_image,
                         "potentialFoam", "-case", f"/data/{case_name}", "-writep"
                     ]
                 

@@ -285,8 +285,15 @@ class SweepWorker(QThread):
             
             if lines:
                 parts = lines[-1].split()
-                if len(parts) >= 4:
-                    # Formato típico: Time Cm Cd Cl CmFront CmRear
+                if len(parts) >= 8:
+                    # Formato OpenFOAM v2xxx:
+                    # Time  Cd  Cd(f)  Cd(r)  Cl  Cl(f)  Cl(r)  CmPitch  CmRoll  CmYaw ...
+                    cd = float(parts[1])
+                    cl = float(parts[4])
+                    cm = float(parts[7])
+                    return cl, cd, cm
+                elif len(parts) >= 4:
+                    # Formato antiguo (fallback): Time Cm Cd Cl
                     cm = float(parts[1])
                     cd = float(parts[2])
                     cl = float(parts[3])

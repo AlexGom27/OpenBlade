@@ -372,7 +372,7 @@ class InputPanel(QWidget):
         btn_box.rejected.connect(dialog.reject)
         layout.addRow(btn_box)
         
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec() == QDialog.Accepted:
             re = re_spin.value()
             c = chord_spin.value()
             yp = yplus_target.value()
@@ -410,13 +410,14 @@ class InputPanel(QWidget):
                     raise ValueError(f"El espesor NACA (últimos 2 dígitos) debe estar entre 01 y 40.\nValor: '{naca[2:]}' → {thickness}% del chord.")
                 if camber > 0 and camber_pos == 0:
                     raise ValueError(f"Si la curvatura máxima (1er dígito) es > 0, la posición (2do dígito) no puede ser 0.\nCódigo: '{naca}'")
-            elif len(naca) == 5:
-                # NACA 5-dígitos: validación básica
-                cl_design = int(naca[0])
-                if cl_design < 1 or cl_design > 6:
-                    raise ValueError(f"Para NACA 5-dígitos, el primer dígito (Cl diseño) debe estar entre 1 y 6.\nValor: '{naca}'")
             else:
-                raise ValueError(f"El código NACA debe tener 4 o 5 dígitos.\nValor incorrecto: '{naca}' ({len(naca)} dígitos)")
+                # El generador de geometría solo implementa la serie NACA de 4 dígitos.
+                # Aceptar 5 dígitos produciría un perfil erróneo en silencio.
+                raise ValueError(
+                    f"Solo se soportan perfiles NACA de 4 dígitos.\n"
+                    f"Valor incorrecto: '{naca}' ({len(naca)} dígitos).\n"
+                    f"Para otras series usa 'Archivo Custom' con las coordenadas del perfil."
+                )
         else:
             # Validar que existe el archivo custom
             file_path = self.file_path_label.text().strip()
@@ -506,6 +507,8 @@ class InputPanel(QWidget):
             self.mesh_growth_rate.setValue(float(p["mesh_growth_rate"]))
         if "mesh_curvature" in p:
             self.mesh_curvature.setValue(int(p["mesh_curvature"]))
+        if "mesh_nb_points" in p:
+            self.mesh_nb_points.setValue(int(p["mesh_nb_points"]))
         if "wake_length" in p:
             self.wake_length.setValue(float(p["wake_length"]))
         if "wake_refine" in p:

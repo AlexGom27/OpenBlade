@@ -39,11 +39,12 @@ class PostProcessor:
         if not self._ensure_reader():
             return None
         try:
+            idx = 0
             if self.reader.time_values:
                 idx = max(0, min(index, len(self.reader.time_values) - 1))
                 if idx == self._current_time_idx and idx in self._mesh_cache:
                     return self._mesh_cache[idx]
-                    
+
                 self.reader.set_active_time_value(self.reader.time_values[idx])
                 self._current_time_idx = idx
             

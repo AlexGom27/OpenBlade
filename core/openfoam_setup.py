@@ -184,7 +184,7 @@ relaxationFactors {{
 {alg} {{
     nNonOrthogonalCorrectors 3;
     nCorrectors     2;
-    nOuterCorrectors 20;
+    nOuterCorrectors 3;
     residualControl {{
         p               {{ tolerance {tolerance}; relTol 0; }}
         U               {{ tolerance {tolerance}; relTol 0; }}

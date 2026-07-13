@@ -31,11 +31,16 @@ def main():
             transient=is_transient,
             tolerance=p.get("tolerance", "1e-4"),
             turbulence=p.get("turbulence", "kEpsilon"),
+            reynolds=p.get("reynolds", 1000000.0),
+            delta_t=p.get("delta_t", "1e-3"),
+            end_time=p.get("end_time", "0.5"),
+            write_interval=p.get("write_interval", "0.01"),
+            max_co=p.get("max_co", 2.0),
             max_iters=p.get("max_iters", 500)
         )
-        
+
         # 2. Inicialización del Solver
-        solver = SolverRunner(case_dir=case_dir)
+        solver = SolverRunner(case_dir=case_dir, native=p.get("native_foam", False))
         
         # 3. gmshToFoam
         print("🔄 Convirtiendo malla...")
@@ -77,8 +82,13 @@ def main():
         while solver.process and solver.process.poll() is None:
             time.sleep(0.5)
             
-        print(f"✅ Simulación finalizada (Código {solver.process.returncode}).")
-        
+        rc = solver.process.returncode
+        print(f"✅ Simulación finalizada (Código {rc}).")
+        # Propagar el código de salida para que barridos/GUI detecten fallos reales
+        sys.exit(rc if rc else 0)
+
+    except SystemExit:
+        raise
     except Exception as e:
         print(f"ERROR_CRITICAL: {e}")
         sys.exit(1)

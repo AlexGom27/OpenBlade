@@ -21,7 +21,10 @@ def main():
         print(f"FATAL ERROR DURING STARTUP:\n{e}")
         print("="*50)
         traceback.print_exc()
-        input("\nPresiona Enter para cerrar...")
+        try:
+            input("\nPresiona Enter para cerrar...")
+        except (EOFError, RuntimeError):
+            pass  # Sin terminal interactiva (ej. doble clic en el .app)
 
 if __name__ == "__main__":
     main()
