@@ -8,16 +8,43 @@ import numpy as np
 from typing import Dict, Any, List
 
 
+def app_root() -> str:
+    """Raíz del repo (donde viven `core/` y `main.py`)."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def subprocess_env() -> Dict[str, str]:
+    """Entorno con la raíz del repo en PYTHONPATH.
+
+    Los scripts se lanzan como `-m core.<script>`; si el CWD de la GUI no es la
+    raíz del repo (p. ej. abierta desde Finder), el import fallaba.
+    """
+    env = os.environ.copy()
+    root = app_root()
+    current = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = root + (os.pathsep + current if current else "")
+    return env
+
+
 class MeshWorker(QThread):
     finished = Signal(str, str)
     error = Signal(str)
     log_msg = Signal(str)
-    
     def __init__(self, params: Dict[str, Any], msh_file: str, case_dir: str) -> None:
         super().__init__()
         self.p = params
         self.msh_file = msh_file
         self.case_dir = case_dir
+        self._proc = None
+
+    def cancel(self) -> None:
+        """Mata el gmsh en curso; sin esto el cierre de la app deja huérfanos."""
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
         
     def run(self) -> None:
         try:
@@ -27,12 +54,21 @@ class MeshWorker(QThread):
                 json.dump(self.p, f)
             
             cmd = [sys.executable, "-m", "core.mesh_script", json_path, self.msh_file]
-            res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
-            self.log_msg.emit(res.stdout)
-            if res.returncode == 0:
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding='utf-8', errors='replace',
+                env=subprocess_env()
+            )
+            try:
+                out, err = self._proc.communicate()
+            finally:
+                rc = self._proc.returncode
+                self._proc = None
+            self.log_msg.emit(out)
+            if rc == 0:
                 self.finished.emit(self.msh_file, self.msh_file.replace(".msh", ".vtk"))
             else:
-                self.error.emit(res.stderr)
+                self.error.emit(err)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -54,6 +90,9 @@ class SimWorker(QObject):
         self.p = params
         self.msh_file = msh_file
         self.process = None
+        # Buffer para líneas partidas entre dos lecturas del QProcess.
+        # Sin esto se pierden RESIDUAL_DATA / FORCE_DATA que llegan a medias.
+        self._stdout_buffer = ""
 
     def start_sim(self):
         json_path = "temp_params_solve.json"
@@ -72,12 +111,15 @@ class SimWorker(QObject):
 
     def on_output(self):
         data = self.process.readAllStandardOutput().data().decode(errors='replace')
-        lines = data.splitlines()
-        
-        # Procesar solo las últimas líneas si hay demasiadas para evitar saturación
-        if len(lines) > 50:
-            lines = lines[-50:]
-            
+        self.consume_text(data)
+
+    def consume_text(self, data: str) -> None:
+        """Procesa un bloque de stdout conservando la línea incompleta final."""
+        data = self._stdout_buffer + data
+        lines = data.split("\n")
+        # La última entrada puede ser una línea incompleta: se guarda para el próximo bloque.
+        self._stdout_buffer = lines.pop()
+
         for line in lines:
             clean = line.strip()
             if not clean:
@@ -88,7 +130,10 @@ class SimWorker(QObject):
                     if len(p) == 4: self.residual_data.emit(p[1], float(p[2]), float(p[3]))
                 elif clean.startswith("FORCE_DATA|"):
                     p = clean.split("|")
-                    if len(p) == 3: self.force_data.emit(p[1], p[2])
+                    # Cm se emite siempre (último valor) para que la GUI no
+                    # muestre un 0.0 de una corrida anterior.
+                    if len(p) == 3:
+                        self.force_data.emit(p[1], p[2])
                 elif clean.startswith("SIM_DONE|"):
                     pass
                 else:
@@ -99,7 +144,22 @@ class SimWorker(QObject):
             except Exception:
                 pass
 
+    def stop(self) -> None:
+        """Termina el QProcess del solver (si sigue vivo)."""
+        if self.process is not None:
+            try:
+                if self.process.state() != QProcess.NotRunning:
+                    self.process.terminate()
+                    if not self.process.waitForFinished(3000):
+                        self.process.kill()
+            except Exception:
+                pass
+
     def on_finished(self, exit_code):
+        # Volcar la última línea si el proceso no terminó con salto de línea
+        if self._stdout_buffer.strip():
+            tail, self._stdout_buffer = self._stdout_buffer, ""
+            self.consume_text(tail + "\n")
         self.finished.emit(exit_code)
         if os.path.exists("temp_params_solve.json"):
             os.remove("temp_params_solve.json")
@@ -127,10 +187,39 @@ class SweepWorker(QThread):
         self.p = params.copy()
         self.case_dir = case_dir
         self._stop_requested = False
-        
+        self._current_proc = None
+
     def request_stop(self):
-        """Solicitar detención segura del barrido."""
+        """Solicitar detención segura del barrido.
+
+        Además de marcar la bandera, mata el subproceso en curso: si no,
+        'Detener Barrido' podía tardar hasta 20 minutos (timeout del solver).
+        """
         self._stop_requested = True
+        proc = self._current_proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+    def _run_cmd(self, cmd, timeout):
+        """Ejecuta un subproceso cancelable. Devuelve un CompletedProcess-like."""
+        self._current_proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace',
+            env=subprocess_env()
+        )
+        try:
+            out, err = self._current_proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self._current_proc.kill()
+            out, err = self._current_proc.communicate()
+            raise
+        finally:
+            rc = self._current_proc.returncode
+            self._current_proc = None
+        return subprocess.CompletedProcess(cmd, rc, out, err)
         
     def run(self) -> None:
         aoa_min = self.p.get("aoa_min", -4.0)
@@ -177,11 +266,12 @@ class SweepWorker(QThread):
                 with open(json_path, 'w') as f:
                     json.dump(sweep_params, f)
                 
-                result = subprocess.run(
+                result = self._run_cmd(
                     [sys.executable, "-m", "core.mesh_script", json_path, msh_file],
-                    capture_output=True, text=True, encoding='utf-8', errors='replace',
                     timeout=300
                 )
+                if self._stop_requested:
+                    break
                 
                 if result.returncode != 0:
                     self.log_msg.emit(f"  ❌ Error en malla: {result.stderr[:200]}")
@@ -195,9 +285,8 @@ class SweepWorker(QThread):
                 # Paso 2: Configurar y ejecutar simulación
                 self.log_msg.emit(f"  🚀 Simulando...")
                 
-                result = subprocess.run(
+                result = self._run_cmd(
                     [sys.executable, "-m", "core.solve_script", json_path, msh_file],
-                    capture_output=True, text=True, encoding='utf-8', errors='replace',
                     timeout=1200
                 )
                 
@@ -250,9 +339,10 @@ class SweepWorker(QThread):
                     name = parts[1].lower()
                     try:
                         val = float(parts[2])
-                        if "cl" in name: cl = val
-                        elif "cd" in name: cd = val
-                        elif "cm" in name: cm = val
+                        # Nombres normalizados: evita que "cl" capture "clock" u otros.
+                        if name.startswith("cl"): cl = val
+                        elif name.startswith("cd"): cd = val
+                        elif name.startswith("cm"): cm = val
                     except ValueError:
                         pass
         return cl, cd, cm

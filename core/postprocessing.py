@@ -66,89 +66,124 @@ class PostProcessor:
         idx = len(time_vals) - 1 if time_vals else 0
         return self.get_mesh_at_index(idx)
 
+    @staticmethod
+    def _find_block(mesh: Any, name_fragment: str) -> Any:
+        """Busca un bloque por nombre en un MultiBlock (posiblemente anidado).
+
+        El OpenFOAMReader de PyVista devuelve `[internalMesh, boundary]`, y los
+        patches reales viven un nivel más abajo en `boundary`.
+        """
+        try:
+            if mesh is None or not hasattr(mesh, "n_blocks"):
+                return None
+            for i in range(mesh.n_blocks):
+                block = mesh.get_block(i)
+                if block is None:
+                    continue
+                name = (mesh.get_block_name(i) or "").lower()
+                if name_fragment in name and hasattr(block, "point_data"):
+                    return block
+                nested = PostProcessor._find_block(block, name_fragment)
+                if nested is not None:
+                    return nested
+        except Exception:
+            return None
+        return None
+
+    def _airfoil_patch_name(self) -> Optional[str]:
+        """Devuelve el nombre real del patch del perfil tal como lo reporta VTK.
+
+        PyVista expone los patches como 'patch/<nombre>', no como '<nombre>'.
+        """
+        try:
+            for name in self.reader.patch_array_names:
+                if "airfoil" in name.lower():
+                    return name
+        except Exception:
+            return None
+        return None
+
     def get_cp_on_surface(self, u_inf: float = 15.0, rho: float = 1.225) -> Optional[tuple]:
         """
-        Extracts pressure on the airfoil surface and calculates Cp.
-        Returns (x_upper, cp_upper, x_lower, cp_lower).
+        Extrae la presión sobre la superficie del perfil y calcula Cp.
+
+        Devuelve (x_upper, cp_upper, x_lower, cp_lower) con x normalizado 0..1.
         """
         if not self._ensure_reader():
             return None
-            
+
         try:
-            # Set latest time
             times = self.reader.time_values
             if times:
                 self.reader.set_active_time_value(times[-1])
-            
-            # Read only the airfoil patch to be efficient
-            self.reader.disable_all_patch_arrays()
-            if "airfoil" in self.reader.patch_array_names:
-                self.reader.enable_patch_array("airfoil")
-            else:
-                # Fallback to internal mesh if patch not found (though less accurate for surface)
-                mesh = self.reader.read()
+
+            patch_name = self._airfoil_patch_name()
+            if patch_name is None:
                 return None
 
+            # Leer solo el patch del perfil para no cargar todo el dominio.
+            self.reader.enable_patch_array(patch_name)
             full_mesh = self.reader.read()
-            # Extract the airfoil surface from the multi-block dataset
-            # PyVista OpenFOAMReader returns a MultiBlock
-            airfoil = None
-            for i in range(full_mesh.n_blocks):
-                block = full_mesh.get_block(i)
-                # In PyVista 0.44+, some versions return blocks with names
-                if "airfoil" in full_mesh.get_block_name(i).lower():
-                    airfoil = block
-                    break
-            
-            if airfoil is None:
-                # If block names are not available or don't match, try to find 2D surface
-                for i in range(full_mesh.n_blocks):
-                    block = full_mesh.get_block(i)
-                    if block.n_points > 0:
-                        airfoil = block
-                        break
-            
-            if airfoil is None: return None
 
-            # OpenFOAM pressure for simpleFoam is p/rho (m^2/s^2)
-            # Cp = (p - p_inf) / (0.5 * rho * U_inf^2)
-            # If p is kinematic: Cp = (p_kin - p_kin_inf) / (0.5 * U_inf^2)
-            p_kin = airfoil.point_data["p"]
-            dyn_head = 0.5 * (u_inf ** 2)
+            airfoil = self._find_block(full_mesh, "airfoil")
+
+            if airfoil is None or airfoil.n_points == 0:
+                return None
+            if "p" not in airfoil.point_data:
+                return None
+
+            p_kin = np.asarray(airfoil.point_data["p"], dtype=float)
+            points = np.asarray(airfoil.points, dtype=float)
+            if points.shape[0] < 4:
+                return None
+
+            x, y = points[:, 0], points[:, 1]
+
+            # Separar extradós/intradós respecto a la línea de cuerda real.
+            # Se usa PCA para tolerar perfiles rotados (ángulo de ataque).
+            xy = np.column_stack([x, y])
+            centered = xy - xy.mean(axis=0)
+            try:
+                _, _, vt = np.linalg.svd(centered, full_matrices=False)
+                chord_dir = vt[0]
+                normal = np.array([-chord_dir[1], chord_dir[0]])
+            except np.linalg.LinAlgError:
+                chord_dir = np.array([1.0, 0.0])
+                normal = np.array([0.0, 1.0])
+
+            # Orientar la cuerda de LE (x mínimo) a TE (x máximo).
+            if chord_dir[0] < 0:
+                chord_dir = -chord_dir
+                normal = -normal
+
+            s_proj = centered @ chord_dir
+            n_proj = centered @ normal
+
+            chord = s_proj.max() - s_proj.min()
+            if chord <= 0:
+                return None
+            x_norm = (s_proj - s_proj.min()) / chord
+
+            # El extradós está del lado positivo de la normal.
+            upper_mask = n_proj >= 0
+            lower_mask = ~upper_mask
+            if not upper_mask.any() or not lower_mask.any():
+                # Fallback para perfiles casi simétricos con n_proj ~ 0
+                upper_mask = y >= np.median(y)
+                lower_mask = ~upper_mask
+
+            dyn_head = 0.5 * (float(u_inf) ** 2)
             cp = p_kin / dyn_head if dyn_head > 0 else p_kin
-            
-            points = airfoil.points
-            x = points[:, 0]
-            y = points[:, 1]
-            
-            # Basic sorting into upper and lower surfaces
-            # Assume chord from x=0 to x=c
-            # Find the leading edge (roughly min x)
-            le_idx = np.argmin(x)
-            
-            # This is a bit simplified: split by y relative to chord line
-            # For a better approach, split at LE
-            # Upper surface: points from LE to TE with higher y
-            # Lower surface: points from LE to TE with lower y
-            
-            # Shift x to be x/c (normalized by max x)
-            c = np.max(x) - np.min(x)
-            x_norm = (x - np.min(x)) / c if c > 0 else x
-            
-            upper_mask = y >= 0
-            lower_mask = y < 0
-            
-            x_up = x_norm[upper_mask]
-            cp_up = cp[upper_mask]
-            x_low = x_norm[lower_mask]
-            cp_low = cp[lower_mask]
-            
-            # Sort by x
-            idx_up = np.argsort(x_up)
-            idx_low = np.argsort(x_low)
-            
-            return x_up[idx_up], cp_up[idx_up], x_low[idx_low], cp_low[idx_low]
-            
+
+            def _sorted(mask):
+                xs, cps = x_norm[mask], cp[mask]
+                order = np.argsort(xs)
+                return xs[order], cps[order]
+
+            x_up, cp_up = _sorted(upper_mask)
+            x_low, cp_low = _sorted(lower_mask)
+            return x_up, cp_up, x_low, cp_low
+
         except Exception as e:
             print(f"Error extracting Cp: {e}")
             return None

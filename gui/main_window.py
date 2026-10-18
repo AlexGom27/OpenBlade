@@ -21,18 +21,43 @@ from core.meshing import NacaMesher
 class MainWindow(QMainWindow):
     log_signal = Signal(str)
 
+    def _ensure_workdir(self) -> str:
+        """Garantiza un directorio de trabajo escribible.
+
+        La app escribe mallas, JSONs temporales y el caso de OpenFOAM con rutas
+        relativas. Al abrirla desde Finder, el CWD puede ser `/` (solo lectura)
+        y el arranque fallaba con PermissionError.
+        """
+        if os.access(os.getcwd(), os.W_OK):
+            return os.getcwd()
+        fallback = os.path.join(os.path.expanduser("~"), "OpenBlade")
+        os.makedirs(fallback, exist_ok=True)
+        os.chdir(fallback)
+        return fallback
+
+    def _sync_sys_path(self) -> None:
+        """Permite `import core.*` aunque el CWD no sea la raíz del repo."""
+        import sys
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if root not in sys.path:
+            sys.path.insert(0, root)
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("OpenBlade 2D CFD Workbench")
         self.resize(1400, 900)
         
-        self.case_dir = os.path.join(os.getcwd(), "openfoam_case")
-        if not os.path.exists(self.case_dir):
-            os.makedirs(self.case_dir)
+        self._sync_sys_path()
+        workdir = self._ensure_workdir()
+        self.case_dir = os.path.join(workdir, "openfoam_case")
+        os.makedirs(self.case_dir, exist_ok=True)
             
         self._has_unsaved_work = False
         self.mesh_worker = None
         self.sweep_worker = None
+        self.sim_worker = None
+        self._current_aoa = 0.0
+        self._sim_running = False
         
         self.mesh_lock = QMutex()
         
@@ -47,7 +72,8 @@ class MainWindow(QMainWindow):
         self.solver_runner = SolverRunner(case_dir=self.case_dir)
         
         self.init_ui()
-        self.cleanup() # Limpieza al iniciar
+        # No se limpia al iniciar: borraría la malla y los resultados del usuario.
+        # La limpieza de temporales ocurre al cerrar.
         self.log_signal.connect(self.log)
         
         # Temporizador para redibujado suave de gráficas (Evita saturación en Mac)
@@ -96,6 +122,7 @@ class MainWindow(QMainWindow):
         
         self.tabs = QTabWidget()
         self.results_panel = ResultsPanel(self.case_dir)
+        self.results_panel.log_signal.connect(self.log)
         self.res_plot = ResidualPlot()
         self.aero_plot = AeroPlot()
         self.cp_plot = PressurePlot()
@@ -121,6 +148,7 @@ class MainWindow(QMainWindow):
         self.input_panel.btn_run.clicked.connect(self.on_run_sim)
         self.input_panel.btn_results.clicked.connect(self.on_results)
         self.input_panel.btn_stop_sweep.clicked.connect(self.on_stop_sweep)
+        self.input_panel.btn_stop_sim.clicked.connect(self.on_stop_sim)
 
     def log(self, text: str) -> None:
         self.log_console.append(text)
@@ -155,7 +183,10 @@ class MainWindow(QMainWindow):
             cmd = [sys.executable, "-m", "core.geom_script", str(naca_val), str(p['chord']), str(p['aoa']), "temp_geom.vtk"]
             if is_custom and file_path:
                 cmd.append(str(file_path))
-            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            from .workers import subprocess_env
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    encoding='utf-8', errors='replace',
+                                    env=subprocess_env())
             
             if result.returncode == 0:
                 self.log("Geometría generada. Proyectando...")
@@ -176,19 +207,30 @@ class MainWindow(QMainWindow):
             self.log(f"Error de visualización: {e}")
 
     def on_build_mesh(self) -> None:
+        if self.mesh_worker is not None and self.mesh_worker.isRunning():
+            self.log("⚠️ Ya hay un mallado en curso.")
+            return
+
         p = self._safe_get_params()
         if not p: return
         
-        msh_file = f"perfil_{p['naca']}.msh"
+        # Para perfiles custom el nombre no puede salir de 'naca' ("custom")
+        msh_file = f"perfil_{p['naca'] or 'custom'}.msh"
         self.log(f"Iniciando mallado de alta fidelidad...")
         
+        self.input_panel.btn_mesh.setEnabled(False)
         self.mesh_worker = MeshWorker(p, msh_file, self.case_dir)
         self.mesh_worker.finished.connect(self.on_mesh_done)
-        self.mesh_worker.error.connect(self.log)
+        self.mesh_worker.error.connect(self._on_mesh_error)
         self.mesh_worker.log_msg.connect(self.log)
         self.mesh_worker.start()
 
+    def _on_mesh_error(self, message: str) -> None:
+        self.input_panel.btn_mesh.setEnabled(True)
+        self.log(f"❌ Error de mallado: {message}")
+
     def on_mesh_done(self, msh_file: str, stl_file: str) -> None:
+        self.input_panel.btn_mesh.setEnabled(True)
         if os.path.exists(msh_file):
             self._has_unsaved_work = True
             self.log(f"✅ Malla estructurada generada: {msh_file}")
@@ -208,6 +250,10 @@ class MainWindow(QMainWindow):
                 self.log(f"Aviso visualización: {e}")
 
     def on_run_sim(self) -> None:
+        if self._sim_running:
+            self.log("⚠️ Ya hay una simulación en curso. Deténla antes de lanzar otra.")
+            return
+
         p = self._safe_get_params()
         if not p: return
         
@@ -227,6 +273,11 @@ class MainWindow(QMainWindow):
             self.res_plot.reset()
 
         from .workers import SimWorker
+        self._current_aoa = float(p.get("aoa", 0.0))
+        self._sim_running = True
+        self.input_panel.btn_run.setEnabled(False)
+        self.input_panel.btn_stop_sim.setVisible(True)
+        self.input_panel.btn_stop_sim.setEnabled(True)
         self.sim_worker = SimWorker(self.solver_runner, p, msh_file)
         self.sim_worker.log_msg.connect(self.log)
         self.sim_worker.residual_data.connect(self.on_residual_data)
@@ -238,15 +289,19 @@ class MainWindow(QMainWindow):
     def _run_sweep(self, p: Dict[str, Any]) -> None:
         """Ejecuta un barrido paramétrico de ángulos de ataque (polar)."""
         self._has_unsaved_work = True
+        self._sim_running = True
+        self.input_panel.btn_run.setEnabled(False)
+        self.input_panel.btn_stop_sim.setVisible(False)
         self.log("📊 Iniciando barrido de ángulos...")
         self.input_panel.btn_stop_sweep.setVisible(True)
+        self.input_panel.btn_stop_sweep.setEnabled(True)
         if hasattr(self, 'res_plot'):
             self.res_plot.reset()
         
         from .workers import SweepWorker
         self.sweep_worker = SweepWorker(p, self.case_dir)
         self.sweep_worker.log_msg.connect(self.log)
-        self.sweep_worker.error.connect(self.log)
+        self.sweep_worker.error.connect(self._on_sweep_error)
         self.sweep_worker.progress.connect(self._on_sweep_progress)
         self.sweep_worker.finished.connect(self._on_sweep_done)
         self.sweep_worker.mesh_generated.connect(self._on_sweep_mesh)
@@ -262,6 +317,15 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def on_stop_sim(self) -> None:
+        """Detiene una simulación de punto único en curso."""
+        if self.sim_worker is None:
+            return
+        self.log("⏳ Deteniendo simulación...")
+        self.sim_worker.stop()
+        self.solver_runner.stop()
+        self.input_panel.btn_stop_sim.setEnabled(False)
+
     def on_stop_sweep(self) -> None:
         if hasattr(self, 'sweep_worker') and self.sweep_worker:
             self.sweep_worker.request_stop()
@@ -271,10 +335,22 @@ class MainWindow(QMainWindow):
     def _on_sweep_progress(self, current: int, total: int) -> None:
         self.log(f"  Progreso: {current}/{total}")
     
-    def _on_sweep_done(self, aoa_list, cl_list, cd_list, cm_list) -> None:
-        self.log(f"✅ Barrido completado: {len(aoa_list)} puntos")
+    def _on_sweep_error(self, message: str) -> None:
+        """Un barrido fallido también debe liberar la UI."""
+        self.log(f"❌ Error en barrido: {message}")
+        self._reset_run_state()
+
+    def _reset_run_state(self) -> None:
+        self._sim_running = False
+        self.input_panel.btn_run.setEnabled(True)
         self.input_panel.btn_stop_sweep.setVisible(False)
         self.input_panel.btn_stop_sweep.setEnabled(True)
+        self.input_panel.btn_stop_sim.setVisible(False)
+        self.input_panel.btn_stop_sim.setEnabled(True)
+
+    def _on_sweep_done(self, aoa_list, cl_list, cd_list, cm_list) -> None:
+        self.log(f"✅ Barrido completado: {len(aoa_list)} puntos")
+        self._reset_run_state()
         if hasattr(self, 'aero_plot') and aoa_list:
             self.aero_plot.update_plots(aoa_list, cl_list, cd_list, cm_list)
             self.tabs.setCurrentWidget(self.aero_plot)
@@ -282,9 +358,14 @@ class MainWindow(QMainWindow):
 
     def on_sim_done(self, code: int) -> None:
         self.log(f"🏁 Simulación finalizada (Código {code})")
+        self._reset_run_state()
         self.results_panel.setEnabled(True)
+        if code != 0:
+            self.log("❌ El solver terminó con error. Revisa el log antes de interpretar resultados.")
+            return
         # Sugerir cargar resultados
         self.log("💡 Puedes pulsar 'Ver Resultados' para visualizar el flujo.")
+        self._refresh_cp_plot()
 
 
 
@@ -313,29 +394,47 @@ class MainWindow(QMainWindow):
         try:
             v_float = float(val)
             name_lower = name.lower()
-            if "cl" in name_lower:
+            # Comparar nombres normalizados: "cl" es subcadena de "clock"/"incl",
+            # y el orden importa para no asignar Cm a Cl.
+            if name_lower.startswith("cl"):
                 self._last_cl = v_float
-            elif "cd" in name_lower:
+            elif name_lower.startswith("cd"):
                 self._last_cd = v_float
-            elif "cm" in name_lower:
+            elif name_lower.startswith("cm"):
                 self._last_cm = v_float
             
-            # Actualizar gráfica Cl/Cd en tiempo real (punto único)
+            # Actualizar gráfica Cl/Cd en tiempo real (punto único).
+            # Se usa el AoA capturado al lanzar la simulación: leer el panel aquí
+            # podría abrir un QMessageBox en cada iteración del solver.
             if hasattr(self, 'aero_plot'):
-                p = self._safe_get_params()
-                aoa = p.get("aoa", 0.0) if p else 0.0
                 self.aero_plot.update_plots(
-                    [aoa], [self._last_cl], [self._last_cd], [self._last_cm]
+                    [self._current_aoa], [self._last_cl], [self._last_cd], [self._last_cm]
                 )
         except (ValueError, TypeError):
             pass
+
+    def _refresh_cp_plot(self) -> None:
+        """Calcula y dibuja la distribución de Cp sobre el perfil."""
+        try:
+            from core.postprocessing import PostProcessor
+            p = self.input_panel.get_params()
+            pp = PostProcessor(self.case_dir)
+            data = pp.get_cp_on_surface(u_inf=float(p.get("u_inlet", 15.0)))
+            if not data:
+                self.log("ℹ️ Cp no disponible: aún no hay resultados o falta el patch 'airfoil'.")
+                return
+            self.cp_plot.update_cp(*data)
+            self.log("📉 Distribución de Cp actualizada.")
+        except Exception as e:
+            self.log(f"⚠️ No se pudo calcular Cp: {e}")
 
     def on_results(self) -> None:
         p = self._safe_get_params()
         is_transient = False
         if p and "Transitorio" in p.get("regime", ""):
             is_transient = True
-        self.results_panel.load_results(is_transient=is_transient)
+        if self.results_panel.load_results(is_transient=is_transient):
+            self._refresh_cp_plot()
 
     def generate_report(self) -> None:
         p = self._safe_get_params()
@@ -349,13 +448,13 @@ class MainWindow(QMainWindow):
         # Save plots
         try:
             if hasattr(self, 'res_plot'):
-                self.res_plot.figure.savefig("temp_res.png", dpi=150, bbox_inches='tight')
+                self.res_plot.fig.savefig("temp_res.png", dpi=150, bbox_inches='tight')
                 images["Gráfica de Residuos"] = "temp_res.png"
             if hasattr(self, 'aero_plot'):
-                self.aero_plot.figure.savefig("temp_aero.png", dpi=150, bbox_inches='tight')
+                self.aero_plot.fig.savefig("temp_aero.png", dpi=150, bbox_inches='tight')
                 images["Curvas Polares"] = "temp_aero.png"
             if hasattr(self, 'cp_plot'):
-                self.cp_plot.figure.savefig("temp_cp.png", dpi=150, bbox_inches='tight')
+                self.cp_plot.fig.savefig("temp_cp.png", dpi=150, bbox_inches='tight')
                 images["Distribución de Cp"] = "temp_cp.png"
             if self.results_panel.plotter:
                 self.results_panel.plotter.screenshot("temp_mesh.png")
@@ -434,7 +533,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"No se pudo abrir el proyecto:\n{e}")
 
     def cleanup(self) -> None:
-        """Limpieza profunda de archivos temporales y residuales."""
+        """Limpieza de archivos temporales y resultados residuales.
+
+        Importante: NO borra `perfil_*.msh|vtk|stl`. El usuario puede tener una
+        malla generada que tarda minutos; al abrir la app se destruía sin aviso.
+        """
         import shutil
         temp_files = [
             "temp_params_mesh.json", "temp_params_solve.json", "temp_params_sweep.json",
@@ -445,10 +548,10 @@ class MainWindow(QMainWindow):
             if os.path.exists(f):
                 try: os.remove(f)
                 except: pass
-        
-        # Limpiar archivos de malla generados en la raíz
+
+        # Solo se limpian mallas temporales del barrido (nombre reservado).
         for f in os.listdir("."):
-            if f.startswith("perfil_") and (f.endswith(".msh") or f.endswith(".vtk") or f.endswith(".stl")):
+            if f.startswith("perfil_") and (f.endswith("_sweep.msh") or f.endswith("_sweep.vtk")):
                 try: os.remove(f)
                 except: pass
 
@@ -478,8 +581,25 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        self.log("🛑 Cerrando aplicación y limpiando workspace...")
+        self.log("🛑 Cerrando aplicación...")
+        # Detener todo lo que pueda quedar vivo: QProcess del solver, hilos y Docker.
+        if self.sim_worker is not None:
+            try:
+                self.sim_worker.stop()
+            except Exception:
+                pass
         if self.solver_runner:
             self.solver_runner.stop()
+        for worker in (self.mesh_worker, self.sweep_worker):
+            if worker is not None:
+                try:
+                    # Cortar primero el subproceso: wait() solo no lo mata.
+                    if hasattr(worker, "cancel"):
+                        worker.cancel()
+                    else:
+                        worker.request_stop()
+                    worker.wait(5000)
+                except Exception:
+                    pass
         self.cleanup()
         event.accept()

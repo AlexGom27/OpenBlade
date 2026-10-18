@@ -337,5 +337,27 @@ class SolverRunner:
         thread.start()
 
     def stop(self) -> None:
+        """Detiene el solver y el contenedor Docker asociado."""
         if self.process and self.process.poll() is None:
-            self.process.terminate()
+            try:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+            except Exception:
+                pass
+        # El cliente docker puede morir y el contenedor seguir corriendo:
+        # limpiar por imagen para no dejar CPU ocupada en segundo plano.
+        if not self.native:
+            try:
+                out = subprocess.check_output(
+                    ["docker", "ps", "-q", "--filter", f"ancestor={self.docker_image}"],
+                    text=True, timeout=10,
+                )
+                ids = out.split()
+                if ids:
+                    subprocess.run(["docker", "kill"] + ids,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+            except Exception:
+                pass

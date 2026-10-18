@@ -64,7 +64,11 @@ class ResultsPanel(QWidget):
         view_layout = QVBoxLayout(self.view_container)
         view_layout.setContentsMargins(0, 0, 0, 0)
         
-        if QtInteractor is not None:
+        # Sin servidor gráfico real, VTK crea un vtkCocoaRenderWindow y provoca
+        # SIGSEGV (no es una excepción capturable). En CI/headless se desactiva.
+        headless = os.environ.get("QT_QPA_PLATFORM", "").lower() in ("offscreen", "minimal")
+
+        if QtInteractor is not None and not headless:
             try:
                 self.plotter = QtInteractor(self.view_container)
                 self.plotter.set_background('#121212')
@@ -77,7 +81,8 @@ class ResultsPanel(QWidget):
                 view_layout.addWidget(QLabel(f"Error al iniciar motor 3D: {e}"))
         else:
             self.plotter = None
-            view_layout.addWidget(QLabel("PyVista no disponible"))
+            reason = "modo headless" if QtInteractor is not None else "PyVista no disponible"
+            view_layout.addWidget(QLabel(f"Vista 3D desactivada ({reason})"))
             
         main_layout.addWidget(self.view_container, stretch=1)
         

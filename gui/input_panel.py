@@ -103,6 +103,8 @@ class InputPanel(QWidget):
         self.aoa_step = QDoubleSpinBox()
         self.aoa_step.setRange(0.1, 45)
         self.aoa_step.setValue(2.0)
+        self.aoa_step.setDecimals(1)
+        self.aoa_step.setSingleStep(0.5)
         
         self.sweep_widget = QWidget()
         sweep_layout = QHBoxLayout(self.sweep_widget)
@@ -129,6 +131,11 @@ class InputPanel(QWidget):
         self.btn_stop_sweep.setVisible(False)
         self.btn_stop_sweep.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; padding: 6px;")
         geom_layout.addRow(self.btn_stop_sweep)
+
+        self.btn_stop_sim = QPushButton("🛑 Detener Simulación")
+        self.btn_stop_sim.setVisible(False)
+        self.btn_stop_sim.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; padding: 6px;")
+        geom_layout.addRow(self.btn_stop_sim)
         
         geom_box.setContentLayout(geom_layout)
         
@@ -176,6 +183,7 @@ class InputPanel(QWidget):
         self.mesh_growth_rate.setRange(1.01, 2.0)
         self.mesh_growth_rate.setValue(1.15)
         self.mesh_growth_rate.setSingleStep(0.05)
+        self.mesh_growth_rate.setDecimals(2)
         
         self.mesh_curvature = QSpinBox()
         self.mesh_curvature.setRange(0, 500)

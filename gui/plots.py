@@ -140,6 +140,7 @@ class AeroPlot(QWidget):
         self.cls = []
         self.cds = []
         self.cms = []
+        self._pending_redraw = False
         
         # Botón de exportación
         btn_layout = QHBoxLayout()
@@ -164,15 +165,21 @@ class AeroPlot(QWidget):
         layout.addLayout(btn_layout)
         
     def update_plots(self, aoas: List[float], cls: List[float], cds: List[float], cms: Optional[List[float]] = None) -> None:
-        self.aoas = aoas
-        self.cls = cls
-        self.cds = cds
-        self.cms = cms if cms is not None else [0.0] * len(aoas)
+        self.aoas = list(aoas)
+        self.cls = list(cls)
+        self.cds = list(cds)
+        self.cms = list(cms) if cms is not None else [0.0] * len(aoas)
+        # El dibujado real lo hace refresh_plots() cada 100 ms; así una simulación
+        # que emite Cl/Cd en cada iteración no bloquea el hilo de la GUI.
+        self._pending_redraw = True
 
+    def redraw(self) -> None:
+        if not self._pending_redraw:
+            return
         self.line_cl.set_data(self.aoas, self.cls)
         self.ax_cl.relim()
         self.ax_cl.autoscale_view()
-        
+
         self.line_cd.set_data(self.aoas, self.cds)
         self.ax_cd.relim()
         self.ax_cd.autoscale_view()
@@ -180,8 +187,9 @@ class AeroPlot(QWidget):
         self.line_cm.set_data(self.aoas, self.cms)
         self.ax_cm.relim()
         self.ax_cm.autoscale_view()
-        
-        self.canvas.draw()
+
+        self.canvas.draw_idle()
+        self._pending_redraw = False
 
     def export_to_csv(self) -> None:
         if not self.aoas:
@@ -219,17 +227,17 @@ class PressurePlot(QWidget):
             spine.set_color('#555555')
         self.ax.grid(True, ls="--", alpha=0.3, color='#888888')
         
-        self.ax.set_title("Distribución de Presión (-Cp)", color='white', fontsize=12)
+        self.ax.set_title("Distribución de Presión (Cp)", color='white', fontsize=12)
         self.ax.set_xlabel("x/c", color='white')
-        self.ax.set_ylabel("-Cp", color='white')
-        # Ya no invertimos el eje, graficamos -Cp directamente
+        self.ax.set_ylabel("-Cp [-]", color='white')
+        # Convención aerodinámica: se grafica -Cp (succión hacia arriba).
         
-        self.line_upper, = self.ax.plot([], [], 'o-', color='#4CAF50', label='Extradós (-Cp)', markersize=3)
-        self.line_lower, = self.ax.plot([], [], 'o-', color='#2196F3', label='Intradós (-Cp)', markersize=3)
+        self.line_upper, = self.ax.plot([], [], 'o-', color='#4CAF50', label='Extradós', markersize=3)
+        self.line_lower, = self.ax.plot([], [], 'o-', color='#2196F3', label='Intradós', markersize=3)
         self.ax.legend(facecolor='#1e1e1e', edgecolor='#333333', labelcolor='white', fontsize=10)
         
     def update_cp(self, x_upper: np.ndarray, cp_upper: np.ndarray, x_lower: np.ndarray, cp_lower: np.ndarray) -> None:
-        # Graficamos -Cp (convención aerodinámica)
+        # Graficamos -Cp (convención aerodinámica): la succión queda arriba.
         self.line_upper.set_data(x_upper, -cp_upper)
         self.line_lower.set_data(x_lower, -cp_lower)
         self.ax.relim()
