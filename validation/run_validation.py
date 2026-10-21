@@ -91,8 +91,14 @@ PRESETS: Dict[str, Dict[str, Any]] = {
 # Dominio muy grande para descartar bloqueo del túnel
 # Dominio grande pero con tamaño de celda exterior acotado: con 0.8c el
 # aspect ratio llegaba a 4e4 y el solver divergía.
+# NOTA: con 150c el generador C-Grid produce ~15k celdas casi degeneradas
+# (determinante minimo 6e-9) al proyectar la capa limite sobre la estela lejana.
+# Con `upwind` (1.er orden, muy difusivo) el caso sobrevive; con `linearUpwind`
+# diverge en ~40 iteraciones. El limite no es el aspect ratio sino el determinante.
+# Este preset sirve para el estudio de sensibilidad con upwind, no con 2.o orden.
 PRESETS["huge"] = dict(PRESETS["fine"], farfield=150.0, wake_length=100.0,
-                       mesh_size_max=0.12, mesh_size_min=0.006)
+                       mesh_size_max=0.12, mesh_size_min=0.006,
+                       bl_dist_min=2e-4, mesh_num_layers=22)
 PRESETS["medium"] = dict(PRESETS["fine"], mesh_size_min=0.008,
                          mesh_size_max=0.4, mesh_nb_points=250, farfield=30.0)
 

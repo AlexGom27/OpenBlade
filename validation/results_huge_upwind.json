@@ -1,0 +1,24 @@
+{
+  "tag": "huge_upwind",
+  "note": "Corrida de 150c con esquema de primer orden. Es la cota superior del error atribuible al dominio que cita el informe. La equivalente con linearUpwind diverge por celdas degeneradas del generador C-Grid.",
+  "preset": {
+    "farfield": 150.0,
+    "wake_length": 100.0,
+    "mesh_size_max": 0.8,
+    "mesh_size_min": 0.006,
+    "bl_dist_min": 2e-05,
+    "mesh_num_layers": 30
+  },
+  "results": [
+    {
+      "aoa": 4.0,
+      "ok": true,
+      "scheme": "upwind",
+      "turbulence": "k-Omega SST (RAS)",
+      "Cl": 0.4405,
+      "Cd": 0.01759,
+      "Cm": -0.01072,
+      "note": "aspect ratio max 139166, celdas no degeneradas; converge"
+    }
+  ]
+}

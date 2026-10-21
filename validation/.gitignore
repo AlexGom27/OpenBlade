@@ -4,3 +4,7 @@ params_*.json
 report_probe*.txt
 results_probe*.json
 results_diag_lu.json
+
+# Corridas divergidas (se conserva solo la de primer orden como cota)
+results_lu_huge.json
+report_lu_huge.txt
