@@ -479,15 +479,63 @@ Y tres más de infraestructura: `pcorr`/`cellDisplacement` ausentes en fvSolutio
 `rho` obligatorio en el módulo FSI, y preCICE anunciando `127.0.0.1` cuando los
 participantes corren en contenedores separados.
 
-### Limitación conocida
+### Corrección importante: la primera versión del sólido estaba mal
 
-El acoplamiento **funciona** (intercambia datos en ambas direcciones) pero con los
-parámetros de prueba no converge dentro de las 5 iteraciones: la medida relativa
-queda en ~0.97 con límite 0.05. Causa: el sólido de prueba es muy flexible
-(E=2 MPa) frente a la carga del fluido, y el número de iteraciones es bajo.
+La primera implementación modelaba una **viga rectangular empotrada** colocada
+detrás del perfil. Sus interfaces no coincidían:
 
-Para converger hace falta: más iteraciones (50, el valor por defecto), Aitken con
-más historia, o un sólido más rígido. No es un defecto del acoplamiento.
+| | Geometría |
+|---|---|
+| Fluido (`airfoil`) | perfil cerrado, x ∈ [0.001, 0.961], y ∈ [−0.070, 0.061], 111 nodos |
+| Sólido (viga) | línea vertical en x = 1.000, y ∈ [0, 0.1], 5 nodos |
+
+preCICE mapeaba por vecino más cercano entre superficies que no se tocaban. El
+"acoplamiento" intercambiaba números, pero no era FSI: la medida de convergencia
+quedaba en 0.998 y las normalizaciones saltaban de 0.1 a 161 unidades. Eso no
+era un sólido deformándose, era un mapeo incoherente bombeando energía.
+
+**Se reescribió el sólido como una cáscara del perfil**: la línea de cuerda del
+NACA 0012 extruida hacia dentro con un espesor dado. Su frontera exterior es
+exactamente el contorno del perfil, es decir, el mismo `patch airfoil` que usa
+el fluido. Ahora la interfaz coincide nodo a nodo.
+
+### Segundo bug: la tensión no es una fuerza
+
+El adaptador envía `Stress` con dimensiones `[1 -1 -2]`, es decir **fuerza por
+unidad de área**, no newtons por nodo. Integrarla directamente producía
+desplazamientos de metros. Hay que multiplicar por el área tributaria de cada
+nodo (longitud del segmento × espesor).
+
+Detectado porque la normalización de la convergencia daba ~6 m en un perfil de
+1 m.
+
+### Tercer bug: elementos con Jacobiano invertido
+
+El contorno del perfil se generaba en sentido **horario** (área firmada
+negativa) y el offset interior invertía además la orientación de las capas
+internas. Resultado: 49.8% de los puntos de Gauss con `detJ < 0` y 913
+autovalores negativos en la matriz de rigidez, que abortaba con
+`Singular matrix`.
+
+Se corrige en dos pasos: invertir el contorno si el área firmada es negativa, y
+comprobar el signo del área **por elemento** invirtiendo la conectividad cuando
+haga falta. Tras el arreglo: 5 puntos invertidos de 2856 (borde de salida) y
+mínimo autovalor **positivo** (7.7).
+
+### Estado final: convergencia verificada
+
+Con la cáscara correcta y la integración por área:
+
+```
+relative two-norm diff of data "Displacement"
+  7.33e-01  →  1.32e-01  →  2.06e-02   ✓  (límite 5e-2)
+All converged
+normalization = 1.48e-04   (148 µm en un perfil de 1 m)
+time_windows = 7, max_displacement = 2.85e-05
+```
+
+**El acoplamiento FSI converge.** Los desplazamientos son del orden de micras,
+coherentes con un perfil de aluminio (E = 70 GPa) bajo carga aerodinámica.
 
 ### Cómo ejecutar
 

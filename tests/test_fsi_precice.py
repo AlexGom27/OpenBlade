@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 
+import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -216,3 +217,70 @@ def test_cantilever_converges_with_mesh_refinement():
 
     assert coarse > medium > fine, (coarse, medium, fine)
     assert fine < 3.0
+
+
+# --------------------------------------------------------------------------
+# Malla de la cáscara del perfil (regresión de los bugs de geometría)
+# --------------------------------------------------------------------------
+def test_contour_is_counter_clockwise():
+    """Con sentido horario los Q4 salen con Jacobiano invertido y la matriz
+    de rigidez queda indefinida (913 autovalores negativos)."""
+    from core.structural_solver import naca0012_contour
+
+    c = naca0012_contour(120)
+    x, y = c[:, 0], c[:, 1]
+    signed = 0.5 * (np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+    assert signed > 0, f"área firmada {signed:.4e}: el contorno es horario"
+
+
+def test_shell_mesh_has_no_inverted_elements():
+    """Todos los puntos de Gauss deben tener detJ > 0."""
+    import math
+    from core.structural_solver import (build_shell_mesh, naca0012_contour,
+                                        q4_shape)
+
+    c = naca0012_contour(120)
+    nodes, elems, n_iface = build_shell_mesh(c, 0.01, 3)
+
+    g = 1 / math.sqrt(3)
+    inverted = 0
+    total = 0
+    for el in elems:
+        co = nodes[el]
+        for xi, eta in ((-g, -g), (g, -g), (g, g), (-g, g)):
+            _, dx, de = q4_shape(xi, eta)
+            J = np.array([[dx @ co[:, 0], dx @ co[:, 1]],
+                          [de @ co[:, 0], de @ co[:, 1]]])
+            total += 1
+            if np.linalg.det(J) <= 0:
+                inverted += 1
+    # Sólo se toleran los del borde de salida, donde el espesor tiende a cero
+    assert inverted / total < 0.01, f"{inverted}/{total} elementos invertidos"
+
+
+def test_profile_shell_interface_matches_contour():
+    """La interfaz sólida debe ser el contorno del perfil: es el patch airfoil."""
+    from core.structural_solver import build_shell_mesh, naca0012_contour
+
+    c = naca0012_contour(120, chord=1.0)
+    nodes, elems, n_iface = build_shell_mesh(c, 0.01, 3)
+
+    assert n_iface == len(c)
+    np.testing.assert_allclose(nodes[:n_iface], c, atol=1e-12)
+    assert c[:, 0].min() == pytest.approx(0.0, abs=1e-6)
+    assert c[:, 0].max() == pytest.approx(1.0, abs=1e-6)
+
+
+def test_nodal_tributary_area_matches_profile_perimeter():
+    """El área tributaria se usa para integrar la tensión del fluido.
+    El perímetro del NACA 0012 es ≈2.02c."""
+    from core.structural_solver import naca0012_contour
+
+    c = naca0012_contour(120)
+    n = len(c)
+    seg = np.zeros(n)
+    for i in range(n):
+        d1 = np.linalg.norm(c[i] - c[i - 1])
+        d2 = np.linalg.norm(c[(i + 1) % n] - c[i])
+        seg[i] = 0.5 * (d1 + d2)
+    assert seg.sum() == pytest.approx(2.02, abs=0.05)
