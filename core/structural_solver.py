@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 
 import numpy as np
@@ -187,6 +188,25 @@ def q4_stiffness(coords: np.ndarray, D: np.ndarray, thickness: float) -> np.ndar
     return Ke
 
 
+def plane_strain_D(E: float, nu: float) -> np.ndarray:
+    """Matriz constitutiva de DEFORMACIÓN PLANA.
+
+    El benchmark de Turek & Hron define el sólido mediante μ_s y λ_s
+    (no E), lo que corresponde a deformación plana:
+
+        λ = 2μν/(1-2ν),   D = [[λ+2μ, λ, 0], [λ, λ+2μ, 0], [0, 0, μ]]
+
+    Con μ = 5e5 y ν = 0.4: λ = 2e6, λ+2μ = 3e6.
+    En tensión plana el mismo material daría 1.667e6, es decir ~2× más
+    flexible; para un flag delgado eso se traduce en el doble de flecha.
+    """
+    lam = E * nu / ((1 + nu) * (1 - 2 * nu))
+    mu = E / (2 * (1 + nu))
+    return np.array([[lam + 2 * mu, lam, 0.0],
+                     [lam, lam + 2 * mu, 0.0],
+                     [0.0, 0.0, mu]])
+
+
 def plane_stress_D(E: float, nu: float) -> np.ndarray:
     c = E / (1.0 - nu * nu)
     return c * np.array([[1.0, nu, 0.0],
@@ -266,13 +286,19 @@ class StructuralSolver:
                  read_data: str = "Stress", write_data: str = "Displacement",
                  E: float = 70e9, nu: float = 0.33, thickness: float = 0.01,
                  chord: float = 1.0, n_contour: int = 120,
-                 n_layers: int = 3) -> None:
+                 n_layers: int = 3, geometry: str = "shell",
+                 case_dir=None) -> None:
         import precice
 
+        self._dbg_count = 0
         self.p = precice.Participant(participant, config_file, 0, 1)
         self.mesh_name = mesh_name
         self.read_data = read_data
         self.write_data = write_data
+
+        if geometry == "flag":
+            self._init_flag(case_dir, E, nu, thickness, mesh_name)
+            return
 
         contour = naca0012_contour(n=n_contour, chord=chord)
         self.nodes, self.elems, self.n_interface = build_shell_mesh(
@@ -320,6 +346,50 @@ class StructuralSolver:
         coords = self.nodes[self.interface].astype(float)
         self.vertex_ids = self.p.set_mesh_vertices(mesh_name, coords)
 
+    def _init_flag(self, case_dir, E, nu, thickness, mesh_name) -> None:
+        """Modo benchmark: flag rectangular (Turek & Hron FSI 1).
+
+        El fluido rodea el flag por arriba, abajo y por el extremo libre.
+        Sólo el borde izquierdo está unido al cilindro: ahí va el empotramiento.
+        La interfaz es el resto del contorno.
+        """
+        self.nodes = np.load(os.path.join(case_dir, "solid_nodes.npy"))
+        self.elems = np.load(os.path.join(case_dir, "solid_elems.npy"))
+        # El benchmark define μ y λ: deformación plana.
+        self.K = assemble(self.nodes, self.elems, plane_strain_D(E, nu), thickness)
+
+        xmin = self.nodes[:, 0].min()
+        xmax = self.nodes[:, 0].max()
+        ymin = self.nodes[:, 1].min()
+        ymax = self.nodes[:, 1].max()
+        eps = 1e-9
+
+        on_boundary = (
+            (np.abs(self.nodes[:, 1] - ymin) < eps) |
+            (np.abs(self.nodes[:, 1] - ymax) < eps) |
+            (np.abs(self.nodes[:, 0] - xmax) < eps)
+        )
+        self.interface = np.where(on_boundary)[0]
+        self.n_interface = len(self.interface)
+
+        pts = self.nodes[self.interface]
+        seg = np.zeros(self.n_interface)
+        for i in range(self.n_interface):
+            d = np.linalg.norm(pts - pts[i], axis=1)
+            d[i] = np.inf
+            idx = np.argsort(d)[:2]
+            seg[i] = 0.5 * (d[idx[0]] + d[idx[1]])
+        self._node_area = [(s_ * thickness, s_ * thickness) for s_ in seg]
+
+        fixed = []
+        for i, q in enumerate(self.nodes):
+            if abs(q[0] - xmin) < eps:
+                fixed += [2 * i, 2 * i + 1]
+        self.fixed = np.array(sorted(set(fixed)), dtype=int)
+
+        coords = self.nodes[self.interface].astype(float)
+        self.vertex_ids = self.p.set_mesh_vertices(mesh_name, coords)
+
     def run(self) -> dict:
         p = self.p
         if p.requires_initial_data():
@@ -336,17 +406,31 @@ class StructuralSolver:
             stress = p.read_data(self.mesh_name, self.read_data,
                                  self.vertex_ids, dt)
 
-            # IMPORTANTE: el adaptador OpenFOAM envía "Stress" como TENSIÓN
-            # (fuerza por unidad de área, dimensiones [1 -1 -2]), no como fuerza
-            # puntual en newtons. Integrarla como fuerza directa da
-            # desplazamientos gigantes (se observaron normalizaciones de ~6 m en
-            # un perfil de 1 m). Hay que multiplicar por el área tributaria de
-            # cada nodo de la interfaz.
+            # El adaptador ya entrega FUERZA en newtons, no tensión.
+            #
+            # En FSI/ForceBase.C:
+            #     forceField = surface * p * rho + (surface & devRhoReff)
+            # es decir, vector de área (m²) multiplicado por presión y densidad.
+            # El resultado son newtons por cara del parche. Multiplicar otra vez
+            # por el área tributaria —como hacía antes— introducía un factor
+            # espurio y daba desplazamientos sin sentido.
+            #
+            # Aun así, el dato viene por cara: hay que repartirlo entre los
+            # nodos si la malla del sólido no coincide cara a cara con la del
+            # fluido. Con mapping nearest-neighbor y mallas coincidentes se usa
+            # directamente.
             F = np.zeros(2 * len(self.nodes))
             for k, nid in enumerate(self.interface):
-                ax, ay = self._node_area[k]
-                F[2 * nid] += float(stress[k][0]) * ax
-                F[2 * nid + 1] += float(stress[k][1]) * ay
+                F[2 * nid] += float(stress[k][0])
+                F[2 * nid + 1] += float(stress[k][1])
+
+            if self._dbg_count < 3:
+                smax = float(np.abs(stress).max())
+                ftot = float(np.linalg.norm(
+                    [F[0::2].sum(), F[1::2].sum()]))
+                print(f"[solid] t={dt:.4f}: |data|max={smax:.4e}  "
+                      f"|F_total|={ftot:.4e} N", file=sys.stderr)
+                self._dbg_count += 1
 
             u = solve_dirichlet(self.K, F, self.fixed)
 
@@ -378,6 +462,8 @@ def main(argv=None) -> int:
     ap.add_argument("--chord", type=float, default=1.0)
     ap.add_argument("--n-contour", type=int, default=120)
     ap.add_argument("--n-layers", type=int, default=3)
+    ap.add_argument("--geometry", default="shell", choices=["shell", "flag"])
+    ap.add_argument("--case-dir", default=None)
     ap.add_argument("--dry-run", action="store_true")
     # compatibilidad con la CLI anterior
     ap.add_argument("--nx", type=int, default=40)
@@ -402,6 +488,7 @@ def main(argv=None) -> int:
         write_data=args.write_data, E=args.E, nu=args.nu,
         thickness=args.thickness, chord=args.chord,
         n_contour=args.n_contour, n_layers=args.n_layers,
+        geometry=args.geometry, case_dir=args.case_dir,
     )
     print(json.dumps(s.run(), indent=2))
     return 0
