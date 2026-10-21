@@ -116,6 +116,7 @@ def test_fsi_case_writes_files(tmp_path):
     case = tmp_path / "case"
     (case / "system").mkdir(parents=True)
     (case / "system" / "controlDict").write_text("FoamFile {}\n\napplication pimpleFoam;\n")
+    (case / "system" / "fvSolution").write_text("solvers\n{\n    p { solver GAMG; }\n}\n")
 
     paths = FsiCase(str(case), FsiConfig()).prepare()
 
@@ -123,7 +124,9 @@ def test_fsi_case_writes_files(tmp_path):
     control = (case / "system" / "controlDict").read_text()
     assert "preciceAdapterFunctionObject" in control
     assert "libpreciceAdapterFunctionObject.so" in control
-    assert "moveMeshOuterCorrectors" in control
+    # La configuración del adaptador vive en preciceDict, no en controlDict
+    assert os.path.exists(paths["preciceDict"])
+    assert os.path.exists(paths["dynamicMeshDict"])
 
 
 def test_adapter_block_is_idempotent(tmp_path):
@@ -131,6 +134,7 @@ def test_adapter_block_is_idempotent(tmp_path):
     case = tmp_path / "c"
     (case / "system").mkdir(parents=True)
     (case / "system" / "controlDict").write_text("application pimpleFoam;\n")
+    (case / "system" / "fvSolution").write_text("solvers\n{\n    p { solver GAMG; }\n}\n")
 
     f = FsiCase(str(case), FsiConfig())
     f.write_adapter_block()
@@ -184,5 +188,31 @@ def test_solid_participant_has_write_mapping():
 def test_m2n_channel_declared():
     xml = build_precice_config(FsiConfig())
     assert "<m2n:sockets" in xml
-    assert 'acceptor="Fluid"' in xml
-    assert 'connector="Solid"' in xml
+    # El sólido es el acceptor: arranca primero y espera al fluido.
+    assert 'acceptor="Solid"' in xml
+    assert 'connector="Fluid"' in xml
+
+
+# --------------------------------------------------------------------------
+# Solver estructural
+# --------------------------------------------------------------------------
+def test_cantilever_matches_euler_bernoulli():
+    """Viga empotrada con carga puntual: δ = PL³/3EI."""
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from core.structural_solver import validate_cantilever
+
+    r = validate_cantilever(nx=80, ny=16)
+    # Malla fina: el error debe ser < 1%
+    assert abs(r["error_pct"]) < 1.0, r
+
+
+def test_cantilever_converges_with_mesh_refinement():
+    """El error debe bajar al refinar: confirma que es discretización."""
+    from core.structural_solver import validate_cantilever
+
+    coarse = abs(validate_cantilever(nx=10, ny=2)["error_pct"])
+    medium = abs(validate_cantilever(nx=20, ny=4)["error_pct"])
+    fine = abs(validate_cantilever(nx=40, ny=8)["error_pct"])
+
+    assert coarse > medium > fine, (coarse, medium, fine)
+    assert fine < 3.0

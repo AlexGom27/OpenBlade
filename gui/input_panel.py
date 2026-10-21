@@ -316,9 +316,83 @@ class InputPanel(QWidget):
         cf_layout.addRow("", self.native_foam_cb)
         cf_box.setContentLayout(cf_layout)
         
+        # ═══════════════════════════════════════════
+        # Sección 4: FSI / Aeroelasticidad (Colapsable)
+        # ═══════════════════════════════════════════
+        fsi_box = CollapsibleBox("▸ FSI (Fluido-Estructura)")
+        fsi_box.toggle_button.setChecked(False)
+        fsi_box.content_area.setVisible(False)
+        fsi_box.toggle_button.setArrowType(Qt.RightArrow)
+        fsi_layout = QFormLayout()
+        fsi_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.fsi_enabled = QCheckBox("Activar acoplamiento FSI (preCICE)")
+        self.fsi_enabled.setToolTip(
+            "Requiere la imagen openblade-fsi. Acopla el CFD con un sólido "
+            "elástico 2D mediante preCICE."
+        )
+
+        self.fsi_E = QDoubleSpinBox()
+        self.fsi_E.setRange(1e3, 1e12)
+        self.fsi_E.setValue(2.0e6)
+        self.fsi_E.setDecimals(0)
+        self.fsi_E.setSingleStep(1e5)
+        self.fsi_E.setGroupSeparatorShown(True)
+        self.fsi_E.setSuffix(" Pa")
+
+        self.fsi_nu = QDoubleSpinBox()
+        self.fsi_nu.setRange(0.0, 0.499)
+        self.fsi_nu.setValue(0.3)
+        self.fsi_nu.setDecimals(3)
+        self.fsi_nu.setSingleStep(0.05)
+
+        self.fsi_thickness = QDoubleSpinBox()
+        self.fsi_thickness.setRange(1e-4, 10.0)
+        self.fsi_thickness.setValue(0.1)
+        self.fsi_thickness.setDecimals(4)
+        self.fsi_thickness.setSuffix(" m")
+
+        self.fsi_dt = QLineEdit("1e-3")
+        self.fsi_end_time = QLineEdit("0.5")
+
+        self.fsi_nx = QSpinBox()
+        self.fsi_nx.setRange(4, 400)
+        self.fsi_nx.setValue(40)
+
+        self.fsi_ny = QSpinBox()
+        self.fsi_ny.setRange(2, 100)
+        self.fsi_ny.setValue(8)
+
+        self.fsi_coupling = QComboBox()
+        self.fsi_coupling.addItems(["serial-implicit", "parallel-explicit"])
+
+        self.fsi_relaxation = QComboBox()
+        self.fsi_relaxation.addItems(["aitken", "constant", "none"])
+
+        self.fsi_max_iter = QSpinBox()
+        self.fsi_max_iter.setRange(1, 500)
+        self.fsi_max_iter.setValue(50)
+
+        self.fsi_tol = QLineEdit("1e-4")
+
+        fsi_layout.addRow("", self.fsi_enabled)
+        fsi_layout.addRow("Módulo E:", self.fsi_E)
+        fsi_layout.addRow("Poisson ν:", self.fsi_nu)
+        fsi_layout.addRow("Espesor:", self.fsi_thickness)
+        fsi_layout.addRow("Paso de tiempo:", self.fsi_dt)
+        fsi_layout.addRow("Tiempo final:", self.fsi_end_time)
+        fsi_layout.addRow("Malla sólido nx:", self.fsi_nx)
+        fsi_layout.addRow("Malla sólido ny:", self.fsi_ny)
+        fsi_layout.addRow("Esquema acople:", self.fsi_coupling)
+        fsi_layout.addRow("Relajación:", self.fsi_relaxation)
+        fsi_layout.addRow("Iteraciones máx:", self.fsi_max_iter)
+        fsi_layout.addRow("Tolerancia acople:", self.fsi_tol)
+        fsi_box.setContentLayout(fsi_layout)
+
         layout.addWidget(geom_box)
         layout.addWidget(mesh_box)
         layout.addWidget(cf_box)
+        layout.addWidget(fsi_box)
         layout.addStretch()
         
         # Botones de Acción (Fijos en la parte inferior fuera del scroll)
@@ -475,7 +549,20 @@ class InputPanel(QWidget):
             "write_interval": self.write_interval_input.text(),
             "max_co": self.max_co_input.value(),
             "max_iters": self.max_iters_input.value(),
-            "native_foam": self.native_foam_cb.isChecked()
+            "native_foam": self.native_foam_cb.isChecked(),
+            # --- FSI ---
+            "fsi_enabled": self.fsi_enabled.isChecked(),
+            "fsi_E": self.fsi_E.value(),
+            "fsi_nu": self.fsi_nu.value(),
+            "fsi_thickness": self.fsi_thickness.value(),
+            "fsi_dt": self.fsi_dt.text(),
+            "fsi_end_time": self.fsi_end_time.text(),
+            "fsi_nx": self.fsi_nx.value(),
+            "fsi_ny": self.fsi_ny.value(),
+            "fsi_coupling": self.fsi_coupling.currentText(),
+            "fsi_relaxation": self.fsi_relaxation.currentText(),
+            "fsi_max_iter": self.fsi_max_iter.value(),
+            "fsi_tol": self.fsi_tol.text(),
         }
 
     def set_params(self, p: Dict[str, Any]) -> None:
@@ -547,3 +634,30 @@ class InputPanel(QWidget):
             self.max_iters_input.setValue(int(p["max_iters"]))
         if "native_foam" in p:
             self.native_foam_cb.setChecked(bool(p["native_foam"]))
+        # --- FSI ---
+        if "fsi_enabled" in p:
+            self.fsi_enabled.setChecked(bool(p["fsi_enabled"]))
+        if "fsi_E" in p:
+            self.fsi_E.setValue(float(p["fsi_E"]))
+        if "fsi_nu" in p:
+            self.fsi_nu.setValue(float(p["fsi_nu"]))
+        if "fsi_thickness" in p:
+            self.fsi_thickness.setValue(float(p["fsi_thickness"]))
+        if "fsi_dt" in p:
+            self.fsi_dt.setText(str(p["fsi_dt"]))
+        if "fsi_end_time" in p:
+            self.fsi_end_time.setText(str(p["fsi_end_time"]))
+        if "fsi_nx" in p:
+            self.fsi_nx.setValue(int(p["fsi_nx"]))
+        if "fsi_ny" in p:
+            self.fsi_ny.setValue(int(p["fsi_ny"]))
+        if "fsi_coupling" in p:
+            i = self.fsi_coupling.findText(p["fsi_coupling"])
+            if i >= 0: self.fsi_coupling.setCurrentIndex(i)
+        if "fsi_relaxation" in p:
+            i = self.fsi_relaxation.findText(p["fsi_relaxation"])
+            if i >= 0: self.fsi_relaxation.setCurrentIndex(i)
+        if "fsi_max_iter" in p:
+            self.fsi_max_iter.setValue(int(p["fsi_max_iter"]))
+        if "fsi_tol" in p:
+            self.fsi_tol.setText(str(p["fsi_tol"]))

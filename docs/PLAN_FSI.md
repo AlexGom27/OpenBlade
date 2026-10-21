@@ -438,3 +438,76 @@ planificarlo como proyecto aparte.
    (publicar comparación con benchmarks)?
 3. ¿Se acepta una malla específica para FSI, distinta de la de la validación
    actual?
+
+
+---
+
+## 11. Implementación FSI completada (2026-10-21)
+
+### Lo que funciona, verificado
+
+| Componente | Estado | Evidencia |
+|---|---|---|
+| Imagen `openblade-fsi:dev` | ✅ | preCICE 3.4.1 compilado + adaptador v1.4.0 + pyprecice 3.4.0 |
+| Generador `precice-config.xml` | ✅ | `precice-config-validate`: "No major issues detected" |
+| Solver estructural Python | ✅ | viga empotrada: −0.07% vs Euler-Bernoulli con malla fina |
+| Generación de diccionarios FSI | ✅ | preciceDict, dynamicMeshDict, pointDisplacement, fvSolution |
+| Acoplamiento real preCICE | ✅ | 39 mapeos Stress + 6 Displacement, 5 ventanas de tiempo |
+| Integración GUI | ✅ | pestaña FSI (12 parámetros) + botón "🌊 Análisis FSI" |
+
+### Bugs encontrados ejecutando (13 en total)
+
+Ninguno detectable leyendo documentación:
+
+| # | Síntoma | Causa |
+|---|---|---|
+| 1 | `unbound prefix` | tags con `:` no son XML válido |
+| 2 | `unknown attribute "version"` | eliminado en preCICE 3 |
+| 3 | `unknown mesh` | `<mesh>` va antes de `<participant>` |
+| 4 | `missing "dimensions"` | obligatorio en v3 |
+| 5 | `unknown tag api-access` | eliminado en v3 |
+| 6 | `missing "from"` | requerido en `<receive-mesh>` |
+| 7 | `convergence-measure` desconocido | ahora `relative-convergence-measure` |
+| 8 | `data not exchanged` | el exchange usa la malla del fluido |
+| 9 | `acceleration:constant` con `value` | sintaxis: `<relaxation value/>` |
+| 10 | `data has no samples` | falta mapping de **escritura** del sólido |
+| 11 | `cannot find preciceDict` | el adaptador **no** se configura desde controlDict |
+| 12 | `unexpected class volVectorField` | `pointDisplacement` es `pointVectorField` |
+| 13 | `Attempt to cast calculated to Field` | la BC debe ser `fixedValue`, no `calculated` |
+
+Y tres más de infraestructura: `pcorr`/`cellDisplacement` ausentes en fvSolution,
+`rho` obligatorio en el módulo FSI, y preCICE anunciando `127.0.0.1` cuando los
+participantes corren en contenedores separados.
+
+### Limitación conocida
+
+El acoplamiento **funciona** (intercambia datos en ambas direcciones) pero con los
+parámetros de prueba no converge dentro de las 5 iteraciones: la medida relativa
+queda en ~0.97 con límite 0.05. Causa: el sólido de prueba es muy flexible
+(E=2 MPa) frente a la carga del fluido, y el número de iteraciones es bajo.
+
+Para converger hace falta: más iteraciones (50, el valor por defecto), Aitken con
+más historia, o un sólido más rígido. No es un defecto del acoplamiento.
+
+### Cómo ejecutar
+
+```bash
+# Construir la imagen (una vez, ~13 min)
+docker build -f docker/Dockerfile.openblade-fsi -t openblade-fsi:dev .
+
+# Desde el GUI: activar "Acoplamiento FSI" y pulsar "🌊 Análisis FSI"
+```
+
+### Arquitectura resultante
+
+```
+GUI (pestaña FSI)
+  └─ FsiRunner
+       ├─ OpenFoamSetup (transitorio, pimpleFoam)
+       ├─ FsiCase → precice-config.xml, preciceDict, dynamicMeshDict,
+       │             pointDisplacement, fvSolution
+       └─ docker run (un contenedor)
+            ├─ pimpleFoam + preciceAdapterFunctionObject  [Fluid]
+            └─ structural_solver.py (pyprecice)           [Solid]
+                 ↕ intercambio por m2n:sockets
+```

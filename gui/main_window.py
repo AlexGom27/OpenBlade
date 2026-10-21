@@ -105,6 +105,10 @@ class MainWindow(QMainWindow):
         btn_report.triggered.connect(self.generate_report)
         toolbar.addAction(btn_report)
 
+        self.btn_fsi = QAction("🌊 Análisis FSI", self)
+        self.btn_fsi.triggered.connect(self.on_run_fsi)
+        toolbar.addAction(self.btn_fsi)
+
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QHBoxLayout(main_widget)
@@ -316,6 +320,68 @@ class MainWindow(QMainWindow):
                 self.results_panel.update_visual_preview(mesh, show_edges=True)
             except Exception:
                 pass
+
+    def on_run_fsi(self) -> None:
+        """Lanza el acoplamiento fluido-estructura con preCICE."""
+        from core.fsi_runner import FsiRunner, check_image
+
+        if self._sim_running:
+            self.log("⚠️ Ya hay una simulación en curso.")
+            return
+
+        if not check_image():
+            QMessageBox.warning(
+                self, "Imagen FSI no disponible",
+                "Para FSI hace falta la imagen con preCICE.\n\n"
+                "Construir con:\n"
+                "docker build -f docker/Dockerfile.openblade-fsi -t openblade-fsi:dev ."
+            )
+            return
+
+        p = self._safe_get_params()
+        if not p:
+            return
+        if not p.get("fsi_enabled"):
+            QMessageBox.information(
+                self, "FSI desactivado",
+                "Activa 'Acoplamiento FSI (preCICE)' en la sección FSI del panel."
+            )
+            return
+
+        msh = f"perfil_{p.get('naca') or 'custom'}.msh"
+        if not os.path.exists(msh):
+            self.log("❌ Genera la malla antes de lanzar FSI.")
+            return
+
+        self._sim_running = True
+        self.input_panel.btn_run.setEnabled(False)
+        self.log("🌊 Iniciando acoplamiento FSI (preCICE)…")
+        self.log(f"   E={p['fsi_E']:.3g} Pa, ν={p['fsi_nu']:.3f}, "
+                 f"malla sólido {p['fsi_nx']}×{p['fsi_ny']}")
+        self.log(f"   dt={p['fsi_dt']} s, t_final={p['fsi_end_time']} s, "
+                 f"acople={p['fsi_coupling']}")
+
+        try:
+            runner = FsiRunner(self.case_dir, p, log=self.log)
+            result = runner.run()
+        except Exception as e:  # noqa: BLE001
+            self.log(f"❌ Error FSI: {e}")
+            self._reset_run_state()
+            return
+
+        if result.ok:
+            self.log(f"✅ FSI completado: {result.time_windows} ventanas de tiempo")
+            self.log(f"   Desplazamiento máximo: {result.displacement_max:.6e} m")
+        else:
+            self.log(f"❌ FSI falló (fluido rc={result.exit_fluid}, "
+                     f"sólido rc={result.exit_solid})")
+            if result.error:
+                self.log(f"   {result.error}")
+            if result.log_solid:
+                for line in result.log_solid.strip().splitlines()[-6:]:
+                    self.log(f"   │ {line}")
+
+        self._reset_run_state()
 
     def on_stop_sim(self) -> None:
         """Detiene una simulación de punto único en curso."""

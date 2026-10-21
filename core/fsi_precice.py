@@ -61,6 +61,10 @@ class FsiConfig:
     # Dimensión del problema: 2 para los casos 2D de OpenBlade
     dimensions: int = 2
 
+    # Densidad del fluido (kg/m³). El módulo FSI del adaptador la necesita
+    # para convertir presión en fuerza.
+    rho: float = 1.225
+
     # Tiempo
     dt: float = 1e-3
     end_time: float = 1.0
@@ -169,8 +173,12 @@ def build_precice_config(cfg: FsiConfig) -> str:
     a("")
 
     # --- Comunicación ------------------------------------------------------
-    a(f'  <m2n:sockets acceptor="{cfg.fluid_participant}"'
-      f' connector="{cfg.solid_participant}" />')
+    # El ACCEPTOR debe arrancar primero. En el runner el sólido es el que
+    # inicia la conexión (espera al fluido), así que él hace de acceptor.
+    # Con los roles invertidos preCICE anuncia 127.0.0.1 y no conecta.
+    a(f'  <m2n:sockets acceptor="{cfg.solid_participant}"'
+      f' connector="{cfg.fluid_participant}"'
+      f' exchange-directory="{cfg.exchange_directory}" />')
     a("")
 
     # --- Esquema de acoplamiento -------------------------------------------
@@ -222,9 +230,12 @@ def build_precice_config(cfg: FsiConfig) -> str:
 class FsiCase:
     """Escribe los archivos FSI dentro de un caso OpenFOAM existente."""
 
-    def __init__(self, case_dir: str, cfg: Optional[FsiConfig] = None) -> None:
+    def __init__(self, case_dir: str, cfg: Optional[FsiConfig] = None,
+                 container_root: str = "/data") -> None:
         self.case_dir = case_dir
         self.cfg = cfg or FsiConfig()
+        # Ruta del caso DENTRO del contenedor (donde corre el adaptador).
+        self.container_root = container_root
 
     def write_precice_config(self) -> str:
         path = os.path.join(self.case_dir, "precice-config.xml")
@@ -232,19 +243,177 @@ class FsiCase:
             f.write(build_precice_config(self.cfg))
         return path
 
+    def patch_fv_solution(self) -> str:
+        """Añade los solvers de malla dinámica a ``system/fvSolution``.
+
+        La malla dinámica necesita entradas para ``cellDisplacement`` y
+        ``pointDisplacement``. Sin ellas OpenFOAM aborta con
+        "Entry 'cellDisplacement' not found in dictionary fvSolution/solvers".
+        """
+        path = os.path.join(self.case_dir, "system", "fvSolution")
+        with open(path) as f:
+            text = f.read()
+
+        if "cellDisplacement" in text:
+            return path
+
+        extra = """
+    cellDisplacement
+    {
+        solver          GAMG;
+        smoother        GaussSeidel;
+        tolerance       1e-6;
+        relTol          0;
+    }
+    pointDisplacement
+    {
+        solver          PCG;
+        preconditioner  DIC;
+        tolerance       1e-6;
+        relTol          0;
+    }
+    // pimpleFoam con malla dinámica exige pcorr (corrección de flujo
+    // tras mover la malla). Sin él: "Entry 'pcorr' not found".
+    pcorr
+    {
+        solver          GAMG;
+        smoother        GaussSeidel;
+        tolerance       1e-5;
+        relTol          0;
+    }
+    pcorrFinal
+    {
+        $pcorr;
+        relTol          0;
+    }
+"""
+        # Insertar dentro del bloque solvers
+        idx = text.index("solvers")
+        brace = text.index("{", idx)
+        text = text[:brace + 1] + extra + text[brace + 1:]
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def write_dynamic_mesh_dict(self) -> str:
+        """Escribe ``constant/dynamicMeshDict`` con difusión de desplazamiento.
+
+        Sin este archivo ``pimpleFoam`` corre con malla estática: el adaptador
+        carga, lee el desplazamiento y lo ignora, y el acoplamiento termina sin
+        efecto visible en el fluido.
+        """
+        path = os.path.join(self.case_dir, "constant", "dynamicMeshDict")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        cfg = self.cfg
+        content = f"""FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      dynamicMeshDict;
+}}
+
+dynamicFvMesh       dynamicMotionSolverFvMesh;
+
+motionSolverLibs    ("libfvMotionSolvers.so");
+
+motionSolver        displacementLaplacian;
+
+displacementLaplacianCoeffs
+{{
+    // Difusividad cuadrática inversa a la distancia: las celdas lejos del
+    // perfil se mueven poco y las cercanas absorben la deformación.
+    diffusivity     quadratic inverseDistance 1({cfg.interface_patch});
+}}
+"""
+        with open(path, "w") as f:
+            f.write(content)
+        return path
+
+    def write_precice_dict(self) -> str:
+        """Escribe ``system/preciceDict``, que es lo que lee el adaptador.
+
+        Importante: el adaptador NO se configura desde ``controlDict``. Busca
+        ``system/preciceDict`` y, si no existe, aborta con
+        ``cannot find file "system/preciceDict"``. En ``controlDict`` solo va
+        el functionObject que lo activa.
+
+        Estructura verificada contra la documentación del adaptador v1.4.0:
+            preciceConfig  <ruta>
+            participant    <nombre>
+            modules        (FSI)
+            interfaces { <nombre> { mesh, patches, locations, readData, writeData } }
+        """
+        cfg = self.cfg
+        path = os.path.join(self.case_dir, "system", "preciceDict")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        content = f"""FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      preciceDict;
+}}
+
+// El adaptador resuelve esta ruta desde su propio CWD, que dentro del
+// contenedor es la raíz del caso montada en `container_root`. Por defecto
+// "/data"; en ejecución nativa se usa la ruta del host.
+preciceConfig   "{os.path.join(self.container_root, "precice-config.xml")}";
+
+participant     {cfg.fluid_participant};
+
+modules         (FSI);
+
+// El módulo FSI del adaptador exige la densidad: la usa para convertir la
+// presión a fuerza. Sin esta entrada aborta con
+// "Entry 'rho' not found in dictionary preciceDict/FSI".
+FSI
+{{
+    // Valor numérico directo: el adaptador espera un escalar, no una
+    // referencia tipo "rhoInf" (eso daría "attempt to read beyond EOF").
+    rho             {cfg.rho};
+}}
+
+interfaces
+{{
+    Interface1
+    {{
+        mesh            {cfg.fluid_mesh};
+        patches         ({cfg.interface_patch});
+        locations       faceCenters;
+
+        readData
+        (
+            {cfg.displacement_data}
+        );
+
+        writeData
+        (
+            {cfg.force_data}
+        );
+    }};
+}};
+
+// ************************************************************************* //
+"""
+        with open(path, "w") as f:
+            f.write(content)
+        return path
+
     def write_adapter_block(self) -> str:
         """Inserta el functionObject del adaptador en system/controlDict.
 
-        Idempotente: si el bloque ya existe, lo reemplaza.
+        El bloque es mínimo: toda la configuración vive en preciceDict.
+        Idempotente: si ya existe, lo reemplaza.
         """
         control = os.path.join(self.case_dir, "system", "controlDict")
         with open(control) as f:
             text = f.read()
 
         block = self._adapter_block()
-        # Reemplazar el bloque previo si existe (idempotente). Se busca la
-        # aparición como NOMBRE de bloque (con llave a continuación), no la
-        # del campo `type`, que también contiene el mismo texto.
         while True:
             new_text = self._remove_function_object(text, "preciceAdapterFunctionObject")
             if new_text == text:
@@ -263,33 +432,14 @@ class FsiCase:
         return control
 
     def _adapter_block(self) -> str:
-        cfg = self.cfg
         return f"""
     preciceAdapterFunctionObject
     {{
         type            preciceAdapterFunctionObject;
         libs            ("libpreciceAdapterFunctionObject.so");
-
-        // Nombre del participante tal como aparece en precice-config.xml
-        participant     {cfg.fluid_participant};
-
-        // Parche de la interfaz fluido-estructura
-        interfaces
-        {{
-            {cfg.interface_patch}
-            {{
-                patches         ({cfg.interface_patch});
-                // El fluido ENVÍA fuerza y RECIBE desplazamiento
-                writeData       ({cfg.force_data});
-                readData        ({cfg.displacement_data});
-            }}
-        }}
-
-        // Malla dinámica: el desplazamiento que llega de preCICE se aplica al
-        // campo pointDisplacement, no al movimiento de cuerpo rígido.
-        moveMeshOuterCorrectors  true;
     }}
 """
+
 
     @staticmethod
     def _remove_function_object(text: str, name: str) -> str:
@@ -317,6 +467,9 @@ class FsiCase:
         """Escribe todos los archivos FSI. Devuelve las rutas generadas."""
         return {
             "precice-config": self.write_precice_config(),
+            "preciceDict": self.write_precice_dict(),
+            "dynamicMeshDict": self.write_dynamic_mesh_dict(),
+            "fvSolution": self.patch_fv_solution(),
             "controlDict": self.write_adapter_block(),
         }
 
