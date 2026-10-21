@@ -201,13 +201,43 @@ def main():
             fluid_surface = gmsh.model.geo.addPlaneSurface([farfield_loop, airfoil_loop])
             gmsh.model.geo.synchronize()
             
-            # Capa límite nativa
-            gmsh.model.mesh.field.add("BoundaryLayer", 1)
-            gmsh.model.mesh.field.setNumbers(1, "CurvesList", lines)
-            gmsh.model.mesh.field.setNumber(1, "Size", first_layer)
-            gmsh.model.mesh.field.setNumber(1, "Ratio", ratio)
-            gmsh.model.mesh.field.setNumber(1, "NbLayers", p.get("mesh_num_layers", 15))
-            gmsh.model.mesh.field.setAsBoundaryLayer(1)
+            # ---- Campo de tamaño por distancia al perfil ----
+            # Sin esto, gmsh interpola el tamaño solo entre los puntos del
+            # contorno: en dominios grandes genera millones de celdas y no
+            # crece hacia el exterior. Un Distance + Threshold hace que el
+            # tamaño pase de `mesh_size` en el perfil a `farfield_size` a
+            # partir de `bl_growth_dist` cuerdas.
+            dist = gmsh.model.mesh.field.add("Distance")
+            gmsh.model.mesh.field.setNumbers(dist, "CurvesList", lines)
+            gmsh.model.mesh.field.setNumber(dist, "Sampling", 200)
+
+            grow_dist = float(p.get("bl_growth_dist", 5.0)) * chord
+            thr = gmsh.model.mesh.field.add("Threshold")
+            gmsh.model.mesh.field.setNumber(thr, "InField", dist)
+            gmsh.model.mesh.field.setNumber(thr, "SizeMin", mesh_size)
+            gmsh.model.mesh.field.setNumber(thr, "SizeMax", farfield_size)
+            gmsh.model.mesh.field.setNumber(thr, "DistMin", 0.0)
+            gmsh.model.mesh.field.setNumber(thr, "DistMax", grow_dist)
+
+            # Capa límite nativa (solo sobre el contorno del perfil).
+            # Se deja que gmsh asigne el id: fijarlo a 1 choca con el campo
+            # Distance anterior ("Field id 1 is already defined").
+            bl = gmsh.model.mesh.field.add("BoundaryLayer")
+            gmsh.model.mesh.field.setNumbers(bl, "CurvesList", lines)
+            gmsh.model.mesh.field.setNumber(bl, "Size", first_layer)
+            gmsh.model.mesh.field.setNumber(bl, "Ratio", ratio)
+            gmsh.model.mesh.field.setNumber(bl, "NbLayers", p.get("mesh_num_layers", 15))
+
+            # Combinar: tamaño por distancia, y la capa límite manda donde aplica
+            fmin = gmsh.model.mesh.field.add("Min")
+            gmsh.model.mesh.field.setNumbers(fmin, "FieldsList", [thr])
+            gmsh.model.mesh.field.setAsBackgroundMesh(fmin)
+            gmsh.model.mesh.field.setAsBoundaryLayer(bl)
+
+            gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+            gmsh.option.setNumber("Mesh.Algorithm", 6)
             
             gmsh.model.mesh.generate(2)
             

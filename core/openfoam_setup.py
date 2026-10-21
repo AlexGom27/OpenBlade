@@ -414,17 +414,26 @@ boundaryField {{
 """
             with open(os.path.join(self.case_dir, "0", "ReThetat"), "w") as f: f.write(re_theta_content)
 
-        # nut is always needed for RAS
-        nut_content = """FoamFile { version 2.0; format ascii; class volScalarField; object nut; }
+        # nut is always needed for RAS.
+        # La condición de pared depende del modelo: nutkWallFunction es para
+        # k-omega/k-epsilon (basada en k). Spalart-Allmaras necesita
+        # nutLowReWallFunction (y+ ~ 1) o nutUSpaldingWallFunction (y+ > 30).
+        # Con el modelo equivocado el caso arranca pero la capa límite es falsa.
+        if "Spalart" in turbulence_ui:
+            nut_wall = "nutLowReWallFunction"
+        else:
+            nut_wall = "nutkWallFunction"
+
+        nut_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object nut; }}
 dimensions      [0 2 -1 0 0 0 0];
 internalField   uniform 0;
-boundaryField {
-    inlet { type calculated; value uniform 0; }
-    outlet { type calculated; value uniform 0; }
-    farfield { type calculated; value uniform 0; }
-    airfoil { type nutkWallFunction; value uniform 0; }
-    frontAndBack { type empty; }
-    defaultFaces { type empty; }
-}
+boundaryField {{
+    inlet {{ type calculated; value uniform 0; }}
+    outlet {{ type calculated; value uniform 0; }}
+    farfield {{ type calculated; value uniform 0; }}
+    airfoil {{ type {nut_wall}; value uniform 0; }}
+    frontAndBack {{ type empty; }}
+    defaultFaces {{ type empty; }}
+}}
 """
         with open(os.path.join(self.case_dir, "0", "nut"), "w") as f: f.write(nut_content)

@@ -1,0 +1,75 @@
+# OpenBlade 2D — imagen con soporte FSI (preCICE + adaptador OpenFOAM)
+#
+# Base: opencfd/openfoam-default (Ubuntu 24.04 noble, OpenFOAM v2512)
+# Añade: preCICE (compilado desde fuente) + openfoam-adapter
+#
+# NOTA sobre arquitectura: preCICE publica .deb sólo para amd64. En Apple
+# Silicon (arm64) hay que compilarlo. Este Dockerfile compila siempre, para
+# que la imagen sea reproducible en ambas arquitecturas.
+#
+# Construir:  docker build -f docker/Dockerfile.openblade-fsi -t openblade-fsi:dev .
+# Probar:     docker run --rm openblade-fsi:dev bash -lc 'ls /usr/local/lib/libprecice*'
+
+FROM opencfd/openfoam-default:latest
+
+SHELL ["/bin/bash", "-lc"]
+
+ARG PRECICE_VERSION=v3.4.1
+ARG ADAPTER_VERSION=v1.4.0
+ARG DEBIAN_FRONTEND=noninteractive
+
+USER root
+
+# --- Dependencias ---------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake git wget ca-certificates pkg-config \
+        python3 python3-dev python3-numpy python3-pip python3-venv \
+        libeigen3-dev libxml2-dev libboost-all-dev libyaml-cpp-dev \
+        liblapack-dev libopenblas-dev libpetsc-real-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- preCICE desde fuente -------------------------------------------------
+# --prefix=/usr/local para no mezclarse con el OpenFOAM del sistema.
+RUN cd /opt \
+    && git clone --depth 1 --branch "${PRECICE_VERSION}" https://github.com/precice/precice.git \
+    && cd precice \
+    && cmake -S . -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DPRECICE_PythonActions=OFF \
+        -DPRECICE_PETScMapping=ON \
+        -DPRECICE_MPICommunication=ON \
+        -DBUILD_TESTING=OFF \
+    && cmake --build build -j"$(nproc)" \
+    && cmake --install build \
+    && rm -rf /opt/precice/build
+
+# --- Adaptador OpenFOAM-preCICE ------------------------------------------
+# Se compila contra el OpenFOAM de la imagen base.
+# Ojo: wmake instala en $FOAM_USER_LIBBIN (/root/OpenFOAM/user-v2512/...),
+# no en el directorio fuente. Hay que localizar el .so resultante.
+RUN . /usr/lib/openfoam/openfoam2512/etc/bashrc; \
+    git clone --depth 1 --branch "${ADAPTER_VERSION}" \
+        https://github.com/precice/openfoam-adapter.git /opt/openfoam-adapter \
+    && cd /opt/openfoam-adapter \
+    && export ADAPTER_PRECICE_DIR=/usr/local \
+    && export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}" \
+    && ./Allwmake -j"$(nproc)" 2>&1 | tail -30 ; \
+    echo "--- .so generados ---" ; \
+    find /root /opt -name "libpreciceAdapterFunctionObject.so" 2>/dev/null
+
+# --- Entorno --------------------------------------------------------------
+ENV LD_LIBRARY_PATH="/usr/local/lib:/opt/openfoam-adapter"
+ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+
+# Verificación en tiempo de build: si algo falta, la imagen no se genera.
+RUN . /usr/lib/openfoam/openfoam2512/etc/bashrc; \
+    test -e /usr/local/lib/libprecice.so \
+    && SO=$(find /root /opt -name "libpreciceAdapterFunctionObject.so" | head -1) \
+    && test -n "$SO" \
+    && mkdir -p /opt/openfoam-adapter/lib \
+    && cp "$SO" /opt/openfoam-adapter/lib/ \
+    && ldd /opt/openfoam-adapter/lib/libpreciceAdapterFunctionObject.so | grep -q precice \
+    && echo "OK: preCICE + adaptador enlazado correctamente"
+
+WORKDIR /data

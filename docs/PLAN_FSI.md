@@ -348,6 +348,76 @@ Sólo después de esas tres se puede afirmar que la implementación es correcta.
 
 ---
 
+## 8-bis. Estado de la implementación (nivel 3, 2026-10-21)
+
+Decisión del usuario: **nivel 3 (preCICE)** por ser para investigación.
+
+### Imagen construida y verificada
+
+`docker/Dockerfile.openblade-fsi` construye sobre `opencfd/openfoam-default` y añade:
+
+| Componente | Versión | Verificación |
+|---|---|---|
+| preCICE | 3.4.1 | `/usr/local/lib/libprecice.so.3.4.1` |
+| openfoam-adapter | v1.4.0 | `libpreciceAdapterFunctionObject.so`, `ldd` resuelve `libprecice` |
+| Python 3 | 3.12 | disponible en la imagen |
+
+**Hallazgo importante**: preCICE publica `.deb` sólo para **amd64**. En Apple
+Silicon (arm64) no existe binario, así que la imagen compila preCICE desde
+fuente. El Dockerfile lo hace siempre para ser reproducible en ambas
+arquitecturas. Tiempo de build: ~13 min (con caché de dependencias, ~1 min).
+
+### Código
+
+`core/fsi_precice.py`:
+
+- `FsiConfig` — dataclass con todos los parámetros del acoplamiento.
+- `build_precice_config()` — genera el XML. Se escribe como **texto**, no con
+  ElementTree: preCICE usa tags con `:` (`data:vector`, `m2n:sockets`,
+  `coupling-scheme:serial-implicit`) que expat interpreta como prefijos de
+  namespace y rechaza.
+- `FsiCase` — escribe `precice-config.xml` e inserta el functionObject del
+  adaptador en `controlDict` de forma idempotente.
+- `validate_config()` — comprobaciones de coherencia.
+
+### Validación realizada
+
+1. `precice-config-validate` (validador oficial) → **"No major issues detected"**
+   para las tres variantes: aitken, constant y parallel-explicit.
+2. **Acoplamiento real ejecutado**: dos `solverdummy` de C++ intercambiaron
+   datos durante 3 ventanas de tiempo con `m2n:sockets` y cerraron limpiamente.
+3. 23 tests unitarios + 3 que invocan el validador dentro de la imagen.
+
+### Errores corregidos durante la implementación
+
+Todos encontrados ejecutando, no leyendo documentación:
+
+| Síntoma | Causa real |
+|---|---|
+| `unbound prefix` al parsear | tags con `:` no son XML válido para expat |
+| `unknown attribute "version"` | preCICE 3 ya no lo acepta en el nodo raíz |
+| `unknown mesh` | las `<mesh>` deben declararse antes de los `<participant>` |
+| `missing attribute "dimensions"` | obligatorio en preCICE 3 |
+| `unknown tag api-access` | eliminado en preCICE 3 |
+| `missing attribute "from"` | `<receive-mesh>` lo requiere |
+| `unknown tag convergence-measure` | en v3 es `relative-convergence-measure` |
+| `data not exchanged over mesh` | el exchange de desplazamiento debe usar la malla del fluido |
+| `unknown attribute "value"` en acceleration | la sintaxis es `<relaxation value="..."/>` |
+| `data doesn't contain any samples` (runtime) | falta el mapping de **escritura** del sólido |
+
+Ese último sólo apareció al ejecutar el acoplamiento de verdad; el validador
+estático no lo detecta.
+
+### Pendiente
+
+- El solver **estructural** no está implementado. `solidDisplacementFoam` está
+  en la imagen, pero el acoplamiento sólido↔preCICE requiere escribir el bucle
+  de intercambio en el lado del sólido (o usar un solver Python con los
+  bindings).
+- El adaptador OpenFOAM exige malla dinámica con `pointDisplacement`; falta
+  conectarlo con la ruta FSI del GUI.
+- Falta el benchmark de Turek & Hron para validación cuantitativa.
+
 ## 9. Recomendación
 
 **Empezar por el nivel 1.** Es lo que el software puede hacer hoy sin
