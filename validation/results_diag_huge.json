@@ -1,0 +1,52 @@
+{
+  "tag": "diag_huge",
+  "reference_table": "VII",
+  "preset": {
+    "mesh_size_min": 0.006,
+    "mesh_size_max": 0.8,
+    "bl_dist_min": 2e-05,
+    "mesh_num_layers": 30,
+    "mesh_growth_rate": 1.12,
+    "mesh_nb_points": 400,
+    "wake_length": 100.0,
+    "farfield": 150.0,
+    "depth": 0.1,
+    "mesh_strategy": "structured",
+    "_name": "huge"
+  },
+  "results": [
+    {
+      "aoa": 4.0,
+      "ok": true,
+      "tag": "diag_huge",
+      "turbulence": "k-Omega SST (RAS)",
+      "scheme": "upwind",
+      "preset": "huge",
+      "Cl": 0.440535,
+      "Cd": 0.0175863,
+      "Cm": -0.0107163,
+      "exit_code": 0,
+      "residuals": {
+        "Phi": 1.0,
+        "p": 0.000567271,
+        "Ux": 0.0098588,
+        "Uy": 0.0162085,
+        "omega": 9.02211e-07,
+        "k": 4.91397e-06
+      },
+      "cells": null,
+      "yplus": {
+        "mean": 0.10629005799999999,
+        "min": 0.04801748,
+        "max": 0.1712235,
+        "p50": 0.1106206,
+        "p95": 0.16461689999999998,
+        "n": 15
+      },
+      "patches_ok": true,
+      "mesh_time_s": null,
+      "total_time_s": 1010.6,
+      "solve_time_s": 997.1
+    }
+  ]
+}

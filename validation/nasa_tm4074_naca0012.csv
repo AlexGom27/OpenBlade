@@ -1,0 +1,40 @@
+# NASA TM 4074 (Ladson 1988) — NACA 0012, M = 0.15
+# Transcrito de la fuente primaria NTRS 19880019495.pdf (texto verificado página por página)
+#
+# Tabla I   : Free Transition,        R = 2.00e6
+# Tabla VII : Transition fixed with No. 60-W grit, R = 2.00e6
+#
+# La Tabla VII es la referencia correcta para una simulación RANS totalmente
+# turbulenta (k-omega SST sin modelo de transición): el grit fuerza transición
+# en el borde de ataque y elimina la zona laminar.
+#
+# columnas: table, alpha[deg], Cl, Cd, Cm
+
+# ---- Tabla I: Free Transition, R = 2.00e6 ----
+I,-4.25,-0.4300,0.00730,-0.0040
+I,-2.10,-0.2150,0.00620,-0.0020
+I,0.00,0.0000,0.00620,0.0000
+I,1.85,0.1940,0.00620,0.0030
+I,4.25,0.4450,0.00670,0.0040
+I,6.05,0.6250,0.00870,0.0070
+I,8.15,0.8550,0.01270,0.0080
+I,10.15,1.0450,0.01350,0.0120
+I,11.15,1.1350,0.01490,0.0140
+I,12.10,1.2180,0.01640,0.0180
+I,13.08,1.2900,0.01880,0.0190
+I,14.25,1.3620,0.02280,0.0220
+I,15.25,1.4080,0.02910,0.0250
+
+# ---- Tabla VII: Transition Fixed, No. 60-W Grit, R = 2.00e6 ----
+VII,-4.16,-0.4300,0.01213,-0.0041
+VII,-2.14,-0.2271,0.01080,-0.0022
+VII,-0.03,-0.0102,0.01091,-0.0005
+VII,0.00,-0.0060,0.01100,-0.0001
+VII,1.97,0.1970,0.01084,0.0017
+VII,4.14,0.4219,0.01152,0.0039
+VII,5.98,0.6084,0.01336,0.0063
+VII,8.10,0.8123,0.01631,0.0098
+VII,10.04,0.9789,0.02093,0.0143
+VII,11.22,1.0644,0.02497,0.0170
+VII,12.25,1.1276,0.02921,0.0194
+VII,13.15,1.1647,0.03599,0.0221

@@ -1,0 +1,6 @@
+# Casos de simulación (mallas, campos, postProcessing): pesados y regenerables
+cases/
+params_*.json
+report_probe*.txt
+results_probe*.json
+results_diag_lu.json

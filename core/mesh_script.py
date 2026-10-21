@@ -74,8 +74,11 @@ def main():
         ratio = p.get("mesh_growth_rate", 1.15)
         farfield_size = p.get("mesh_size_max", 1.0) * chord # Para que no quede tupido lejos
         wake_length = p.get("wake_length", 5.0) * chord
-        farfield = 10.0 * chord
-        depth = 0.1 * chord
+        # Radio/caja del dominio exterior en cuerdas. Configurable para poder
+        # hacer estudios de sensibilidad (NASA TMR recomienda >100c sin
+        # corrección de vórtice lejano; con 10c el bloqueo altera Cl y Cd).
+        farfield = float(p.get("farfield", 10.0)) * chord
+        depth = float(p.get("depth", 0.1)) * chord
         
         gmsh.initialize()
         gmsh.model.add("NACA")
@@ -116,8 +119,20 @@ def main():
         volumes = []
         front_back_surfaces = []
         extrusion_map = []
-        
+
+        # Estrategia de mallado:
+        #   auto         -> intenta C-Grid estructurado y cae a Gmsh nativo
+        #   structured   -> solo C-Grid (falla si no es válido)
+        #   unstructured -> solo Gmsh nativo (no estructurado)
+        strategy = p.get("mesh_strategy", "auto")
+        if strategy == "unstructured":
+            raise_fallback = RuntimeError("estrategia 'unstructured' solicitada")
+        else:
+            raise_fallback = None
+
         try:
+            if raise_fallback is not None:
+                raise raise_fallback
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("error", RuntimeWarning)
@@ -126,9 +141,12 @@ def main():
                 airfoil = AirfoilSpline(rotated_points, mesh_size, name="airfoil")
                 gmsh.model.geo.synchronize()
                 
-                # Usar farfield_size en lugar de mesh_size_min para la frontera exterior
+                # OJO: el 4o argumento de CType es el tamaño de malla del
+                # PERFIL, no del farfield. Pasar `farfield_size` (mesh_size_max,
+                # ~1.0c) dejaba el perfil con 3 puntos -> 11 caras en el patch
+                # `airfoil` y el resto de la superficie acababa en defaultFaces.
                 mesh = CType(airfoil, wake_length, farfield,
-                             farfield_size, first_layer, ratio, 0.0,
+                             mesh_size, first_layer, ratio, 0.0,
                              structured=True)
                 gmsh.model.geo.synchronize()
                 

@@ -50,3 +50,38 @@ def test_transient_parameter_application(tmp_path):
     assert "application     pimpleFoam;" in content
     assert "endTime         2.5;" in content
     assert "deltaT          1e-4;" in content
+
+
+def test_momentum_scheme_default_is_upwind(tmp_path):
+    setup = OpenFoamSetup(case_dir=str(tmp_path / "c"))
+    setup.create_case()
+    schemes = (tmp_path / "c" / "system" / "fvSchemes").read_text()
+    assert "div(phi,U)      bounded Gauss upwind;" in schemes
+
+
+def test_linear_upwind_gets_gradient_argument(tmp_path):
+    """linearUpwind sin `grad(U)` hace abortar a OpenFOAM con EOF."""
+    setup = OpenFoamSetup(case_dir=str(tmp_path / "c"))
+    setup.create_case(momentum_scheme="linearUpwind")
+    schemes = (tmp_path / "c" / "system" / "fvSchemes").read_text()
+    assert "bounded Gauss linearUpwind grad(U);" in schemes
+
+
+def test_boundary_conditions_match_mesher_patch_names(tmp_path):
+    """El mallador crea `farfield`, no `walls_TB`: una BC para un parche
+    inexistente se ignora en silencio."""
+    setup = OpenFoamSetup(case_dir=str(tmp_path / "c"))
+    setup.create_case()
+    for field in ("U", "p", "k", "omega", "nut"):
+        text = (tmp_path / "c" / "0" / field).read_text()
+        assert "walls_TB" not in text, f"{field} referencia un parche inexistente"
+        assert "farfield" in text
+
+
+def test_yplus_does_not_write_every_iteration(tmp_path):
+    """writeInterval 1 creaba un directorio por iteración (1678 en una corrida)."""
+    setup = OpenFoamSetup(case_dir=str(tmp_path / "c"))
+    setup.create_case()
+    control = (tmp_path / "c" / "system" / "controlDict").read_text()
+    block = control.split("yPlus", 1)[1].split("}", 1)[0]
+    assert "writeInterval   1;" not in block

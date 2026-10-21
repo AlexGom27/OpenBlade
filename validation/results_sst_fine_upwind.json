@@ -1,0 +1,151 @@
+{
+  "tag": "sst_fine_upwind",
+  "reference_table": "VII",
+  "preset": {
+    "mesh_size_min": 0.006,
+    "mesh_size_max": 0.4,
+    "bl_dist_min": 2e-05,
+    "mesh_num_layers": 30,
+    "mesh_growth_rate": 1.12,
+    "mesh_nb_points": 400,
+    "wake_length": 20.0,
+    "farfield": 50.0,
+    "depth": 0.1,
+    "mesh_strategy": "structured",
+    "_name": "fine"
+  },
+  "results": [
+    {
+      "aoa": 0.0,
+      "ok": true,
+      "tag": "sst_fine_upwind",
+      "turbulence": "k-Omega SST (RAS)",
+      "scheme": "upwind",
+      "preset": "fine",
+      "Cl": 0.000215243,
+      "Cd": 0.0140483,
+      "Cm": -4.71245e-05,
+      "exit_code": 0,
+      "residuals": {
+        "Phi": 1.0,
+        "p": 0.000171189,
+        "Ux": 3.27674e-06,
+        "Uy": 6.33316e-06,
+        "omega": 8.35015e-07,
+        "k": 3.03452e-06
+      },
+      "cells": null,
+      "yplus": {
+        "mean": 0.16852697333333336,
+        "min": 0.1634481,
+        "max": 0.1692601,
+        "p50": 0.1688065,
+        "p95": 0.16915874,
+        "n": 15
+      },
+      "patches_ok": true,
+      "mesh_time_s": null,
+      "total_time_s": 245.9,
+      "solve_time_s": 232.7
+    },
+    {
+      "aoa": 2.0,
+      "ok": true,
+      "tag": "sst_fine_upwind",
+      "turbulence": "k-Omega SST (RAS)",
+      "scheme": "upwind",
+      "preset": "fine",
+      "Cl": 0.24503,
+      "Cd": 0.01506,
+      "Cm": -0.00694962,
+      "exit_code": 0,
+      "residuals": {
+        "Phi": 1.0,
+        "p": 0.000265134,
+        "Ux": 2.73533e-06,
+        "Uy": 5.99352e-06,
+        "omega": 6.89113e-07,
+        "k": 2.2012e-06
+      },
+      "cells": null,
+      "yplus": {
+        "mean": 0.08996366,
+        "min": 0.03335042,
+        "max": 0.1683246,
+        "p50": 0.08773902,
+        "p95": 0.14054208999999995,
+        "n": 15
+      },
+      "patches_ok": true,
+      "mesh_time_s": null,
+      "total_time_s": 218.4,
+      "solve_time_s": 206.8
+    },
+    {
+      "aoa": 4.0,
+      "ok": true,
+      "tag": "sst_fine_upwind",
+      "turbulence": "k-Omega SST (RAS)",
+      "scheme": "upwind",
+      "preset": "fine",
+      "Cl": 0.476047,
+      "Cd": 0.0181234,
+      "Cm": -0.0113095,
+      "exit_code": 0,
+      "residuals": {
+        "Phi": 1.0,
+        "p": 0.00102523,
+        "Ux": 2.85462e-06,
+        "Uy": 7.59206e-06,
+        "omega": 8.72159e-07,
+        "k": 3.32646e-06
+      },
+      "cells": null,
+      "yplus": {
+        "mean": 0.08313378866666668,
+        "min": 0.0605741,
+        "max": 0.1690051,
+        "p50": 0.06341649,
+        "p95": 0.15936553999999997,
+        "n": 15
+      },
+      "patches_ok": true,
+      "mesh_time_s": null,
+      "total_time_s": 205.5,
+      "solve_time_s": 194.7
+    },
+    {
+      "aoa": 6.0,
+      "ok": true,
+      "tag": "sst_fine_upwind",
+      "turbulence": "k-Omega SST (RAS)",
+      "scheme": "upwind",
+      "preset": "fine",
+      "Cl": 0.69429,
+      "Cd": 0.0235941,
+      "Cm": -0.0141216,
+      "exit_code": 0,
+      "residuals": {
+        "Phi": 1.0,
+        "p": 0.00108505,
+        "Ux": 3.72241e-06,
+        "Uy": 7.49639e-06,
+        "omega": 8.32513e-07,
+        "k": 5.89035e-06
+      },
+      "cells": null,
+      "yplus": {
+        "mean": 0.07993940333333333,
+        "min": 0.02580623,
+        "max": 0.1578838,
+        "p50": 0.06809925,
+        "p95": 0.15076214,
+        "n": 15
+      },
+      "patches_ok": true,
+      "mesh_time_s": null,
+      "total_time_s": 206.4,
+      "solve_time_s": 194.7
+    }
+  ]
+}

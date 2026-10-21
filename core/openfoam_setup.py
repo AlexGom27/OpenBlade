@@ -5,7 +5,7 @@ class OpenFoamSetup:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
         self.case_dir = case_dir
         
-    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500) -> None:
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "upwind") -> None:
         # Create directories
         for d in ["0", "constant", "system"]:
             os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
@@ -40,11 +40,11 @@ class OpenFoamSetup:
         # Calcular viscosidad cinemática a partir de Reynolds: nu = U * L / Re
         nu = (float(u_inlet) * float(chord)) / float(reynolds)
             
-        self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co, max_iters)
+        self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co, max_iters, momentum_scheme)
         self._write_constant(turbulence, nu)
         self._write_0(u_inlet, p_outlet, chord, turbulence, nu)
         
-    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500) -> None:
+    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "upwind") -> None:
         app_name = "pimpleFoam" if transient else "simpleFoam"
         initial_dt = delta_t if transient else "1"
         endTime  = end_time if transient else str(max_iters)
@@ -88,6 +88,17 @@ runTimeModifiable true;
 
 functions
 {{
+    yPlus
+    {{
+        type            yPlus;
+        libs            ("libfieldFunctionObjects.so");
+        // Escribir cada 100 iteraciones: con writeInterval 1 se crea un
+        // directorio por paso de tiempo y la E/S domina el coste del solver.
+        writeControl    timeStep;
+        writeInterval   100;
+        patches         (airfoil);
+    }}
+
     forceCoeffs
     {{
         type            forceCoeffs;
@@ -132,13 +143,17 @@ functions
             elif "Spalart" in turbulence_ui:
                 div_turb = """\n    div(phi,nuTilda) bounded Gauss upwind;"""
 
+        # linearUpwind necesita el esquema de gradiente como argumento;
+        # con upwind (1er orden) no aplica.
+        momentum_grad = " grad(U)" if momentum_scheme == "linearUpwind" else ""
+
         ddt = "Euler" if transient else "steadyState"
         fvSchemes = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object fvSchemes; }}
 ddtSchemes {{ default {ddt}; }}
 gradSchemes {{ default cellMDLimited Gauss linear 1; }}
 divSchemes {{
     default         none;
-    div(phi,U)      bounded Gauss upwind;{div_turb}
+    div(phi,U)      bounded Gauss {momentum_scheme}{momentum_grad};{div_turb}
     div((nuEff*dev2(T(grad(U))))) Gauss linear;
     div(div(phi,U)) Gauss linear;
 }}
@@ -272,7 +287,7 @@ internalField   uniform ({u_inlet} 0 0);
 boundaryField {{
     inlet {{ type fixedValue; value uniform ({u_inlet} 0 0); }}
     outlet {{ type zeroGradient; }}
-    walls_TB {{ type slip; }}
+    farfield {{ type slip; }}
     airfoil {{ type noSlip; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
@@ -286,7 +301,7 @@ internalField   uniform 0;
 boundaryField {{
     inlet {{ type zeroGradient; }}
     outlet {{ type fixedValue; value uniform {p_outlet}; }}
-    walls_TB {{ type zeroGradient; }}
+    farfield {{ type zeroGradient; }}
     airfoil {{ type zeroGradient; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
@@ -314,7 +329,7 @@ internalField   uniform {k_val:.6f};
 boundaryField {{
     inlet {{ type fixedValue; value uniform {k_val:.6f}; }}
     outlet {{ type zeroGradient; }}
-    walls_TB {{ type zeroGradient; }}
+    farfield {{ type zeroGradient; }}
     airfoil {{ type kqRWallFunction; value uniform {k_val:.6f}; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
@@ -329,7 +344,7 @@ internalField   uniform {epsilon_val:.6f};
 boundaryField {{
     inlet {{ type fixedValue; value uniform {epsilon_val:.6f}; }}
     outlet {{ type zeroGradient; }}
-    walls_TB {{ type zeroGradient; }}
+    farfield {{ type zeroGradient; }}
     airfoil {{ type epsilonWallFunction; value uniform {epsilon_val:.6f}; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
@@ -344,7 +359,7 @@ internalField   uniform {omega_val:.6f};
 boundaryField {{
     inlet {{ type fixedValue; value uniform {omega_val:.6f}; }}
     outlet {{ type zeroGradient; }}
-    walls_TB {{ type zeroGradient; }}
+    farfield {{ type zeroGradient; }}
     airfoil {{ type omegaWallFunction; value uniform {omega_val:.6f}; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
@@ -359,7 +374,7 @@ internalField   uniform {nuTilda_val:.6f};
 boundaryField {{
     inlet {{ type fixedValue; value uniform {nuTilda_val:.6f}; }}
     outlet {{ type zeroGradient; }}
-    walls_TB {{ type zeroGradient; }}
+    farfield {{ type zeroGradient; }}
     airfoil {{ type fixedValue; value uniform 0; }} 
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
@@ -375,7 +390,7 @@ internalField   uniform 1;
 boundaryField {{
     inlet {{ type fixedValue; value uniform 1; }}
     outlet {{ type zeroGradient; }}
-    walls_TB {{ type zeroGradient; }}
+    farfield {{ type zeroGradient; }}
     airfoil {{ type zeroGradient; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
@@ -391,7 +406,7 @@ internalField   uniform {Re_theta:.1f};
 boundaryField {{
     inlet {{ type fixedValue; value uniform {Re_theta:.1f}; }}
     outlet {{ type zeroGradient; }}
-    walls_TB {{ type zeroGradient; }}
+    farfield {{ type zeroGradient; }}
     airfoil {{ type zeroGradient; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
@@ -406,7 +421,7 @@ internalField   uniform 0;
 boundaryField {
     inlet { type calculated; value uniform 0; }
     outlet { type calculated; value uniform 0; }
-    walls_TB { type calculated; value uniform 0; }
+    farfield { type calculated; value uniform 0; }
     airfoil { type nutkWallFunction; value uniform 0; }
     frontAndBack { type empty; }
     defaultFaces { type empty; }
