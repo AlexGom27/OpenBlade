@@ -58,9 +58,19 @@ RUN . /usr/lib/openfoam/openfoam2512/etc/bashrc; \
     echo "--- .so generados ---" ; \
     find /root /opt -name "libpreciceAdapterFunctionObject.so" 2>/dev/null
 
+# --- Bindings de Python para el solver estructural -------------------------
+# El solido se resuelve con pyprecice + FEM en numpy: solidDisplacementFoam
+# no tiene adaptador y no puede hablar con preCICE directamente.
+# --break-system-packages porque la imagen base es PEP 668 (externally-managed).
+RUN LD_LIBRARY_PATH=/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} \
+    pip install --break-system-packages --no-cache-dir pyprecice==3.4.0 \
+    && LD_LIBRARY_PATH=/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} \
+       python3 -c "import precice; print('pyprecice', precice.__version__)"
+
 # --- Entorno --------------------------------------------------------------
 ENV LD_LIBRARY_PATH="/usr/local/lib:/opt/openfoam-adapter"
 ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+ENV PYTHONPATH="/data"
 
 # Verificación en tiempo de build: si algo falta, la imagen no se genera.
 RUN . /usr/lib/openfoam/openfoam2512/etc/bashrc; \

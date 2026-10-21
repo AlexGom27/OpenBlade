@@ -186,7 +186,7 @@ def build_precice_config(cfg: FsiConfig) -> str:
         if cfg.relaxation == "aitken":
             a('    <acceleration:aitken>')
             a(f'      <data name="{cfg.displacement_data}"'
-              f' mesh="{cfg.fluid_mesh}" />')
+              f' mesh="{cfg.solid_mesh}" />')
             a("    </acceleration:aitken>")
         elif cfg.relaxation == "constant":
             # Sintaxis verificada en los tests de preCICE:
@@ -196,16 +196,20 @@ def build_precice_config(cfg: FsiConfig) -> str:
             a("    </acceleration:constant>")
         # En preCICE 3 el tag se llama relative-convergence-measure
         a(f'    <relative-convergence-measure limit="{cfg.convergence_limit}"'
-          f' data="{cfg.displacement_data}" mesh="{cfg.fluid_mesh}" />')
+          f' data="{cfg.displacement_data}" mesh="{cfg.solid_mesh}" />')
 
     a(f'    <exchange data="{cfg.force_data}" mesh="{cfg.fluid_mesh}"'
       f' from="{cfg.fluid_participant}" to="{cfg.solid_participant}"'
       f' initialize="true" />')
-    # El desplazamiento se intercambia sobre la malla del FLUIDO: es donde se
-    # mide la convergencia y donde actúa el acelerador. Declararlo sobre la
-    # malla del sólido hace que preCICE rechace la configuración.
-    a(f'    <exchange data="{cfg.displacement_data}" mesh="{cfg.fluid_mesh}"'
-      f' from="{cfg.solid_participant}" to="{cfg.fluid_participant}" />')
+    # El exchange se declara sobre la malla del participante que PRODUCE el
+    # dato: el desplazamiento lo escribe el sólido en Solid-Mesh. Declararlo
+    # sobre Fluid-Mesh hace que preCICE aborte al arrancar con
+    # "Data Displacement on mesh Solid-Mesh didn't contain any data samples".
+    # La transferencia a la malla del fluido la hace el mapping de escritura
+    # del sólido; el fluido lo lee en su propia malla.
+    a(f'    <exchange data="{cfg.displacement_data}" mesh="{cfg.solid_mesh}"'
+      f' from="{cfg.solid_participant}" to="{cfg.fluid_participant}"'
+      f' initialize="true" />')
     a(f"  </coupling-scheme:{cfg.coupling_scheme}>")
     a("</precice-configuration>")
     a("")

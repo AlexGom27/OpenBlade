@@ -52,13 +52,17 @@ def test_participants_have_mapping_as_child():
         assert block.count("<receive-mesh") == 1
 
 
-def test_exchange_uses_fluid_mesh_for_displacement():
-    """La convergencia se mide sobre la malla del fluido: el exchange debe
-    declarar esa misma malla o preCICE rechaza la configuración."""
+def test_exchange_uses_producer_mesh_for_displacement():
+    """El exchange se declara sobre la malla del participante que PRODUCE el
+    dato (el sólido). preCICE aborta en ejecución con "Data Displacement on
+    mesh Solid-Mesh didn't contain any data samples" si se declara sobre
+    Fluid-Mesh: el contexto de datos del sólido queda vacío."""
     xml = build_precice_config(FsiConfig())
     line = [l for l in xml.splitlines() if 'data="Displacement"' in l and "<exchange" in l]
     assert line, "no se encontró el exchange de desplazamiento"
-    assert 'mesh="Fluid-Mesh"' in line[0]
+    assert 'mesh="Solid-Mesh"' in line[0]
+    assert 'from="Solid"' in line[0]
+    assert 'to="Fluid"' in line[0]
 
 
 def test_convergence_measure_name_for_precice3():
