@@ -313,6 +313,8 @@ class SolidParticipant:
         dt = p.get_max_time_step_size()
         history = []
         window = 0
+        iterations = 0
+        windows_done = 0
         t = 0.0
         u = np.zeros(self.mesh.n_dof)
         checkpoint = None
@@ -341,6 +343,13 @@ class SolidParticipant:
                     self.mesh.n_dof
                 )
 
+            # En un esquema implícito advance() se llama en CADA iteración de
+            # acoplamiento, no una vez por ventana de tiempo. Hay que distinguir
+            # ambos contadores o el resumen miente (77 iteraciones ≠ 77 ventanas).
+            iterations += 1
+            if p.is_time_window_complete():
+                windows_done += 1
+
             t += dt
 
             tip = int(self.mesh.interface_nodes[-1])
@@ -357,7 +366,11 @@ class SolidParticipant:
             window += 1
 
         p.finalize()
-        return {"windows": window, "history": history}
+        return {
+            "windows": windows_done,
+            "iterations": iterations,
+            "history": history,
+        }
 
 
 # --------------------------------------------------------------------------
@@ -402,7 +415,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         offset_y=args.offset_y,
     )
     result = solver.run(max_windows=args.max_windows)
-    print(f"ventanas completadas: {result['windows']}")
+    print(
+        f"ventanas de tiempo completadas: {result['windows']} "
+        f"({result['iterations']} iteraciones acopladas)"
+    )
     for row in result["history"][-3:]:
         print(
             f"  w={row['window']} t={row['time']:.6g} "
