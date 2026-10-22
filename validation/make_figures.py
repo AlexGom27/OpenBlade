@@ -172,7 +172,7 @@ def fig_cp():
 # 3/4/5. Campos (velocidad, presión, turbulencia)
 # --------------------------------------------------------------------------
 def _field_plot(mesh_2d, ax, field, title, cmap, label, vmin=None, vmax=None,
-                levels=40, logscale=False):
+                levels=40, logscale=False, clip_floor=None):
     data = mesh_2d.point_data.get(field)
     if data is None:
         data = mesh_2d.cell_data.get(field)
@@ -182,15 +182,47 @@ def _field_plot(mesh_2d, ax, field, title, cmap, label, vmin=None, vmax=None,
     if data is None:
         ax.text(0.5, 0.5, f"campo '{field}' no disponible", ha="center", transform=ax.transAxes)
         return
-    x = mesh_2d.points[:, 0]
-    y = mesh_2d.points[:, 1]
+    # Se dibujan las CARAS REALES de la malla, no una triangulación de la nube
+    # de puntos. Delaunay no sabe que el perfil es un hueco: lo rellena con
+    # triángulos espurios y pinta contornos de presión/velocidad DENTRO del
+    # alabe (se midieron 127 de 9559 triángulos, 1.3%).
+    from core.field_render import cell_polygons, cell_values_from_nodal
+    from matplotlib.collections import PolyCollection
+    from matplotlib.colors import Normalize
+
+    nodal = np.asarray(data).ravel()
+    polys = cell_polygons(mesh_2d)
+    cvals = cell_values_from_nodal(mesh_2d, nodal)
+
+    if clip_floor is not None:
+        # Para campos que abarcan muchos órdenes de magnitud (k, nut) el valor
+        # mínimo es casi cero y aplasta el resto contra el color más oscuro,
+        # que se lee como "sin datos". Se fija un suelo y se recorta.
+        cvals = np.maximum(cvals, clip_floor)
+        vmin = clip_floor
     if vmin is None:
-        vmin = float(np.nanpercentile(data, 1))
+        vmin = float(np.nanmin(cvals))
     if vmax is None:
-        vmax = float(np.nanpercentile(data, 99))
-    tpc = ax.tricontourf(x, y, data, levels=levels, cmap=cmap, vmin=vmin, vmax=vmax)
-    cb = plt.colorbar(tpc, ax=ax, shrink=0.85, pad=0.02)
-    cb.set_label(label)
+        vmax = float(np.nanpercentile(cvals, 99.5))
+
+    # Escala logarítmica opcional: k y nut abarcan 6 órdenes de magnitud y en
+    # escala lineal todo lo que no está en la estela se ve negro.
+    if logscale:
+        from matplotlib.colors import LogNorm
+        floor = clip_floor if clip_floor else max(float(np.nanmin(cvals[cvals > 0])), 1e-12)
+        cvals = np.maximum(cvals, floor)
+        vmin = floor
+        norm = LogNorm(vmin=vmin, vmax=vmax)
+        cb_label = label + "  (escala log)"
+    else:
+        norm = Normalize(vmin, vmax)
+        cb_label = label
+
+    pc = PolyCollection(polys, array=cvals, cmap=cmap,
+                        norm=norm, edgecolors="none")
+    ax.add_collection(pc)
+    cb = plt.colorbar(pc, ax=ax, shrink=0.85, pad=0.02)
+    cb.set_label(cb_label)
     ax.set_aspect("equal")
     ax.set_xlabel("x/c")
     ax.set_ylabel("y/c")
@@ -218,11 +250,11 @@ def fig_velocity():
     add_airfoil_outline(ax, boundary, color="k", lw=1.0)
     save(fig, "fig04_velocidad_dominio.png")
 
-    # Detalle cerca del perfil: recorte por CAJA (un clip por plano deja
-    # media figura vacía).
-    s2 = s.clip_box([-0.35, 1.65, -0.40, 0.40, -1, 1], invert=False)
+    # Detalle cerca del perfil. NO se recorta la malla con clip_box: eso parte
+    # las celdas y deja un mosaico de triángulos sueltos. Se dibuja el dominio
+    # completo y se limita la VISTA, que no toca la topología.
     fig, ax = plt.subplots(figsize=(9, 5))
-    _field_plot(s2, ax, "Umag",
+    _field_plot(s, ax, "Umag",
                 "Detalle de velocidad: borde de ataque, extradós y estela, α = 4°",
                 "turbo", "|U| [m/s]", levels=50, vmin=0, vmax=22)
     add_airfoil_outline(ax, boundary, color="k", lw=1.2)
@@ -251,7 +283,7 @@ def fig_turbulence():
     fig, ax = plt.subplots(figsize=(9, 5))
     _field_plot(s, ax, "k",
                 "Energía cinética de turbulencia — k [m²/s²], α = 4°",
-                "magma", "k [m²/s²]", levels=45)
+                "magma", "k [m²/s²]", levels=45, logscale=True, clip_floor=1e-6)
     add_airfoil_outline(ax, boundary, color="w", lw=1.2)
     ax.set_xlim(-0.6, 2.2)
     ax.set_ylim(-0.7, 0.7)
@@ -260,7 +292,7 @@ def fig_turbulence():
     fig, ax = plt.subplots(figsize=(9, 5))
     _field_plot(s, ax, "nut",
                 "Viscosidad turbulenta — νt [m²/s], α = 4°",
-                "viridis", "νt [m²/s]", levels=45)
+                "viridis", "νt [m²/s]", levels=45, logscale=True, clip_floor=1e-8)
     add_airfoil_outline(ax, boundary, color="r", lw=1.2)
     ax.set_xlim(-0.6, 2.2)
     ax.set_ylim(-0.7, 0.7)

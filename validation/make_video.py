@@ -160,96 +160,17 @@ def render_solid(frames_dir: str, out_dir: str, fps: int = 12,
 # --------------------------------------------------------------------------
 def render_fluid(case_dir: str, out_dir: str, field: str = "p",
                  fps: int = 12, out_path: str = "cfd.mp4") -> str:
-    """Vídeo de un campo del CFD sobre los tiempos guardados."""
-    import pyvista as pv
+    """Vídeo de un campo del CFD usando las caras reales de la malla.
 
-    foam = os.path.join(case_dir, "case.foam")
-    if not os.path.exists(foam):
-        open(foam, "w").close()
+    Se delega en ``core.field_render``, que dibuja los polígonos del corte en
+    vez de triangular la nube de puntos. Ésa era la causa de que aparecieran
+    contornos de presión y velocidad DENTRO del alabe: Delaunay cierra el
+    hueco porque no sabe que el perfil es un agujero.
+    """
+    from core.field_render import render_frames
 
-    r = pv.OpenFOAMReader(foam)
-    times = [t for t in r.time_values if t > 0]
-    if not times:
-        raise RuntimeError("El caso no tiene tiempos guardados con campos.")
-
-    os.makedirs(out_dir, exist_ok=True)
-    print(f"  {len(times)} tiempos en el caso")
-
-    # No todos los tiempos tienen los campos escritos: en los casos FSI el
-    # adaptador escribe sólo yPlus en los intermedios. Se descartan los que no
-    # contengan el campo pedido.
-    valid = []
-    for t in times:
-        d = os.path.join(case_dir, f"{t:g}")
-        if os.path.isdir(d) and os.path.exists(os.path.join(d, field)):
-            valid.append(t)
-    if not valid:
-        raise RuntimeError(
-            f"ningún tiempo contiene el campo {field!r}; revisa qué se escribió")
-    times = valid
-    print(f"  {len(times)} con el campo {field!r}: {times[0]:g} … {times[-1]:g}")
-
-    # Rango global del campo
-    vmin, vmax = np.inf, -np.inf
-    snaps = []
-    for t in times:
-        r.set_active_time_value(t)
-        m = r.read()["internalMesh"]
-        z0, z1 = m.bounds[4], m.bounds[5]
-        s = m.slice(normal="z", origin=(0, 0, (z0 + z1) / 2))
-        # Tras el corte, el campo puede quedar en point_data o en cell_data
-        # según cómo lo escriba el solver. Se comprueban ambos y sólo se
-        # convierte si hace falta (convertir un bloque ya nodal lo vacía).
-        data = s.point_data.get(field)
-        if data is None:
-            data = s.cell_data.get(field)
-            if data is not None:
-                s = s.cell_data_to_point_data()
-                data = s.point_data.get(field)
-        if data is None:
-            raise RuntimeError(
-                f"campo {field!r} no disponible; hay: "
-                f"{list(s.point_data.keys()) + list(s.cell_data.keys())}")
-
-        arr = np.asarray(data)
-        # Los campos vectoriales (U, displacement) llegan como (n, 3): para
-        # pintarlos hace falta la magnitud. Sin esto el triplot falla con
-        # "z array must have same length as triangulation".
-        if arr.ndim == 2 and arr.shape[1] == 3:
-            arr = np.linalg.norm(arr, axis=1)
-        else:
-            arr = arr.ravel()
-
-        snaps.append((t, s.points[:, :2].copy(), arr))
-        vmin = min(vmin, float(np.nanpercentile(data, 0.5)))
-        vmax = max(vmax, float(np.nanpercentile(data, 99.5)))
-
-    cmap = {"p": "coolwarm", "U": "turbo", "k": "magma",
-            "nut": "viridis"}.get(field, "viridis")
-    label = {"p": "p [m²/s²]", "U": "|U| [m/s]", "k": "k [m²/s²]",
-             "nut": "νt [m²/s]"}.get(field, field)
-
-    for k, (t, pts, vals) in enumerate(snaps):
-        fig, ax = plt.subplots(figsize=(9, 4))
-        tri = mtri.Triangulation(pts[:, 0], pts[:, 1])
-        tp = ax.tricontourf(tri, vals, levels=45, cmap=cmap, vmin=vmin, vmax=vmax)
-        # Recorte a la zona del perfil: el dominio completo (50c) deja el
-        # alabe en un píxel y no se ve nada de interés.
-        ax.set_xlim(-0.4, 1.8)
-        ax.set_ylim(-0.7, 0.7)
-        cb = fig.colorbar(tp, ax=ax, shrink=0.85, pad=0.02)
-        cb.set_label(label)
-        ax.set_aspect("equal")
-        ax.set_xlabel("x/c")
-        ax.set_ylabel("y/c")
-        ax.set_title(f"{label} — t = {t:g} s", fontsize=11)
-        fig.tight_layout()
-        fig.savefig(os.path.join(out_dir, f"f_{k:04d}.png"), dpi=110,
-                    facecolor="white")
-        plt.close(fig)
-        if (k + 1) % 10 == 0 or k == len(snaps) - 1:
-            print(f"  {k + 1}/{len(snaps)}")
-
+    files = render_frames(case_dir, field, out_dir)
+    print(f"  {len(files)} fotogramas")
     return encode(out_dir, out_path, fps=fps)
 
 

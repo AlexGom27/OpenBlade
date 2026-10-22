@@ -284,3 +284,56 @@ def test_nodal_tributary_area_matches_profile_perimeter():
         d2 = np.linalg.norm(c[(i + 1) % n] - c[i])
         seg[i] = 0.5 * (d1 + d2)
     assert seg.sum() == pytest.approx(2.02, abs=0.05)
+
+
+# --------------------------------------------------------------------------
+# Renderizado de campos: el alabe no debe tener datos dentro
+# --------------------------------------------------------------------------
+def test_cell_polygons_preserve_mesh_topology():
+    """Las caras deben venir de la malla, no de una triangulación de puntos.
+
+    Delaunay no sabe que el perfil es un hueco: lo rellena con triángulos
+    espurios y pinta contornos DENTRO del sólido.
+    """
+    import matplotlib.path as mpath
+    import numpy as np
+
+    from core.field_render import cell_polygons, mask_inside_airfoil
+    from core.structural_solver import naca0012_contour
+
+    # Malla sintética: cuadrado con un agujero cuadrado en el centro
+    pts = np.array([[0, 0], [1, 0], [1, 1], [0, 1],
+                    [0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]], float)
+
+    class FakeMesh:
+        points = np.column_stack([pts, np.zeros(len(pts))])
+        # 4 quads periféricos alrededor del agujero central
+        faces = np.array([
+            4, 0, 1, 5, 4,
+            4, 1, 2, 6, 5,
+            4, 2, 3, 7, 6,
+            4, 3, 0, 4, 7,
+        ])
+
+    polys = cell_polygons(FakeMesh())
+    assert len(polys) == 4
+    # Ningún polígono debe cubrir el centro del agujero
+    centres = np.array([p.mean(axis=0) for p in polys])
+    hole = np.array([[0.5, 0.5]])
+    assert not mpath.Path([[0.35, 0.35], [0.65, 0.35], [0.65, 0.65],
+                           [0.35, 0.65]]).contains_points(centres).any()
+    assert not mask_inside_airfoil(hole, naca0012_contour(50)).any()
+
+
+def test_nodal_values_converts_vectors_to_magnitude():
+    """U llega como (n,3); sin la magnitud el triplot falla."""
+    import numpy as np
+
+    from core.field_render import nodal_values
+
+    class FakeMesh:
+        point_data = {"U": np.array([[3.0, 4.0, 0.0], [0.0, 0.0, 0.0]])}
+        cell_data = {}
+
+    out = nodal_values(FakeMesh(), "U")
+    np.testing.assert_allclose(out, [5.0, 0.0])
