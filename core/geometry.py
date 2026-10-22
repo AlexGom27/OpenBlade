@@ -36,7 +36,17 @@ class NacaGeometry:
             
             xu, yu = x, yc + yt
             xl, yl = x, yc - yt
-            x_rot, y_rot = np.concatenate([xu[::-1], xl[1:]]), np.concatenate([yu[::-1], yl[1:]])
+            # Contorno cerrado SIN punto duplicado.
+            #
+            # `xu[::-1]` empieza por el borde de salida (x=1) y `xl[1:]` termina
+            # también en el borde de salida. Al concatenar, el último punto
+            # repetía el primero. `addSpline` no admite puntos coincidentes y
+            # OCC aborta con "Could not create spline".
+            #
+            # Se recorta el último punto: el borde de salida queda representado
+            # una sola vez y `build_geometry` cierra el contorno con una recta.
+            x_rot = np.concatenate([xu[::-1], xl[1:-1]])
+            y_rot = np.concatenate([yu[::-1], yl[1:-1]])
             
             # Rotación sobre el centro aerodinámico (25% de la cuerda)
             rad = np.radians(-self.aoa)
