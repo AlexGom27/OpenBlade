@@ -182,46 +182,57 @@ def _field_plot(mesh_2d, ax, field, title, cmap, label, vmin=None, vmax=None,
     if data is None:
         ax.text(0.5, 0.5, f"campo '{field}' no disponible", ha="center", transform=ax.transAxes)
         return
-    # Se dibujan las CARAS REALES de la malla, no una triangulación de la nube
-    # de puntos. Delaunay no sabe que el perfil es un hueco: lo rellena con
-    # triángulos espurios y pinta contornos de presión/velocidad DENTRO del
-    # alabe (se midieron 127 de 9559 triángulos, 1.3%).
-    from core.field_render import cell_polygons, cell_values_from_nodal
-    from matplotlib.collections import PolyCollection
-    from matplotlib.colors import Normalize
+    # Triangulación construida desde las CARAS REALES de la malla.
+    #
+    # Dos requisitos a la vez:
+    #   1. No triangular la nube de puntos: Delaunay no sabe que el perfil es
+    #      un hueco y lo rellenaría con triángulos espurios, pintando contornos
+    #      DENTRO del alabe.
+    #   2. Interpolar entre nodos: un color plano por celda (PolyCollection)
+    #      hace visible el reticulado de la malla.
+    #
+    # Abanicar cada polígono en triángulos cumple ambos.
+    import matplotlib.tri as mtri
+    from core.field_render import mesh_triangulation
 
     nodal = np.asarray(data).ravel()
-    polys = cell_polygons(mesh_2d)
-    cvals = cell_values_from_nodal(mesh_2d, nodal)
+    pts, tris = mesh_triangulation(mesh_2d)
 
     if clip_floor is not None:
-        # Para campos que abarcan muchos órdenes de magnitud (k, nut) el valor
-        # mínimo es casi cero y aplasta el resto contra el color más oscuro,
-        # que se lee como "sin datos". Se fija un suelo y se recorta.
-        cvals = np.maximum(cvals, clip_floor)
+        nodal = np.maximum(nodal, clip_floor)
         vmin = clip_floor
     if vmin is None:
-        vmin = float(np.nanmin(cvals))
+        vmin = float(np.nanmin(nodal))
     if vmax is None:
-        vmax = float(np.nanpercentile(cvals, 99.5))
+        vmax = float(np.nanpercentile(nodal, 99.5))
 
     # Escala logarítmica opcional: k y nut abarcan 6 órdenes de magnitud y en
     # escala lineal todo lo que no está en la estela se ve negro.
     if logscale:
+        # k y nut abarcan 6 órdenes: niveles logarítmicos y norm=LogNorm.
+        # Sin el norm explícito, tricontourf aplica una escala lineal a los
+        # niveles logarítmicos y el resultado queda casi todo negro.
         from matplotlib.colors import LogNorm
-        floor = clip_floor if clip_floor else max(float(np.nanmin(cvals[cvals > 0])), 1e-12)
-        cvals = np.maximum(cvals, floor)
+        floor = clip_floor if clip_floor else max(float(np.nanmin(nodal[nodal > 0])), 1e-12)
+        nodal = np.maximum(nodal, floor)
         vmin = floor
-        norm = LogNorm(vmin=vmin, vmax=vmax)
+        levels_ = np.logspace(np.log10(floor), np.log10(vmax), levels)
         cb_label = label + "  (escala log)"
+        pc = ax.tricontourf(
+            mtri.Triangulation(pts[:, 0], pts[:, 1], triangles=tris),
+            nodal, levels=levels_, cmap=cmap,
+            norm=LogNorm(vmin=floor, vmax=vmax), extend="both")
     else:
-        norm = Normalize(vmin, vmax)
+        levels_ = np.linspace(vmin, vmax, levels)
         cb_label = label
-
-    pc = PolyCollection(polys, array=cvals, cmap=cmap,
-                        norm=norm, edgecolors="none")
-    ax.add_collection(pc)
+        pc = ax.tricontourf(mtri.Triangulation(pts[:, 0], pts[:, 1], triangles=tris),
+                            nodal, levels=levels_, cmap=cmap,
+                            vmin=vmin, vmax=vmax, extend="both")
     cb = plt.colorbar(pc, ax=ax, shrink=0.85, pad=0.02)
+    if logscale:
+        from matplotlib.ticker import LogFormatterMathtext
+        cb.formatter = LogFormatterMathtext(base=10)
+        cb.update_ticks()
     cb.set_label(cb_label)
     ax.set_aspect("equal")
     ax.set_xlabel("x/c")

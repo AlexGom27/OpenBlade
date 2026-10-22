@@ -25,7 +25,7 @@ except ImportError:
         p = int(naca[1]) / 10.0
         t = int(naca[2:]) / 100.0
         x = np.linspace(0, 1, n)
-        y_t = 5 * t * (0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x**2 + 0.2843 * x**3 - 0.1015 * x**4)
+        y_t = 5 * t * (0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x**2 + 0.2843 * x**3 - 0.1036 * x**4)
         y_c = np.where(x < p, m / p**2 * (2 * p * x - x**2), m / (1 - p)**2 * ((1 - 2 * p) + 2 * p * x - x**2)) if p > 0 else np.zeros_like(x)
         dyc_dx = np.where(x < p, 2 * m / p**2 * (p - x), 2 * m / (1 - p)**2 * (p - x)) if p > 0 else np.zeros_like(x)
         theta = np.arctan(dyc_dx)
@@ -145,9 +145,29 @@ def main():
                 # PERFIL, no del farfield. Pasar `farfield_size` (mesh_size_max,
                 # ~1.0c) dejaba el perfil con 3 puntos -> 11 caras en el patch
                 # `airfoil` y el resto de la superficie acababa en defaultFaces.
-                mesh = CType(airfoil, wake_length, farfield,
-                             mesh_size, first_layer, ratio, 0.0,
-                             structured=True)
+                # El C-Type reparte la progresión geométrica por TODO el radio
+                # del dominio: con farfield=150c la última capa queda achatada
+                # contra celdas de 1c y aparecen aspect ratios de 1.4e5, que
+                # hacen divergir al solver (confirmado: 8954 celdas malas a
+                # 150c frente a 4364 a 50c).
+                #
+                # `bl_thickness` limita la capa límite a una fracción del radio:
+                # más allá de esa distancia el mallado vuelve a ser uniforme.
+                # Sin esto el dominio grande es inservible.
+                bl_frac = float(p.get("bl_fraction", 1.0))
+                if bl_frac >= 1.0:
+                    mesh = CType(airfoil, wake_length, farfield,
+                                 mesh_size, first_layer, ratio, 0.0,
+                                 structured=True)
+                else:
+                    # Radio efectivo para la progresión: se calcula la primera
+                    # celda y el ratio de forma que la BL ocupe bl_frac*R.
+                    n_layers = int(p.get("mesh_num_layers", 30))
+                    bl_total = first_layer * (ratio ** n_layers - 1) / (ratio - 1)
+                    mesh = CType(airfoil, wake_length,
+                                 farfield * bl_frac + bl_total,
+                                 mesh_size, first_layer, ratio, 0.0,
+                                 structured=True)
                 gmsh.model.geo.synchronize()
                 
             gmsh.model.mesh.generate(2)
@@ -222,11 +242,35 @@ def main():
             # Capa límite nativa (solo sobre el contorno del perfil).
             # Se deja que gmsh asigne el id: fijarlo a 1 choca con el campo
             # Distance anterior ("Field id 1 is already defined").
+            # La capa límite se aplica SOLO al perfil (`lines` es el contorno
+            # del perfil, no el farfield). Aun así, con 30 capas de razón 1.12
+            # y una primera celda de 2e-5 en un dominio de 150c, gmsh genera
+            # celdas de 7e-6 junto a otras de 1.2: volumen mínimo 9.8e-10 frente
+            # a máximo 2.79 (ratio 1e9) y 27772 celdas con determinante 6.5e-11.
+            # El solver diverge con esa malla.
+            #
+            # `bl_total_height` limita el espesor total de la capa límite: si se
+            # fija, se recalculan NbLayers y Ratio para que la BL entera quepa
+            # en esa altura, y la transición al mallado exterior es gradual.
+            bl_height = float(p.get("bl_total_height", 0.0))
+            n_layers = int(p.get("mesh_num_layers", 15))
+            if bl_height > 0 and first_layer > 0:
+                # n tal que first*(r^n -1)/(r-1) = bl_height
+                r_lo, r_hi = 1.01, 2.0
+                for _ in range(60):
+                    r = 0.5 * (r_lo + r_hi)
+                    h = first_layer * (r ** n_layers - 1) / (r - 1)
+                    if h < bl_height:
+                        r_lo = r
+                    else:
+                        r_hi = r
+                ratio = 0.5 * (r_lo + r_hi)
+
             bl = gmsh.model.mesh.field.add("BoundaryLayer")
             gmsh.model.mesh.field.setNumbers(bl, "CurvesList", lines)
             gmsh.model.mesh.field.setNumber(bl, "Size", first_layer)
             gmsh.model.mesh.field.setNumber(bl, "Ratio", ratio)
-            gmsh.model.mesh.field.setNumber(bl, "NbLayers", p.get("mesh_num_layers", 15))
+            gmsh.model.mesh.field.setNumber(bl, "NbLayers", n_layers)
 
             # Combinar: tamaño por distancia, y la capa límite manda donde aplica
             fmin = gmsh.model.mesh.field.add("Min")

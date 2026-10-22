@@ -26,7 +26,7 @@ class NacaGeometry:
             m, p, t = int(self.naca_code[0])/100.0, int(self.naca_code[1])/10.0, int(self.naca_code[2:])/100.0
             beta = np.linspace(0, np.pi, n_points)
             x = self.chord * (0.5 * (1 - np.cos(beta)))
-            yt = 5 * t * self.chord * (0.2969 * np.sqrt(x / self.chord) - 0.1260 * (x / self.chord) - 0.3516 * (x / self.chord)**2 + 0.2843 * (x / self.chord)**3 - 0.1015 * (x / self.chord)**4)
+            yt = 5 * t * self.chord * (0.2969 * np.sqrt(x / self.chord) - 0.1260 * (x / self.chord) - 0.3516 * (x / self.chord)**2 + 0.2843 * (x / self.chord)**3 - 0.1036 * (x / self.chord)**4)
             yc = np.zeros_like(x)
             if p > 0:
                 for i in range(n_points):
