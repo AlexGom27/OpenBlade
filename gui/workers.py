@@ -145,7 +145,17 @@ class SimWorker(QObject):
                 pass
 
     def stop(self) -> None:
-        """Termina el QProcess del solver (si sigue vivo)."""
+        """Detiene la simulación de verdad, contenedor incluido.
+
+        Matar sólo el QProcess deja huérfano el contenedor Docker: el cliente
+        muere, el contenedor sigue consumiendo CPU. Es lo que ocurrió con una
+        corrida que siguió viva dos horas después de pulsar detener.
+
+        Orden:
+          1. Pedir al script que aborte (SIGTERM al QProcess).
+          2. Matar el contenedor de OpenFOAM por imagen, que es la única forma
+             fiable de pararlo desde fuera del proceso hijo.
+        """
         if self.process is not None:
             try:
                 if self.process.state() != QProcess.NotRunning:
@@ -154,6 +164,21 @@ class SimWorker(QObject):
                         self.process.kill()
             except Exception:
                 pass
+
+        # Limpieza del contenedor, independiente del QProcess.
+        try:
+            import subprocess as _sp
+            ids = _sp.run(["docker", "ps", "-q", "--filter",
+                           "ancestor=opencfd/openfoam-default"],
+                          capture_output=True, text=True, timeout=15).stdout.split()
+            for cid in ids:
+                _sp.run(["docker", "kill", cid], capture_output=True,
+                        text=True, timeout=15)
+            if ids:
+                self.log_msg.emit(
+                    f"🛑 {len(ids)} contenedor(es) de OpenFOAM detenido(s).")
+        except Exception as e:  # noqa: BLE001
+            self.log_msg.emit(f"⚠️ No se pudo limpiar el contenedor: {e}")
 
     def on_finished(self, exit_code):
         # Volcar la última línea si el proceso no terminó con salto de línea

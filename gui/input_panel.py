@@ -1,4 +1,4 @@
-from qtpy.QtWidgets import (QWidget, QFormLayout, QLineEdit, QDoubleSpinBox, 
+from qtpy.QtWidgets import (QWidget, QFormLayout, QLineEdit, QDoubleSpinBox, QLabel,
     QVBoxLayout, QGroupBox, QComboBox, QPushButton, QFileDialog, QHBoxLayout,
     QToolButton, QSizePolicy, QFrame, QLayout, QDialog, QDialogButtonBox, QCheckBox, QSpinBox)
 from qtpy.QtCore import Qt, QPropertyAnimation, QParallelAnimationGroup
@@ -132,10 +132,29 @@ class InputPanel(QWidget):
         self.btn_stop_sweep.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; padding: 6px;")
         geom_layout.addRow(self.btn_stop_sweep)
 
+        # Pausar: congela el contenedor (SIGSTOP) sin perder el estado de la
+        # simulación. Reanudar lo descongela. Detener sí termina y libera.
+        self.btn_pause_sim = QPushButton("⏸️ Pausar")
+        self.btn_pause_sim.setVisible(False)
+        self.btn_pause_sim.setStyleSheet(
+            "background-color: #f9a825; color: #1a1a1a; font-weight: bold; "
+            "padding: 6px;")
+        geom_layout.addRow(self.btn_pause_sim)
+
         self.btn_stop_sim = QPushButton("🛑 Detener Simulación")
         self.btn_stop_sim.setVisible(False)
         self.btn_stop_sim.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; padding: 6px;")
         geom_layout.addRow(self.btn_stop_sim)
+
+        # Panel de progreso en vivo. Se rellena desde MainWindow con los datos
+        # del solver: tiempo simulado, porcentaje, ritmo y pasos.
+        self.progress_label = QLabel("")
+        self.progress_label.setVisible(False)
+        self.progress_label.setWordWrap(True)
+        self.progress_label.setStyleSheet(
+            "background: #11202e; color: #cfe3f5; padding: 8px; "
+            "border-radius: 4px; font-family: Menlo, monospace; font-size: 9px;")
+        geom_layout.addRow(self.progress_label)
         
         geom_box.setContentLayout(geom_layout)
         

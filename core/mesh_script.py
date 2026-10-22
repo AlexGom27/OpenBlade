@@ -73,15 +73,19 @@ def main():
         first_layer = p.get("bl_dist_min", 0.001) * chord # Ahora sí usa el parámetro de capa límite
         ratio = p.get("mesh_growth_rate", 1.15)
         farfield_size = p.get("mesh_size_max", 1.0) * chord # Para que no quede tupido lejos
-        # 12c por defecto: la estela del NACA 0012 a alta incidencia se extiende
-        # varios cientos de cuerdas; con 5c el contorno la trunca y el Cd
-        # se distorsiona. El valor debe coincidir con DOMAIN_DEFAULT de
-        # core/geometry.py para que la previsualización no engañe.
-        wake_length = p.get("wake_length", 12.0) * chord
-        # Radio/caja del dominio exterior en cuerdas. Configurable para poder
-        # hacer estudios de sensibilidad (NASA TMR recomienda >100c sin
-        # corrección de vórtice lejano; con 10c el bloqueo altera Cl y Cd).
+        # --- Proporciones del volumen de control --------------------------
+        #
+        # Criterio: NASA TMR, "Effect of Farfield Boundary" (naca0012_val_
+        # ffeffect.html) — 500c libre de bloqueo, 30c sesga el Cd sin
+        # corrección PV (Thomas & Salas, AIAA J. 24(7):1074, 1986).
+        #
+        # La topología es C-Grid: semicírculo de radio `farfield` delante y
+        # caja de longitud `wake_length` detrás. Si la estela queda más corta
+        # que el radio lateral, el contorno la trunca y el Cd se distorsiona.
         farfield = float(p.get("farfield", 10.0)) * chord
+        wake_length = float(p.get("wake_length", 12.0)) * chord
+        if wake_length < farfield:
+            wake_length = max(wake_length, farfield)
         depth = float(p.get("depth", 0.1)) * chord
         
         gmsh.initialize()
@@ -242,6 +246,29 @@ def main():
             gmsh.model.mesh.field.setNumber(thr, "SizeMax", farfield_size)
             gmsh.model.mesh.field.setNumber(thr, "DistMin", 0.0)
             gmsh.model.mesh.field.setNumber(thr, "DistMax", grow_dist)
+
+            # ---- Refinamiento de la estela ----
+            #
+            # El Threshold sobre el perfil refina radialmente: a 2c del borde
+            # de salida ya no aporta nada y la estela queda con celdas del
+            # tamaño del campo lejano. Un campo Box sobre la franja
+            # y = +-0.06c, desde el borde de salida hasta la salida, impone
+            # tamaño pequeño ahí y transiciona en `Thickness`. Se combina con
+            # el Threshold del perfil mediante Min (manda el más fino).
+            box = gmsh.model.mesh.field.add("Box")
+            gmsh.model.mesh.field.setNumber(box, "VIn", mesh_size * 1.5)
+            gmsh.model.mesh.field.setNumber(box, "VOut", farfield_size)
+            gmsh.model.mesh.field.setNumber(box, "XMin", 1.0 * chord)
+            gmsh.model.mesh.field.setNumber(box, "XMax", wake_length)
+            gmsh.model.mesh.field.setNumber(box, "YMin", -0.06 * chord)
+            gmsh.model.mesh.field.setNumber(box, "YMax", 0.06 * chord)
+            gmsh.model.mesh.field.setNumber(box, "ZMin", -1.0)
+            gmsh.model.mesh.field.setNumber(box, "ZMax", 1.0)
+            gmsh.model.mesh.field.setNumber(box, "Thickness", 0.30 * chord)
+
+            fmin = gmsh.model.mesh.field.add("Min")
+            gmsh.model.mesh.field.setNumbers(fmin, "FieldsList", [thr, box])
+            gmsh.model.mesh.field.setAsBackgroundMesh(fmin)
 
             # Capa límite nativa (solo sobre el contorno del perfil).
             # Se deja que gmsh asigne el id: fijarlo a 1 choca con el campo

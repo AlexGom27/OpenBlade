@@ -17,6 +17,7 @@ from .workers import MeshWorker, SweepWorker
 
 from core.geometry import NacaGeometry
 from core.meshing import NacaMesher
+import time
 
 class MainWindow(QMainWindow):
     log_signal = Signal(str)
@@ -153,6 +154,7 @@ class MainWindow(QMainWindow):
         self.input_panel.btn_results.clicked.connect(self.on_results)
         self.input_panel.btn_stop_sweep.clicked.connect(self.on_stop_sweep)
         self.input_panel.btn_stop_sim.clicked.connect(self.on_stop_sim)
+        self.input_panel.btn_pause_sim.clicked.connect(self.on_pause_sim)
 
     def log(self, text: str) -> None:
         self.log_console.append(text)
@@ -282,6 +284,16 @@ class MainWindow(QMainWindow):
         self.input_panel.btn_run.setEnabled(False)
         self.input_panel.btn_stop_sim.setVisible(True)
         self.input_panel.btn_stop_sim.setEnabled(True)
+        self.input_panel.btn_pause_sim.setVisible(True)
+        self.input_panel.btn_pause_sim.setEnabled(True)
+        self.input_panel.btn_pause_sim.setText("⏸️ Pausar")
+        self._paused = False
+        self._sim_steps = 0
+        self._last_t = -1.0
+        self._sim_t0 = time.time()
+        self._sim_end_time = float(p.get("end_time", 0.5))
+        self.input_panel.progress_label.setVisible(True)
+        self.input_panel.progress_label.setText("Iniciando...")
         self.sim_worker = SimWorker(self.solver_runner, p, msh_file)
         self.sim_worker.log_msg.connect(self.log)
         self.sim_worker.residual_data.connect(self.on_residual_data)
@@ -383,6 +395,78 @@ class MainWindow(QMainWindow):
 
         self._reset_run_state()
 
+    def on_pause_sim(self) -> None:
+        """Pausa o reanuda el contenedor del solver sin perder el estado.
+
+        Se usa `docker pause` / `docker unpause`, que envían SIGSTOP/SIGCONT
+        al proceso dentro del contenedor. A diferencia de detener, conserva el
+        campo de flujo y los ficheros de tiempo ya escritos: reanudar continúa
+        desde donde iba.
+        """
+        import subprocess as sp
+
+        if getattr(self, "_paused", False):
+            action, label = "unpause", "⏸️ Pausar"
+            self.log("▶️ Reanudando simulación...")
+        else:
+            action, label = "pause", "▶️ Reanudar"
+            self.log("⏸️ Pausando simulación...")
+
+        try:
+            ids = sp.run(["docker", "ps", "-q", "--filter",
+                          "ancestor=opencfd/openfoam-default"],
+                         capture_output=True, text=True, timeout=15).stdout.split()
+            for cid in ids:
+                sp.run(["docker", action, cid], capture_output=True,
+                       text=True, timeout=15)
+            self._paused = not getattr(self, "_paused", False)
+            self.input_panel.btn_pause_sim.setText(label)
+            self.log(f"   {'Pausada' if self._paused else 'En marcha'} "
+                     f"({len(ids)} contenedor(es)).")
+        except Exception as e:  # noqa: BLE001
+            self.log(f"⚠️ No se pudo {'pausar' if action == 'pause' else 'reanudar'}: {e}")
+
+    def _update_progress(self, t_current: float, n_steps: int = 0) -> None:
+        """Rellena el panel de progreso con tiempo, porcentaje y ritmo.
+
+        Los datos salen del propio solver: `t_current` es el tiempo simulado
+        que llega con cada RESIDUAL_DATA, y `n_steps` el número de muestras
+        vistas. El ritmo se calcula con el reloj de pared.
+        """
+        lbl = self.input_panel.progress_label
+        # No se comprueba isVisible(): con la ventana aún no mostrada (o en
+        # tests offscreen) devuelve False aunque el widget esté habilitado, y
+        # el panel se quedaba vacío.
+        if lbl is None:
+            return
+
+        t0 = getattr(self, "_sim_t0", None)
+        if t0 is None:
+            return
+        elapsed_min = (time.time() - t0) / 60.0
+        end = getattr(self, "_sim_end_time", 0.5) or 0.5
+        pct = 100.0 * t_current / end if end > 0 else 0.0
+
+        if n_steps > 0 and elapsed_min > 0:
+            per_step = elapsed_min / n_steps
+            restante = (end - t_current) / max(t_current / n_steps, 1e-9)
+            eta = restante / 60.0
+            eta_txt = (f"{eta:.0f} h" if eta > 90 else f"{eta:.0f} min")
+            ritmo = f"{n_steps} pasos en {elapsed_min:.0f} min → {per_step:.1f} min/paso"
+        else:
+            eta_txt, ritmo = "—", "—"
+
+        ahora = time.strftime("%H:%M")
+        inicio = time.strftime("%H:%M", time.localtime(t0))
+        estado = "⏸ PAUSADA" if getattr(self, "_paused", False) else "▶ en marcha"
+
+        lbl.setText(
+            f"{estado}   {inicio} → {ahora}  ({elapsed_min:.0f} min)\n"
+            f"Progreso:  t = {t_current:.4g} de {end:g} s   ({pct:.1f}%)\n"
+            f"Falta:     {100 - pct:.1f}%   ·   ETA ~{eta_txt}\n"
+            f"Ritmo:     {ritmo}"
+        )
+
     def on_stop_sim(self) -> None:
         """Detiene una simulación de punto único en curso."""
         if self.sim_worker is None:
@@ -436,11 +520,26 @@ class MainWindow(QMainWindow):
 
 
     def on_residual_data(self, field: str, val: float, time: float) -> None:
+        """Actualiza la gráfica de residuales y el panel de progreso.
+
+        `time` es el tiempo simulado que reporta OpenFOAM en esa iteración;
+        se usa tanto para el eje X de la gráfica como para calcular el avance.
+        """
         if hasattr(self, 'res_plot'):
             try:
                 self.res_plot.update_plot(field, val, time)
             except Exception as e:
                 print(f"Error plot residual: {e}")
+
+        # Contar pasos distintos: cada iteración puede reportar varias
+        # ecuaciones (Ux, Uy, p, k, omega) con el mismo tiempo.
+        if not hasattr(self, "_sim_steps"):
+            self._sim_steps = 0
+            self._last_t = -1.0
+        if time > getattr(self, "_last_t", -1.0):
+            self._sim_steps += 1
+            self._last_t = time
+        self._update_progress(time, self._sim_steps)
 
     def refresh_plots(self) -> None:
         # Solo redibujar si hay cambios pendientes y no estamos saturando
