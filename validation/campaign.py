@@ -223,6 +223,20 @@ def run_case(name: str, entry: dict, mesh_only: bool = False) -> dict:
         runner = SolverRunner(case_dir=work, native=False)
         runner.run_gmshToFoam(msh)
 
+        # Inicialización con flujo potencial ANTES de simpleFoam.
+        #
+        # Sin esto el caso arranca con U uniforme en todo el dominio. A ángulo
+        # alto la estela está desviada y ese estado inicial es incoherente: el
+        # solver diverge en ~13 iteraciones con SIGFPE. La validación anterior
+        # (run_validation.py) sí llamaba a potentialFoam; la campaña no.
+        pot_done = threading.Event()
+        runner.run_potentialFoam(
+            done_callback=lambda c: pot_done.set())
+        if not pot_done.wait(timeout=900):
+            results.append({"aoa": aoa, "ok": False,
+                            "error": "timeout en potentialFoam"})
+            continue
+
         done = threading.Event()
         rc = {"code": None}
         runner.run_solver("simpleFoam",

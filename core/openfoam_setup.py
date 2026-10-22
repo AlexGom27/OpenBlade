@@ -145,7 +145,19 @@ functions
 
         # linearUpwind necesita el esquema de gradiente como argumento;
         # con upwind (1er orden) no aplica.
-        momentum_grad = " grad(U)" if momentum_scheme == "linearUpwind" else ""
+        # Cada esquema de convección tiene su sintaxis:
+        #   upwind                          -> sin argumentos
+        #   linearUpwind                    -> requiere el gradiente: grad(U)
+        #   limitedLinearV                  -> requiere un coeficiente 0..1
+        # Escribir "limitedLinearV" a secas hace que OpenFOAM aborte al leer
+        # fvSchemes. Se normaliza aquí.
+        if momentum_scheme == "linearUpwind":
+            momentum_grad = " grad(U)"
+        elif momentum_scheme.startswith("limitedLinear"):
+            momentum_grad = "" if momentum_scheme.split()[-1].replace(".", "").isdigit() \
+                else " 1"
+        else:
+            momentum_grad = ""
 
         ddt = "Euler" if transient else "steadyState"
         fvSchemes = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object fvSchemes; }}
