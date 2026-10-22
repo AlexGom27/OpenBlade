@@ -220,8 +220,10 @@ class InputPanel(QWidget):
         bl_min_layout.addWidget(self.btn_yplus)
         
         self.wake_length = QDoubleSpinBox()
-        self.wake_length.setRange(1.0, 30.0)
-        self.wake_length.setValue(5.0)
+        self.wake_length.setRange(1.0, 40.0)
+        # 12c: coherente con DOMAIN_DEFAULT de core/geometry.py. Con 5c la
+        # estela no cabe en el dominio y el contorno la trunca.
+        self.wake_length.setValue(12.0)
         self.wake_length.setDecimals(1)
         self.wake_length.setSuffix(" c")
         

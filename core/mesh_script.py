@@ -73,7 +73,11 @@ def main():
         first_layer = p.get("bl_dist_min", 0.001) * chord # Ahora sí usa el parámetro de capa límite
         ratio = p.get("mesh_growth_rate", 1.15)
         farfield_size = p.get("mesh_size_max", 1.0) * chord # Para que no quede tupido lejos
-        wake_length = p.get("wake_length", 5.0) * chord
+        # 12c por defecto: la estela del NACA 0012 a alta incidencia se extiende
+        # varios cientos de cuerdas; con 5c el contorno la trunca y el Cd
+        # se distorsiona. El valor debe coincidir con DOMAIN_DEFAULT de
+        # core/geometry.py para que la previsualización no engañe.
+        wake_length = p.get("wake_length", 12.0) * chord
         # Radio/caja del dominio exterior en cuerdas. Configurable para poder
         # hacer estudios de sensibilidad (NASA TMR recomienda >100c sin
         # corrección de vórtice lejano; con 10c el bloqueo altera Cl y Cd).
