@@ -155,28 +155,39 @@ class InputPanel(QWidget):
         
         self.mesh_size_min = QDoubleSpinBox()
         self.mesh_size_min.setRange(0.001, 1.0)
-        self.mesh_size_min.setValue(0.02) # Más grueso para cálculo rápido
+        # Valor validado contra NASA TM 4074: 0.006c da error de Cd < 2% en el
+        # NACA 0012 a Re=6e6. Con 0.02c la malla no resuelve la capa límite.
         self.mesh_size_min.setDecimals(4)
+        self.mesh_size_min.setValue(0.006)
         self.mesh_size_min.setSingleStep(0.001)
         self.mesh_size_min.setSuffix(" c")
         self.mesh_size_min.setToolTip("En fracciones de cuerda")
         
         self.mesh_size_max = QDoubleSpinBox()
         self.mesh_size_max.setRange(0.01, 10.0)
-        self.mesh_size_max.setValue(1.0) # Más grueso para cálculo rápido
+        # 0.5c en el farfield a 50c de distancia: equilibrio entre coste y que la
+        # estela no se refleje. Con 1.0c la malla exterior es demasiado gruesa.
         self.mesh_size_max.setDecimals(3)
+        self.mesh_size_max.setValue(0.5)
         self.mesh_size_max.setSuffix(" c")
         
         self.bl_dist_min = QDoubleSpinBox()
-        self.bl_dist_min.setRange(0.00001, 1.0)
-        self.bl_dist_min.setValue(0.05) # Capa límite más gruesa
+        # La primera celda debe dar y+ ~ 1. Para Re=6e6 y U=15 m/s eso es ~2e-5c.
+        # Con 0.05c la "capa límite" es MÁS GRUESA QUE EL PERFIL (0.12c de
+        # espesor) y no resuelve nada.
+        self.bl_dist_min.setRange(0.000001, 0.1)
+        # setDecimals ANTES de setValue: con los decimales por defecto (2),
+        # 0.00002 se redondea a 0.00 y la capa límite desaparece.
         self.bl_dist_min.setDecimals(5)
+        self.bl_dist_min.setValue(0.00002)
         self.bl_dist_min.setSingleStep(0.001)
         self.bl_dist_min.setSuffix(" c")
         
         self.mesh_num_layers = QSpinBox()
         self.mesh_num_layers.setRange(1, 100)
-        self.mesh_num_layers.setValue(5) # Menos capas para cálculo rápido
+        # 30 capas es lo mínimo para resolver el gradiente con k-omega SST.
+        # Con 5 capas el perfil queda prácticamente sin capa límite.
+        self.mesh_num_layers.setValue(30)
 
         
         self.mesh_growth_rate = QDoubleSpinBox()
@@ -193,7 +204,9 @@ class InputPanel(QWidget):
         
         self.mesh_nb_points = QSpinBox()
         self.mesh_nb_points.setRange(50, 2000)
-        self.mesh_nb_points.setValue(100)
+        # 400 puntos en el contorno: menos deja el borde de ataque mal definido y
+        # el patch `airfoil` con muy pocas caras.
+        self.mesh_nb_points.setValue(400)
         self.mesh_nb_points.setSingleStep(50)
         self.mesh_nb_points.setSuffix(" pts")
         self.mesh_nb_points.setToolTip("Puntos en el contorno del perfil (mayor valor = líneas más ortogonales)")
@@ -212,6 +225,20 @@ class InputPanel(QWidget):
         self.wake_length.setDecimals(1)
         self.wake_length.setSuffix(" c")
         
+        # Dominio exterior en cuerdas. Falta este control y sin él el
+        # mesh_script usa 10c, un dominio 5x menor que el validado (50c).
+        # Con 10c la estela se refleja en el contorno y el Cd se distorsiona.
+        self.farfield = QDoubleSpinBox()
+        self.farfield.setRange(5.0, 500.0)
+        self.farfield.setDecimals(0)
+        self.farfield.setValue(50.0)
+        self.farfield.setSingleStep(5.0)
+        self.farfield.setSuffix(" c")
+        self.farfield.setToolTip(
+            "Radio del dominio exterior. NASA TMR recomienda 500c para "
+            "resultados libres de bloqueo, pero el C-Grid estructurado produce "
+            "celdas degeneradas por encima de ~60c. 50c es el compromiso validado.")
+
         self.wake_refine = QDoubleSpinBox()
         self.wake_refine.setRange(0.5, 5.0)
         self.wake_refine.setValue(1.0)
@@ -537,6 +564,7 @@ class InputPanel(QWidget):
             "mesh_curvature": self.mesh_curvature.value(),
             "mesh_nb_points": self.mesh_nb_points.value(),
             "wake_length": self.wake_length.value(),
+            "farfield": self.farfield.value(),
             "wake_refine": self.wake_refine.value(),
             "regime": self.regime_selector.currentText(),
             "reynolds": self.reynolds_input.value(),
@@ -606,6 +634,8 @@ class InputPanel(QWidget):
             self.mesh_nb_points.setValue(int(p["mesh_nb_points"]))
         if "wake_length" in p:
             self.wake_length.setValue(float(p["wake_length"]))
+        if "farfield" in p:
+            self.farfield.setValue(float(p["farfield"]))
         if "wake_refine" in p:
             self.wake_refine.setValue(float(p["wake_refine"]))
         if "regime" in p:

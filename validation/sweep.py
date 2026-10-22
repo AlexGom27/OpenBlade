@@ -84,7 +84,10 @@ def make_case(work: str, aoa: float, scheme: str, transient: bool,
         u_inlet=15.0, p_outlet=0.0, chord=1.0,
         transient=transient, tolerance="1e-4",
         turbulence="k-Omega SST (RAS)", reynolds=6e6,
-        delta_t="1e-4", end_time="0.05", write_interval="0.005",
+        # Tiempo convectivo c/U = 1/15 = 0.067 s. Se simulan ~4 tránsitos
+        # (0.27 s) para ver si la solución oscila o se asienta. Con dt
+        # adaptativo a maxCo=1 el paso efectivo ronda 4e-4 s.
+        delta_t="1e-4", end_time="0.27", write_interval="0.01",
         max_co=1.0, max_iters=max_iters, momentum_scheme=scheme,
     )
 
