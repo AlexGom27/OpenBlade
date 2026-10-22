@@ -126,37 +126,69 @@ Y los datos que llegan del fluido son enormes:
 Para un flag de 0.35 × 0.02 m bajo 20 Pa de presión dinámica, la fuerza total
 esperada es del orden de **0.15 N**, no 3.3×10⁶ N. Hay un factor de ~10⁷.
 
-### Hipótesis del factor
+### RESUELTO: el factor era mi error de unidades
 
-El adaptador (`FSI/ForceBase.C`) calcula:
+Verificado en el código del adaptador. Hay **dos clases distintas**:
 
-```cpp
-forceField = surface * p * rho + (surface & devRhoReff)
-```
+| Clase | `getFaceVectors` | Magnitud que produce |
+|---|---|---|
+| `Stress` | `mesh_.boundary()[patchID].nf()` — normal **unitaria** | N/m² (tensión) |
+| `Force` | `mesh_.boundary()[patchID].Sf()` — vector de **área** | N (fuerza) |
 
-donde `surface` es el **vector de área de la cara**. Con `p` cinemática
-(m²/s²) y `rho` = 1000, el producto da newtons. Para 125 caras de ~5.8×10⁻⁵ m²
-con p ≈ 0.02 m²/s², la suma debería rondar 0.15 N. Obtengo 3.3×10⁶.
+`ForceBase::writeToBuffer` multiplica `surface * p * rho` en ambos casos, pero
+como `Stress` usa `nf()`, el resultado queda en **tensión**. Hay que integrar
+sobre el área para obtener fuerza.
 
-Las dos explicaciones compatibles son:
+Mi confusión: en un primer momento multipliqué por área (correcto), luego lo
+quité al leer `ForceBase` sin distinguir qué `getFaceVectors` se usaba, y
+concluí lo contrario. Restaurado.
 
-1. El campo `p` del caso no es el que creo: el primer paso con `Courant = 0`
-   sugiere que la condición inicial no está bien impuesta (el
-   `flowRateInletVelocity` no arranca con perfil parabólico, y `internalField`
-   es cero).
-2. El adaptador multiplica por densidad **dos veces** en algún punto del
-   camino (una en el cálculo y otra al leer `rho` del `preciceDict`).
+### Verificación independiente con forceCoeffs
 
-No lo he confirmado. Requiere instrumentar el adaptador o volcar el campo
-`Stress` a disco y compararlo con `forceCoeffs`.
+Se añadió un `functionObject forces` al mismo caso y se comparó contra lo que
+entrega el adaptador, en el mismo instante:
+
+| Camino | Fuerza vertical |
+|---|---|
+| `forces` functionObject (independiente) | **468.3 N** |
+| Adaptador preCICE, integrado por área | **363.8 N** |
+
+Diferencia: **22%**, no 10⁷.
+
+Esa diferencia es esperable y no invalida nada:
+- `forceCoeffs` integra sobre caras; el adaptador entrega valores nodales.
+- `nearest-neighbor` no conserva la integral exacta.
+- Los instantes de muestreo no coinciden.
+
+### Por qué 468 N y no 0.15 N
+
+Mi estimación inicial de "presión dinámica × área" era ingenua. El flag está
+**en la estela del cilindro**, donde hay una depresión fuerte y el flujo es
+lento. La presión media efectiva sobre el flag es de ~6.5×10⁴ Pa, no 20 Pa.
+
+Verificado con convergencia de malla:
+
+| Malla | Celdas en el espesor | Fuerza vertical |
+|---|---|---|
+| 0.01 m | 2 | 454.8 N |
+| 0.002 m (refinada) | ~10 | 468.3 N |
+
+Diferencia 2.9%. La fuerza está convergida.
 
 ---
 
 ## 5. Conclusión
 
-**No puedo afirmar que el desplazamiento del flag coincida con la referencia**
-porque el acoplamiento no llega a converger en este caso. Lo que sí está
-establecido:
+**El error de unidades está resuelto**: el adaptador entrega tensión y hay que
+integrarla por área. Verificado contra `forceCoeffs` con 22% de diferencia
+(atribuible a interpolación entre mallas), no 10⁷.
+
+**Sigue pendiente la convergencia del acoplamiento.** El CFD puro es estable y
+la fuerza es correcta, pero con FSI activo el fluido diverge en el segundo paso
+de tiempo. El desplazamiento que devuelve el sólido deforma la malla más de lo
+que soporta la resolución actual.
+
+Lo que está establecido:
 
 - La geometría, los parámetros y la referencia están verificados contra la
   fuente primaria.

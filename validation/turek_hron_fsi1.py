@@ -178,8 +178,26 @@ def build_channel_mesh(msh_path: str, mesh_size: float = 0.01,
     surf = [t for _, t in fluid]
     gmsh.model.addPhysicalGroup(2, surf, name="fluid")
 
+    # Refinamiento local: el flag tiene sólo 0.02 m de espesor. Con celdas de
+    # 0.01 m quedan 2 celdas en el espesor y el gradiente de presión no se
+    # resuelve (aparecían velocidades espurias de 3.9 m/s junto al borde).
+    # Se usa un campo de tamaño por distancia al flag.
+    dist = gmsh.model.mesh.field.add("Distance")
+    gmsh.model.mesh.field.setNumbers(dist, "CurvesList", flag_c)
+    gmsh.model.mesh.field.setNumber(dist, "Sampling", 200)
+    thr = gmsh.model.mesh.field.add("Threshold")
+    gmsh.model.mesh.field.setNumber(thr, "InField", dist)
+    gmsh.model.mesh.field.setNumber(thr, "SizeMin", mesh_size / 5.0)
+    gmsh.model.mesh.field.setNumber(thr, "SizeMax", mesh_size * 2)
+    gmsh.model.mesh.field.setNumber(thr, "DistMin", 0.0)
+    gmsh.model.mesh.field.setNumber(thr, "DistMax", 0.08)
+    gmsh.model.mesh.field.setAsBackgroundMesh(thr)
+
     gmsh.option.setNumber("Mesh.MeshSizeMin", mesh_size)
     gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_size * 2)
+    gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+    gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
     gmsh.model.mesh.generate(2)
 
     contour_curves = [t for _, t in gmsh.model.getEntities(1)]

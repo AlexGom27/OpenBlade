@@ -406,23 +406,23 @@ class StructuralSolver:
             stress = p.read_data(self.mesh_name, self.read_data,
                                  self.vertex_ids, dt)
 
-            # El adaptador ya entrega FUERZA en newtons, no tensión.
+            # "Stress" es TENSIÓN (N/m²), no fuerza. Verificado en el código
+            # del adaptador (FSI/Stress.C):
             #
-            # En FSI/ForceBase.C:
-            #     forceField = surface * p * rho + (surface & devRhoReff)
-            # es decir, vector de área (m²) multiplicado por presión y densidad.
-            # El resultado son newtons por cara del parche. Multiplicar otra vez
-            # por el área tributaria —como hacía antes— introducía un factor
-            # espurio y daba desplazamientos sin sentido.
+            #     Stress::getFaceVectors()  ->  mesh_.boundary()[patchID].nf()
             #
-            # Aun así, el dato viene por cara: hay que repartirlo entre los
-            # nodos si la malla del sólido no coincide cara a cara con la del
-            # fluido. Con mapping nearest-neighbor y mallas coincidentes se usa
-            # directamente.
+            # `nf()` es la normal UNITARIA (adimensional). La clase `Force`, en
+            # cambio, usa `Sf()` (vector de área) y por eso sí devuelve newtons.
+            # Con `nf()`, el producto `surface * p * rho` de ForceBase.C queda
+            # en N/m², es decir tensión.
+            #
+            # Por tanto hay que integrar sobre el área tributaria de cada nodo
+            # para obtener la fuerza nodal.
             F = np.zeros(2 * len(self.nodes))
             for k, nid in enumerate(self.interface):
-                F[2 * nid] += float(stress[k][0])
-                F[2 * nid + 1] += float(stress[k][1])
+                ax, ay = self._node_area[k]
+                F[2 * nid] += float(stress[k][0]) * ax
+                F[2 * nid + 1] += float(stress[k][1]) * ay
 
             if self._dbg_count < 3:
                 smax = float(np.abs(stress).max())
