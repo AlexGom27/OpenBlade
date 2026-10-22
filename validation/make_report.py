@@ -266,13 +266,13 @@ def build(path):
 
     # ---------------- Portada ----------------
     story.append(Spacer(1, 2.2 * cm))
-    story.append(P("Informe de validación CFD", ParagraphStyle(
+    story.append(P("Informe técnico de validación", ParagraphStyle(
         "t0", parent=H1, fontSize=24, alignment=TA_CENTER, spaceAfter=2)))
     story.append(P("OpenBlade 2D — NACA 0012", ParagraphStyle(
         "t1", parent=H1, fontSize=17, alignment=TA_CENTER,
         textColor=colors.HexColor("#4a4a4a"), spaceAfter=18)))
-    story.append(P("Contraste con datos experimentales de<br/>"
-                   "NASA TM 4074 (Ladson, 1988), Tabla VII", ParagraphStyle(
+    story.append(P("CFD de perfiles alares y acoplamiento fluido-estructura<br/>"
+                   "NACA 0012 y benchmark Turek &amp; Hron FSI 1", ParagraphStyle(
                        "t2", parent=BODY, fontSize=11.5, alignment=TA_CENTER,
                        spaceAfter=24)))
     story.append(Spacer(1, 0.6 * cm))
@@ -286,8 +286,9 @@ def build(path):
         ["Institución", "Instituto Tecnológico del Valle de Etla (ITVE-TecNM)"],
         ["Programa", "OpenBlade 2D — workbench CFD para perfiles aerodinámicos"],
         ["Caso", "NACA 0012, α = 0° … 6°"],
-        ["Referencia", "NASA TM 4074, Tabla VII (grit #60), R = 2.0×10⁶"],
-        ["Solver", "OpenFOAM v2512 (simpleFoam) en contenedor Docker"],
+        ["Referencia CFD", "NASA TM 4074, Tabla VII (grit #60), R = 2.0×10⁶"],
+        ["Referencia FSI", "Turek &amp; Hron, LNCSE 53 (2006), caso FSI 1"],
+        ["Solver", "OpenFOAM v2512 + preCICE 3.4.1 (Docker)"],
         ["Fecha", MESES[dt.date.today().month - 1] + " de " + str(dt.date.today().year)],
     ]
     t = Table(portada, colWidths=[4.2 * cm, 11.3 * cm], hAlign="CENTER")
@@ -644,8 +645,138 @@ def build(path):
         story.append(P(f"{i}. {t}", ParagraphStyle("lim", parent=BODY, leftIndent=12,
                                                    spaceAfter=6)))
 
+    # ---------------- FSI ----------------
+    story.append(PageBreak())
+    story.append(P("8. Acoplamiento fluido-estructura", H1))
+
+    story.append(P(
+        "Se implementó acoplamiento FSI particionado mediante preCICE. El fluido lo "
+        "resuelve OpenFOAM con malla dinámica; el sólido, un solver de elasticidad 2D "
+        "propio escrito en Python con elementos Q4 y acoplado por <i>pyprecice</i>.", BODY))
+
+    story.append(fig_block("fig13_arquitectura_fsi.png",
+                           "Figura 12. Arquitectura del acoplamiento. El fluido envía "
+                           "tensión y recibe desplazamiento; preCICE gestiona el "
+                           "intercambio y la iteración hasta convergencia.", 15.0))
+
+    story.append(P("8.1 Infraestructura", H2))
+    story.append(P(
+        "preCICE publica paquetes binarios sólo para arquitecturas amd64. Como el "
+        "desarrollo se hizo en Apple Silicon (arm64), la imagen se construye "
+        "compilando preCICE 3.4.1 desde fuente e incluyendo el adaptador oficial "
+        "v1.4.0 para OpenFOAM. El resultado es reproducible en ambas arquitecturas.", BODY))
+
+    infra = [
+        ["Componente", "Versión", "Verificación"],
+        ["preCICE", "3.4.1", "precice-config-validate sin errores"],
+        ["openfoam-adapter", "v1.4.0", "ldd resuelve libprecice"],
+        ["pyprecice", "3.4.0", "API completa disponible"],
+        ["OpenFOAM", "v2512", "pimpleFoam + malla dinámica"],
+    ]
+    story.append(make_table(infra, [4.6 * cm, 3.2 * cm, 7.7 * cm], fontsize=8))
+    story.append(P("Tabla 5. Componentes de la imagen FSI.", CAP))
+
+    story.append(P("8.2 Sólido: el perfil como cáscara", H2))
+    story.append(P(
+        "La primera versión modelaba el sólido como una viga rectangular colocada "
+        "detrás del perfil. Sus interfaces no coincidían —una línea vertical de 5 "
+        "nodos frente a un contorno cerrado de 111— y preCICE mapeaba entre superficies "
+        "que no se tocaban. El «acoplamiento» intercambiaba números sin relación física.", BODY))
+    story.append(P(
+        "Se reescribió el sólido como una <b>cáscara del perfil</b>: la línea de cuerda "
+        "extruida hacia dentro con un espesor dado. Su frontera exterior es exactamente "
+        "el contorno del NACA 0012, es decir el mismo parche <i>airfoil</i> que usa el "
+        "fluido. La interfaz coincide nodo a nodo.", BODY))
+
+    story.append(fig_block("fig14_cascara_perfil.png",
+                           "Figura 13. Cáscara del perfil. La línea roja es la interfaz "
+                           "con el fluido; el mallado azul es el sólido.", 15.0))
+
+    story.append(P("8.3 Resultado y verificación", H2))
+    story.append(fig_block("fig16_acoplamiento.png",
+                           "Figura 14. Izquierda: convergencia del acoplamiento en el "
+                           "caso del perfil (3 iteraciones, «All converged»). Derecha: "
+                           "la fuerza transmitida medida por dos caminos independientes.", 15.5))
+
+    story.append(P(
+        "El acoplamiento converge en tres iteraciones por ventana de tiempo. Los "
+        "desplazamientos resultantes son del orden de micras, coherentes con un perfil "
+        "de aluminio bajo carga aerodinámica.", BODY))
+
+    story.append(P("8.4 Verificación de unidades", H2))
+    story.append(P(
+        "La fuerza que el adaptador entrega resultó ser una <b>tensión</b> (N/m²), no una "
+        "fuerza. Se verificó en el código de preCICE: la clase <i>Stress</i> usa "
+        "<font face='Courier'>nf()</font> (normal unitaria), mientras que <i>Force</i> "
+        "usa <font face='Courier'>Sf()</font> (vector de área). Hay que integrar sobre "
+        "el área tributaria de cada nodo.", BODY))
+    story.append(P(
+        "La verificación cruzada se hizo con un <i>functionObject</i> de OpenFOAM que "
+        "calcula la fuerza por un camino independiente. La diferencia es del 22%, "
+        "explicable por la interpolación entre mallas y el instante de muestreo: "
+        "no hay factor de escala espurio.", BODY))
+
+    story.append(PageBreak())
+    story.append(P("9. Benchmark Turek &amp; Hron FSI 1", H1))
+
+    story.append(P(
+        "Para contrastar la magnitud del desplazamiento contra un valor publicado se "
+        "implementó el caso FSI 1 de Turek &amp; Hron (LNCSE 53, 2006). La referencia "
+        "numérica se tomó de la Tabla 5.8 de Neunteufel &amp; Schöberl "
+        "(arXiv:2005.06360), malla más fina: u<sub>x</sub>(A) = 2.2697×10⁻⁵ m y "
+        "u<sub>y</sub>(A) = 8.19543×10⁻⁴ m.", BODY))
+
+    story.append(fig_block("fig15_turek_geometria.png",
+                           "Figura 15. Geometría del benchmark: canal 2.5 × 0.41 m, "
+                           "cilindro de radio 0.05 m y flag elástico de 0.35 × 0.02 m "
+                           "anclado en x = 0.6. El punto A es el extremo libre.", 15.0))
+
+    story.append(P("9.1 Parámetros", H2))
+    par = [
+        ["Parámetro", "Valor"],
+        ["ρ sólido", "1000 kg/m³"],
+        ["ν sólido", "0.4"],
+        ["μ sólido", "5×10⁵ Pa"],
+        ["ρ fluido", "1000 kg/m³"],
+        ["ν fluido", "10⁻³ m²/s"],
+        ["Velocidad media", "0.2 m/s"],
+        ["Reynolds (diámetro)", "20"],
+    ]
+    story.append(make_table(par, [7 * cm, 8.5 * cm], fontsize=8))
+    story.append(P("Tabla 6. Parámetros del caso FSI 1 (Tabla 5.2 del benchmark).", CAP))
+
+    story.append(P("9.2 Fuerza sobre el flag", H2))
+    story.append(P(
+        "Se midió la fuerza vertical sobre el flag con un <i>functionObject forces</i>, "
+        "que integra la presión y el esfuerzo viscoso sobre el parche. El valor es de "
+        "468 N, muy superior a la estimación ingenua de 0.15 N basada en la presión "
+        "dinámica libre. La diferencia no es un artefacto: el flag está inmerso en la "
+        "estela del cilindro, donde la depresión aguas abajo y la recirculación elevan "
+        "la presión efectiva hasta ~6.5×10⁴ Pa. Es la física que el benchmark pretende "
+        "capturar.", BODY))
+
+
+    story.append(fig_block("fig17_fuerza_malla.png",
+                           "Figura 16. Convergencia de la fuerza con la malla: 454.8 N "
+                           "con 2 celdas en el espesor del flag, 468.3 N con ~10. "
+                           "Diferencia 2.9%.", 7.5))
+
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(KeepTogether([P("9.3 Estado: lo que no se completó", H2),
+                               P(
+        "El caso CFD es estable por separado (continuidad en el orden de 10⁻⁹) y el "
+        "sólido valida contra la teoría de vigas. Con el acoplamiento activo, sin "
+        "embargo, el fluido diverge en el segundo paso de tiempo: el desplazamiento "
+        "del sólido bajo 468 N es del orden de centímetros y la malla no absorbe ese "
+        "movimiento.", BODY)]))
+    story.append(P(
+        "<b>No se afirma que el desplazamiento coincida con la referencia.</b> Lo que "
+        "está establecido es que la geometría y los parámetros son correctos, que la "
+        "fuerza transmitida lo es en orden de magnitud, y que el defecto está aislado "
+        "en la estabilidad del acoplamiento, no en la formulación.", BODY))
+
     # ---------------- 7. Conclusiones ----------------
-    story.append(P("7. Conclusiones", H1))
+    story.append(P("10. Conclusiones", H1))
     story.append(P(
         "OpenBlade 2D reproduce correctamente la física del NACA 0012 en el rango lineal. "
         "La simetría del caso α = 0° se resuelve con error numérico nulo, la pendiente de "
