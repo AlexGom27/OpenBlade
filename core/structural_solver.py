@@ -226,6 +226,56 @@ def assemble(nodes, elems, D, thickness):
     return K
 
 
+def von_mises_per_element(nodes, elems, u, D, thickness):
+    """Tensión de von Mises en el centro de cada elemento Q4.
+
+    Para cada elemento:
+      1. Deformaciones  eps = B · u_e   en el punto central (xi=eta=0)
+      2. Tensiones      sigma = D · eps
+      3. von Mises      sqrt(sx² - sx·sy + sy² + 3·txy²)   (estado plano)
+
+    Devuelve un array (n_elems,) en Pa y las coordenadas del centroide.
+    """
+    g = 0.0  # centro del elemento
+    N, dN_dxi, dN_deta = q4_shape(g, g)
+
+    vm = np.zeros(len(elems))
+    centres = np.zeros((len(elems), 2))
+
+    for k, e in enumerate(elems):
+        co = nodes[e]
+        J = np.array([
+            [dN_dxi @ co[:, 0], dN_dxi @ co[:, 1]],
+            [dN_deta @ co[:, 0], dN_deta @ co[:, 1]],
+        ])
+        detJ = np.linalg.det(J)
+        if detJ <= 1e-18:
+            vm[k] = 0.0
+            centres[k] = co.mean(axis=0)
+            continue
+        invJ = np.linalg.inv(J)
+        dN = np.array([invJ @ np.array([dN_dxi[i], dN_deta[i]]) for i in range(4)])
+
+        B = np.zeros((3, 8))
+        for i in range(4):
+            B[0, 2 * i] = dN[i, 0]
+            B[1, 2 * i + 1] = dN[i, 1]
+            B[2, 2 * i] = dN[i, 1]
+            B[2, 2 * i + 1] = dN[i, 0]
+
+        ue = np.empty(8)
+        ue[0::2] = u[2 * e]
+        ue[1::2] = u[2 * e + 1]
+
+        eps = B @ ue
+        sig = D @ eps
+        sx, sy, txy = sig
+        vm[k] = math.sqrt(max(sx * sx - sx * sy + sy * sy + 3 * txy * txy, 0.0))
+        centres[k] = N @ co
+
+    return vm, centres
+
+
 def solve_dirichlet(K, F, fixed_dofs):
     free = np.setdiff1d(np.arange(len(F)), fixed_dofs)
     u = np.zeros_like(F)
@@ -295,6 +345,9 @@ class StructuralSolver:
         self.mesh_name = mesh_name
         self.read_data = read_data
         self.write_data = write_data
+        self.D = plane_stress_D(E, nu)
+        self.thickness = thickness
+        self.out_dir = os.environ.get("FSI_FRAMES_DIR")
 
         if geometry == "flag":
             self._init_flag(case_dir, E, nu, thickness, mesh_name)
@@ -356,7 +409,8 @@ class StructuralSolver:
         self.nodes = np.load(os.path.join(case_dir, "solid_nodes.npy"))
         self.elems = np.load(os.path.join(case_dir, "solid_elems.npy"))
         # El benchmark define μ y λ: deformación plana.
-        self.K = assemble(self.nodes, self.elems, plane_strain_D(E, nu), thickness)
+        self.D = plane_strain_D(E, nu)
+        self.K = assemble(self.nodes, self.elems, self.D, thickness)
 
         xmin = self.nodes[:, 0].min()
         xmax = self.nodes[:, 0].max()
@@ -389,6 +443,14 @@ class StructuralSolver:
 
         coords = self.nodes[self.interface].astype(float)
         self.vertex_ids = self.p.set_mesh_vertices(mesh_name, coords)
+
+    def _save_frame(self, index, t, u) -> None:
+        """Guarda un fotograma del campo de von Mises para el vídeo."""
+        vm, centres = von_mises_per_element(
+            self.nodes, self.elems, u, self.D, self.thickness)
+        np.savez(os.path.join(self.out_dir, f"frame_{index:04d}.npz"),
+                 nodes=self.nodes, elems=self.elems, u=u,
+                 vm=vm, centres=centres, t=t)
 
     def run(self) -> dict:
         p = self.p
@@ -439,6 +501,11 @@ class StructuralSolver:
             p.write_data(self.mesh_name, self.write_data, self.vertex_ids, disp)
 
             max_disp = max(max_disp, float(np.abs(u).max()))
+
+            # Guardar fotograma del campo de von Mises si se pidió
+            if self.out_dir:
+                self._save_frame(blocks, dt, u)
+
             p.advance(dt)
             if p.requires_reading_checkpoint():
                 pass
