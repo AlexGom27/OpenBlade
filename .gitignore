@@ -24,3 +24,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Salidas de las baterías de validación (regenerables)
+validation/sweep/
+validation/campaign/
