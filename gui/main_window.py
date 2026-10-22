@@ -190,8 +190,21 @@ class MainWindow(QMainWindow):
             if is_custom and file_path:
                 cmd.append(str(file_path))
             from .workers import subprocess_env
+            # stdin=DEVNULL es obligatorio: al lanzar la GUI con nohup/desacoplada,
+            # el descriptor de entrada está cerrado y el hijo hereda un fd
+            # inválido. Python aborta al arrancar con
+            # "init_sys_streams: can't initialize sys standard streams".
+            # Los tres descriptores se fijan explícitamente.
+            #
+            # Al lanzar la GUI con nohup/disown, los fds 0, 1 y 2 pueden no ser
+            # válidos en el momento de crear el hijo. Python aborta entonces
+            # con:
+            #   Fatal Python error: init_sys_streams: can't initialize sys
+            #   standard streams / OSError: [Errno 9] Bad file descriptor
+            # capture_output ya redirige stdout/stderr; stdin se fija a DEVNULL.
             result = subprocess.run(cmd, capture_output=True, text=True,
                                     encoding='utf-8', errors='replace',
+                                    stdin=subprocess.DEVNULL,
                                     env=subprocess_env())
             
             if result.returncode == 0:

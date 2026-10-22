@@ -54,8 +54,12 @@ class MeshWorker(QThread):
                 json.dump(self.p, f)
             
             cmd = [sys.executable, "-m", "core.mesh_script", json_path, self.msh_file]
+            # stdin=DEVNULL: si la GUI se lanzó con nohup, el fd 0 está
+            # cerrado y el hijo muere con "can't initialize sys standard
+            # streams". Con DEVNULL hereda un descriptor válido.
             self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                cmd, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding='utf-8', errors='replace',
                 env=subprocess_env()
             )
@@ -230,8 +234,11 @@ class SweepWorker(QThread):
 
     def _run_cmd(self, cmd, timeout):
         """Ejecuta un subproceso cancelable. Devuelve un CompletedProcess-like."""
+        # stdin=DEVNULL por el mismo motivo que en MeshWorker: sin un fd 0
+        # válido el intérprete hijo aborta en init_sys_streams.
         self._current_proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', errors='replace',
             env=subprocess_env()
         )
