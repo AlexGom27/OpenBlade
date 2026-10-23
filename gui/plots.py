@@ -8,6 +8,7 @@ except ImportError:
 from matplotlib.figure import Figure
 from typing import Optional, List, Dict
 import csv
+import os
 import numpy as np
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QFileDialog
 
@@ -54,6 +55,80 @@ class ResidualPlot(QWidget):
         self.ax.autoscale_view()
         self.canvas.draw()
         
+    def load_from_log(self, log_path: str, max_points: int = 400) -> int:
+        """Rellena el gráfico con los residuales de un run.log de OpenFOAM.
+
+        Permite ver la convergencia de una simulación YA lanzada (incluso si
+        se abrió la app después de arrancarla), no sólo la que se lanza desde
+        la propia GUI.
+
+        OpenFOAM escribe por cada paso de tiempo:
+            Time = <t>
+            smoothSolver:  Solving for Ux, Initial residual = <r>, ...
+            GAMG:          Solving for p,  Initial residual = <r>, ...
+
+        Se toma el residuo INICIAL de cada ecuación y se usa `Time` como
+        abscisa. Devuelve cuántos puntos se cargaron.
+        """
+        import re
+
+        if not os.path.exists(log_path):
+            return 0
+
+        eq_re = re.compile(
+            r"Solving for (Ux|Uy|Uz|p|k|omega|epsilon|nuTilda),\s*"
+            r"Initial residual = ([-+0-9.eE]+)")
+        time_re = re.compile(r"^Time = ([-+0-9.eE]+)", re.M)
+
+        try:
+            with open(log_path, errors="replace") as f:
+                lines = f.readlines()
+        except OSError:
+            return 0
+
+        # Se recorre el log y se agrupa por bloque de tiempo.
+        bloques = []
+        actual = None
+        for ln in lines:
+            mt = time_re.match(ln)
+            if mt:
+                actual = {"t": float(mt.group(1)), "res": {}}
+                bloques.append(actual)
+                continue
+            if actual is None:
+                continue
+            me = eq_re.search(ln)
+            if me:
+                campo, val = me.group(1), float(me.group(2))
+                # primer valor del bloque = residuo inicial
+                actual["res"].setdefault(campo, val)
+
+        if not bloques:
+            return 0
+
+        # Submuestreo para no dibujar 100 000 puntos.
+        if len(bloques) > max_points:
+            paso = max(1, len(bloques) // max_points)
+            bloques = bloques[::paso]
+
+        self.res_iters = []
+        self.res_data = {}
+        self.res_lines = {}
+        for b in bloques:
+            self.res_iters.append(b["t"])
+            for campo, val in b["res"].items():
+                self.res_data.setdefault(campo, []).append(val)
+
+        # Rellenar series incompletas para que todas tengan la misma longitud.
+        n = len(self.res_iters)
+        for campo in self.res_data:
+            serie = self.res_data[campo]
+            if len(serie) < n:
+                serie.extend([serie[-1] if serie else 1.0] * (n - len(serie)))
+
+        self._pending_redraw = True
+        return n
+
     def update_plot(self, field: str, value: float, time_val: float) -> None:
         if not self.res_iters or self.res_iters[-1] != time_val:
             self.res_iters.append(time_val)

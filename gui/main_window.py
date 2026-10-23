@@ -49,9 +49,14 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
         
         self._sync_sys_path()
-        workdir = self._ensure_workdir()
-        self.case_dir = os.path.join(workdir, "openfoam_case")
-        os.makedirs(self.case_dir, exist_ok=True)
+
+        # Los datos generados viven FUERA del repositorio. Ver core/paths.py.
+        # Antes se escribían en el CWD, que al lanzar desde la raíz del repo
+        # ensuciaba el árbol y hacía que Google Drive sincronizara cientos de
+        # MB de resultados en cada simulación.
+        from core import paths
+        self._data_root = paths.data_root()
+        self.case_dir = paths.case_dir()
             
         self._has_unsaved_work = False
         self.mesh_worker = None
@@ -136,6 +141,15 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.res_plot, "Residuales")
         self.tabs.addTab(self.aero_plot, "Cl / Cd")
         self.tabs.addTab(self.cp_plot, "Presión (Cp)")
+
+        # Cargar la convergencia de una corrida existente y refrescarla cada
+        # 10 s. Sin esto la pestaña de Residuales sólo se llena si la
+        # simulación se lanzó desde esta misma ventana.
+        from qtpy.QtCore import QTimer
+        self._conv_timer = QTimer(self)
+        self._conv_timer.timeout.connect(self.load_convergence_from_log)
+        self._conv_timer.start(10000)
+        self.load_convergence_from_log()
         
         right_layout.addWidget(self.tabs, 7)
         
@@ -157,7 +171,17 @@ class MainWindow(QMainWindow):
         self.input_panel.btn_pause_sim.clicked.connect(self.on_pause_sim)
 
     def log(self, text: str) -> None:
-        self.log_console.append(text)
+        """Añade una línea a la consola. Seguro durante el arranque temprano."""
+        console = getattr(self, "log_console", None)
+        if console is None:
+            print(text)
+            return
+        console.append(text)
+        try:
+            console.moveCursor(QTextCursor.MoveOperation.End)
+            console.ensureCursorVisible()
+        except Exception:
+            pass
         self.log_console.moveCursor(QTextCursor.MoveOperation.End)
 
 
@@ -186,7 +210,8 @@ class MainWindow(QMainWindow):
             # sys.executable garantiza el mismo intérprete (y sus paquetes) que la GUI
             import subprocess
             import sys
-            cmd = [sys.executable, "-m", "core.geom_script", str(naca_val), str(p['chord']), str(p['aoa']), "temp_geom.vtk"]
+            geom_out = paths.temp_path("temp_geom.vtk")
+            cmd = [sys.executable, "-m", "core.geom_script", str(naca_val), str(p['chord']), str(p['aoa']), geom_out]
             if is_custom and file_path:
                 cmd.append(str(file_path))
             from .workers import subprocess_env
@@ -219,8 +244,9 @@ class MainWindow(QMainWindow):
 
     def _delayed_preview_update(self) -> None:
         try:
-            if os.path.exists("temp_geom.vtk"):
-                mesh = pv.read("temp_geom.vtk")
+            _g = paths.temp_path("temp_geom.vtk")
+            if os.path.exists(_g):
+                mesh = pv.read(_g)
                 self.results_panel.update_visual_preview(mesh)
         except Exception as e:
             self.log(f"Error de visualización: {e}")
@@ -234,7 +260,7 @@ class MainWindow(QMainWindow):
         if not p: return
         
         # Para perfiles custom el nombre no puede salir de 'naca' ("custom")
-        msh_file = f"perfil_{p['naca'] or 'custom'}.msh"
+        msh_file = paths.mesh_path(p['naca'] or "custom")
         self.log(f"Iniciando mallado de alta fidelidad...")
         
         self.input_panel.btn_mesh.setEnabled(False)
@@ -531,6 +557,24 @@ class MainWindow(QMainWindow):
         self._refresh_cp_plot()
 
 
+
+    def load_convergence_from_log(self) -> None:
+        """Carga la curva de residuales de una corrida ya existente.
+
+        Se llama al abrir la app y al refrescar: permite ver la convergencia
+        de una simulación lanzada desde fuera (por ejemplo, el caso que corre
+        en segundo plano), no sólo la que arranca esta ventana.
+        """
+        try:
+            log_path = os.path.join(self.case_dir, "run.log")
+            if not os.path.exists(log_path):
+                return
+            n = self.res_plot.load_from_log(log_path)
+            if n:
+                self.res_plot.redraw()
+                self.log(f"📈 Convergencia cargada desde run.log ({n} puntos).")
+        except Exception as e:  # noqa: BLE001
+            self.log(f"⚠️ No se pudo leer run.log: {e}")
 
     def on_residual_data(self, field: str, val: float, time: float) -> None:
         """Actualiza la gráfica de residuales y el panel de progreso.

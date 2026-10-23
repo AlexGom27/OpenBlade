@@ -383,7 +383,10 @@ class ResultsPanel(QWidget):
     def _frame_has_field(self, t: float) -> bool:
         """¿Existe el campo activo en el directorio de este tiempo?"""
         try:
-            case_dir = getattr(self.post_processor, 'case_dir', 'openfoam_case')
+            case_dir = getattr(self.post_processor, 'case_dir', None)
+            if not case_dir:
+                from core import paths
+                case_dir = paths.case_dir()
             field_map = {0: 'U', 1: 'p', 2: 'k', 3: 'nut', 4: 'omega',
                          5: 'epsilon', 6: 'nuTilda'}
             name = field_map.get(self.var_selector.currentIndex(), 'U')
