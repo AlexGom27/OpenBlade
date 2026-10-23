@@ -145,6 +145,19 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.aero_plot, "Cl / Cd")
         self.tabs.addTab(self.cp_plot, "Presión (Cp)")
 
+        # Panel de monitorización remota: estado de la simulación y carga del
+        # servidor. Requiere una clave SSH sin contraseña al equipo remoto;
+        # si no la hay, el panel lo indica y no interfiere con el resto.
+        try:
+            from .remote_monitor import RemoteMonitorPanel
+            self.remote_panel = RemoteMonitorPanel(
+                remote=os.environ.get("OPENBLADE_REMOTE", ""),
+                case=os.environ.get("OPENBLADE_REMOTE_CASE", "openfoam_case"))
+            self.tabs.addTab(self.remote_panel, "Servidor")
+        except Exception as e:  # noqa: BLE001
+            self.remote_panel = None
+            print(f"Panel remoto no disponible: {e}")
+
         # Cargar la convergencia de una corrida existente y refrescarla
         # periódicamente. La lectura del run.log corre en un hilo aparte: un
         # log de decenas de MB leído en el hilo de la interfaz congelaba la
