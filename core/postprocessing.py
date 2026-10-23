@@ -5,9 +5,12 @@ import numpy as np
 from typing import List, Optional, Any
 
 class PostProcessor:
-    def __init__(self, case_dir: str = "openfoam_case") -> None:
+    def __init__(self, case_dir: str = "") -> None:
         # Cache de tiempos que realmente contienen campos (ver _has_fields).
         self._valid_times = None
+        if not case_dir:
+            from core import paths
+            case_dir = paths.case_dir()
         self.case_dir = case_dir
         self.foam_file = os.path.join(self.case_dir, "case.foam")
         

@@ -10,7 +10,7 @@ from typing import Optional, List, Dict
 import csv
 import os
 import numpy as np
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QFileDialog
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QFileDialog, QLabel
 
 class ResidualPlot(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -21,6 +21,17 @@ class ResidualPlot(QWidget):
         self.fig = Figure(figsize=(4, 2.5), dpi=80)
         self.canvas = FigureCanvas(self.fig)
         layout.addWidget(self.canvas)
+
+        # Panel de avance junto a la grafica: tiempo simulado, porcentaje,
+        # ETA y ritmo. Se rellena desde run.log, asi funciona tambien con
+        # corridas lanzadas fuera de la GUI.
+        self.progress_label = QLabel("Sin datos de avance.")
+        self.progress_label.setWordWrap(True)
+        self.progress_label.setStyleSheet(
+            "background: #263238; color: #dbe9f4; padding: 8px; "
+            "border-radius: 4px; font-family: Menlo, monospace; font-size: 10px;")
+        layout.addWidget(self.progress_label)
+        self._end_time = None
         
         self.ax = self.fig.add_subplot(111)
         self.ax.set_yscale('log')
@@ -74,6 +85,11 @@ class ResidualPlot(QWidget):
 
         if not os.path.exists(log_path):
             return 0
+        self._log_path = log_path
+        try:
+            self._log_ctime = os.stat(log_path).st_ctime
+        except OSError:
+            self._log_ctime = None
 
         eq_re = re.compile(
             r"Solving for (Ux|Uy|Uz|p|k|omega|epsilon|nuTilda),\s*"
@@ -126,8 +142,91 @@ class ResidualPlot(QWidget):
             if len(serie) < n:
                 serie.extend([serie[-1] if serie else 1.0] * (n - len(serie)))
 
+        self._update_progress_label()
         self._pending_redraw = True
         return n
+
+    def _update_progress_label(self) -> None:
+        """Rellena el panel de avance con los datos ya cargados."""
+        if not self.res_iters:
+            self.progress_label.setText("Sin datos de avance.")
+            return
+
+        # El avance real se mide por el último directorio escrito, no por el
+        # último Time del log: si el contenedor se reinició, el log empieza de
+        # cero pero los tiempos guardados siguen siendo válidos.
+        t_guardado = self._last_saved_time()
+        t_now = t_guardado if t_guardado is not None else self.res_iters[-1]
+        fin = self._end_time or self._read_end_time()
+        self._end_time = fin
+        n = len(self.res_iters)
+
+        if not fin:
+            self.progress_label.setText(f"t = {t_now:.4f} s   ({n} muestras)")
+            return
+
+        pct = 100.0 * t_now / fin
+        if pct >= 99.95:
+            self.progress_label.setText(
+                f"✔ COMPLETADA   t = {t_now:.4f} de {fin:g} s   (100%)\n"
+                f"Muestras: {n}")
+            return
+
+        # Ritmo: media entre el primer y el ultimo tiempo del log. Se usa el
+        # propio log como reloj, no el reloj de pared, para que funcione igual
+        # con una corrida ya terminada.
+        ritmo = ""
+        if n > 1:
+            dt_sim = self.res_iters[-1] - self.res_iters[0]
+            if dt_sim > 0:
+                mtime = os.path.getmtime(getattr(self, "_log_path", "") or "")
+                ctime = getattr(self, "_log_ctime", None)
+                if ctime and mtime > ctime:
+                    sp = (mtime - ctime) / max(n - 1, 1)
+                    faltan = (fin - t_now) / (dt_sim / max(n - 1, 1))
+                    eta_h = faltan * sp / 3600
+                    eta = f"{eta_h:.1f} h" if eta_h >= 1 else f"{eta_h*60:.0f} min"
+                    ritmo = f"\nRitmo: {sp:.2f} s/paso   ·   ETA ~{eta}"
+
+        self.progress_label.setText(
+            f"⏳ EN CURSO   t = {t_now:.4f} de {fin:g} s   ({pct:.1f}%)"
+            f"\nMuestras: {n}{ritmo}")
+
+    def _last_saved_time(self):
+        """Último directorio de tiempo realmente escrito en el caso.
+
+        Es más fiable que el `Time =` del run.log: si el contenedor se
+        reinició, el log vuelve a empezar pero los directorios de tiempo ya
+        escritos siguen ahí.
+        """
+        try:
+            caso = getattr(self, "case_dir", None) or os.path.join(
+                os.path.expanduser("~"), ".openblade", "openfoam_case")
+            tiempos = []
+            for nombre in os.listdir(caso):
+                try:
+                    t = float(nombre)
+                except ValueError:
+                    continue
+                # sólo cuentan los que tienen campos
+                if os.path.exists(os.path.join(caso, nombre, "U")):
+                    tiempos.append(t)
+            return max(tiempos) if tiempos else None
+        except Exception:
+            return None
+
+    def _read_end_time(self):
+        """Lee endTime del controlDict del caso."""
+        try:
+            import re as _re
+            caso = getattr(self, "case_dir", None) or os.path.join(
+                os.path.expanduser("~"), ".openblade", "openfoam_case")
+            cd = os.path.join(caso, "system", "controlDict")
+            m = _re.search(r"^endTime\s+([0-9.eE+-]+);",
+                           open(cd, errors="replace").read(), _re.M)
+            return float(m.group(1)) if m else None
+        except Exception:
+            return None
 
     def update_plot(self, field: str, value: float, time_val: float) -> None:
         if not self.res_iters or self.res_iters[-1] != time_val:

@@ -49,7 +49,8 @@ class MeshWorker(QThread):
     def run(self) -> None:
         try:
             self.log_msg.emit("⏳ Iniciando mallado aislado...")
-            json_path = "temp_params_mesh.json"
+            from core import paths
+            json_path = paths.temp_path("temp_params_mesh.json")
             with open(json_path, 'w') as f:
                 json.dump(self.p, f)
             
@@ -99,7 +100,8 @@ class SimWorker(QObject):
         self._stdout_buffer = ""
 
     def start_sim(self):
-        json_path = "temp_params_solve.json"
+        from core import paths
+        json_path = paths.temp_path("temp_params_solve.json")
         with open(json_path, 'w') as f:
             json.dump(self.p, f)
             
@@ -291,10 +293,12 @@ class SweepWorker(QThread):
             
             try:
                 # Paso 1: Generar malla con nuevo AoA
-                msh_file = f"perfil_{naca}_sweep.msh"
+                from core import paths
+                msh_file = os.path.join(os.path.dirname(paths.mesh_path(naca)),
+                                        f"perfil_{naca}_sweep.msh")
                 self.log_msg.emit(f"  🔧 Generando malla (AoA={angle}°)...")
                 
-                json_path = "temp_params_sweep.json"
+                json_path = paths.temp_path("temp_params_sweep.json")
                 with open(json_path, 'w') as f:
                     json.dump(sweep_params, f)
                 

@@ -5,13 +5,19 @@ simulación en curso termine.
 
 ---
 
-## 1. Panel de avance junto a la gráfica de convergencia
+## 1. ~~Panel de avance junto a la gráfica de convergencia~~ ✅ HECHO
 
 **Lo que pidió el usuario**: ver junto a las gráficas de convergencia el
 porcentaje de avance, el tiempo transcurrido y el ritmo — el mismo resumen que
 ya existe abajo del panel de malla, pero visible en la pestaña **Residuales**.
 
-**Estado actual**: el resumen de progreso existe (`_update_progress` en
+**HECHO (2026-10-23)**: se añadió `progress_label` a `ResidualPlot`,
+rellenado desde `_last_saved_time()` + `_read_end_time()`. Mide el
+avance por el último directorio de tiempo escrito, no por el `Time =`
+del log, para que sobreviva a reinicios del contenedor.
+Verificado: `✔ COMPLETADA t = 0.5000 de 0.5 s (100%)`.
+
+**Estado anterior**: el resumen de progreso existía (`_update_progress` en
 `gui/main_window.py`) y se muestra en `input_panel.progress_label`, debajo de
 los botones Pausar/Detener. En la pestaña Residuales sólo está la gráfica, sin
 texto de avance.

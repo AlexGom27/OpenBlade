@@ -16,7 +16,9 @@ def main():
     with open(json_path, 'r') as f:
         p = json.load(f)
         
-    case_dir = "openfoam_case"
+    # El caso vive fuera del repositorio (ver core/paths.py).
+    from core import paths
+    case_dir = paths.case_dir()
     
     try:
         # 1. Configuración del caso
