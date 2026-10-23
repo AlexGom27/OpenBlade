@@ -152,6 +152,26 @@ class ResultsPanel(QWidget):
                                  color='#555555', 
                                  name='watermark')
 
+    def _detect_available_fields(self):
+        """Campos que existen en el último tiempo con datos del caso."""
+        caso = getattr(self.post_processor, 'case_dir', self.case_dir)
+        if not os.path.isdir(caso):
+            return None
+        # Directorio de tiempo más reciente que contenga U
+        candidatos = []
+        for name in os.listdir(caso):
+            try:
+                t = float(name)
+            except ValueError:
+                continue
+            if os.path.exists(os.path.join(caso, name, "U")):
+                candidatos.append((t, name))
+        if not candidatos:
+            return None
+        d = os.path.join(caso, max(candidatos)[1])
+        conocidos = ("U", "p", "k", "nut", "omega", "epsilon", "nuTilda")
+        return {f for f in conocidos if os.path.exists(os.path.join(d, f))}
+
     def load_results(self, is_transient: bool = False) -> bool:
         try:
             self.post_processor = PostProcessor(self.case_dir)
@@ -174,6 +194,15 @@ class ResultsPanel(QWidget):
                 self.time_values = [0]
                 self.current_time_idx = 0
                 
+            # Detectar qué campos existen realmente en el caso. Con k-omega SST
+            # no hay epsilon ni nuTilda; sin esta lista el selector permite
+            # elegirlos y el visor pinta la malla gris como respaldo.
+            try:
+                self._available_fields = self._detect_available_fields()
+            except Exception as e:  # noqa: BLE001
+                self.log(f"⚠️ No se pudieron detectar los campos: {e}")
+                self._available_fields = None
+
             self.var_selector.setEnabled(True)
             self._is_first_plot = True
             self.update_results_plot()
@@ -206,6 +235,18 @@ class ResultsPanel(QWidget):
         
         idx = self.var_selector.currentIndex()
         field_name = field_map.get(idx, 'U')
+
+        # Si el campo pedido no existe en este caso (epsilon y nuTilda no
+        # existen con k-omega SST), se cae a 'p' en vez de pintar la malla
+        # gris. El respaldo gris en mitad de una animación produce parpadeos.
+        disponibles = getattr(self, '_available_fields', None)
+        if disponibles and field_name not in disponibles:
+            alternativas = [f for f in ('U', 'p', 'k', 'nut', 'omega')
+                            if f in disponibles]
+            if alternativas and field_name != alternativas[0]:
+                self.log(f"ℹ️ Campo '{field_name}' no existe en este caso; "
+                         f"se muestra '{alternativas[0]}'.")
+                field_name = alternativas[0]
         
         time_repr = "latestTime"
         if self.player_widget.isVisible() and self.time_values:
@@ -339,6 +380,23 @@ class ResultsPanel(QWidget):
         except Exception as e:
             self.log(f"Error al guardar captura: {e}")
 
+    def _frame_has_field(self, t: float) -> bool:
+        """¿Existe el campo activo en el directorio de este tiempo?"""
+        try:
+            case_dir = getattr(self.post_processor, 'case_dir', 'openfoam_case')
+            field_map = {0: 'U', 1: 'p', 2: 'k', 3: 'nut', 4: 'omega',
+                         5: 'epsilon', 6: 'nuTilda'}
+            name = field_map.get(self.var_selector.currentIndex(), 'U')
+            if abs(t) < 1e-12:
+                return True
+            for cand in (f"{t:g}", f"{t:.6f}", repr(t)):
+                d = os.path.join(case_dir, cand)
+                if os.path.isdir(d):
+                    return os.path.exists(os.path.join(d, name))
+            return False
+        except Exception:
+            return True   # ante la duda, no omitir
+
     def record_video(self) -> None:
         if not self.plotter or not self.time_values:
             return
@@ -366,10 +424,19 @@ class ResultsPanel(QWidget):
             self.plotter.open_movie(filename, framerate=fps, quality=5)
             
             from qtpy.QtWidgets import QApplication
+            omitidos = 0
             for i in range(len(self.time_values)):
                 self.current_time_idx = i
                 t_val = self.time_values[i]
                 self.lbl_time.setText(f"t = {t_val}s")
+
+                # Se comprueba que el campo exista antes de capturar: si falta,
+                # el fotograma saldría con la malla gris y rompería la
+                # continuidad del vídeo.
+                if not self._frame_has_field(t_val):
+                    omitidos += 1
+                    continue
+
                 self.update_results_plot()
                 
                 # Procesar eventos de Qt para forzar el repintado del buffer antes de capturar el frame
@@ -381,6 +448,9 @@ class ResultsPanel(QWidget):
                 
             if hasattr(self.plotter, 'mwriter'):
                 self.plotter.mwriter.close()
+            if omitidos:
+                self.log(f"ℹ️ {omitidos} fotograma(s) omitido(s) por no tener "
+                         f"campos guardados en ese tiempo.")
             self.log(f"✅ Video guardado exitosamente: {filename}")
             
             self.current_time_idx = orig_idx

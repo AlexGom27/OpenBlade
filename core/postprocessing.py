@@ -6,6 +6,8 @@ from typing import List, Optional, Any
 
 class PostProcessor:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
+        # Cache de tiempos que realmente contienen campos (ver _has_fields).
+        self._valid_times = None
         self.case_dir = case_dir
         self.foam_file = os.path.join(self.case_dir, "case.foam")
         
@@ -30,22 +32,51 @@ class PostProcessor:
                 return False
         return True
 
+    def _has_fields(self, t: float) -> bool:
+        """¿El directorio de este tiempo contiene los campos del flujo?
+
+        OpenFOAM crea un directorio cada vez que CUALQUIER functionObject
+        escribe. `yPlus` lo hace cada 100 pasos de tiempo, mientras el solver
+        escribe U/p/k/... según `writeInterval`. Resultado: decenas de
+        directorios que sólo contienen `yPlus`, sin campos.
+
+        Si el reproductor los recorre, en esos tiempos no hay nada que pintar y
+        se dibuja la malla gris como respaldo: eso producía los destellos en el
+        vídeo.
+        """
+        if abs(t) < 1e-12:
+            return True          # el tiempo 0 (condición inicial) siempre vale
+        # pyvista puede devolver el tiempo con distinta representación textual
+        for cand in (f"{t:g}", f"{t:.6f}", repr(t)):
+            d = os.path.join(self.case_dir, cand)
+            if os.path.isdir(d):
+                return any(os.path.exists(os.path.join(d, f))
+                           for f in ("U", "p"))
+        return False
+
     def get_time_values(self) -> List[float]:
         if not self._ensure_reader():
             return []
-        return self.reader.time_values
+        if self._valid_times is not None:
+            return self._valid_times
+        valid = [t for t in self.reader.time_values if self._has_fields(t)]
+        # Si el filtro se comiera todo (caso raro), se usa la lista original
+        # para no dejar la interfaz sin tiempos.
+        self._valid_times = valid if valid else list(self.reader.time_values)
+        return self._valid_times
 
     def get_mesh_at_index(self, index: int) -> Any:
         if not self._ensure_reader():
             return None
         try:
+            times = self.get_time_values()
             idx = 0
-            if self.reader.time_values:
-                idx = max(0, min(index, len(self.reader.time_values) - 1))
+            if times:
+                idx = max(0, min(index, len(times) - 1))
                 if idx == self._current_time_idx and idx in self._mesh_cache:
                     return self._mesh_cache[idx]
 
-                self.reader.set_active_time_value(self.reader.time_values[idx])
+                self.reader.set_active_time_value(times[idx])
                 self._current_time_idx = idx
             
             mesh = self.reader.read()
