@@ -86,6 +86,22 @@ class ResidualPlot(QWidget):
         if not os.path.exists(log_path):
             return 0
         self._log_path = log_path
+
+        # No releer si el fichero no ha cambiado.
+        #
+        # El temporizador llama cada 10 s y el run.log de una corrida larga
+        # pesa decenas de MB (27 MB en el caso de alpha=12). Releerlo entero
+        # cada vez bloqueaba el hilo de la interfaz: la app se quedaba
+        # congelada al 17% de CPU. Con (mtime, tamaño) se evita el trabajo
+        # cuando nada ha cambiado.
+        try:
+            st = os.stat(log_path)
+            firma = (st.st_mtime, st.st_size)
+        except OSError:
+            firma = None
+        if firma is not None and firma == getattr(self, "_log_firma", None):
+            return getattr(self, "_log_n", 0)
+        self._log_firma = firma
         try:
             self._log_ctime = os.stat(log_path).st_ctime
         except OSError:
@@ -96,28 +112,29 @@ class ResidualPlot(QWidget):
             r"Initial residual = ([-+0-9.eE]+)")
         time_re = re.compile(r"^Time = ([-+0-9.eE]+)", re.M)
 
-        try:
-            with open(log_path, errors="replace") as f:
-                lines = f.readlines()
-        except OSError:
-            return 0
-
-        # Se recorre el log y se agrupa por bloque de tiempo.
+        # Se itera el fichero línea a línea en lugar de leerlo entero: un log
+        # de 27 MB como lista de strings ocupa cientos de MB y provoca
+        # pausas largas del recolector.
         bloques = []
         actual = None
-        for ln in lines:
-            mt = time_re.match(ln)
-            if mt:
-                actual = {"t": float(mt.group(1)), "res": {}}
-                bloques.append(actual)
-                continue
-            if actual is None:
-                continue
-            me = eq_re.search(ln)
-            if me:
-                campo, val = me.group(1), float(me.group(2))
-                # primer valor del bloque = residuo inicial
-                actual["res"].setdefault(campo, val)
+        try:
+            fh = open(log_path, errors="replace")
+        except OSError:
+            return 0
+        with fh:
+            for ln in fh:
+                mt = time_re.match(ln)
+                if mt:
+                    actual = {"t": float(mt.group(1)), "res": {}}
+                    bloques.append(actual)
+                    continue
+                if actual is None:
+                    continue
+                me = eq_re.search(ln)
+                if me:
+                    campo, val = me.group(1), float(me.group(2))
+                    # primer valor del bloque = residuo inicial
+                    actual["res"].setdefault(campo, val)
 
         if not bloques:
             return 0
@@ -142,9 +159,33 @@ class ResidualPlot(QWidget):
             if len(serie) < n:
                 serie.extend([serie[-1] if serie else 1.0] * (n - len(serie)))
 
+        self._log_n = n
         self._update_progress_label()
         self._pending_redraw = True
         return n
+
+    def set_series(self, bloques) -> None:
+        """Coloca en el gráfico una lista de bloques ya parseados.
+
+        Lo llama MainWindow desde el hilo de la GUI, con los datos que preparó
+        el hilo de lectura. Evita que ResidualPlot toque el fichero.
+        """
+        if not bloques:
+            return
+        self.res_iters = [b["t"] for b in bloques]
+        self.res_data = {}
+        self.res_lines = {}
+        for b in bloques:
+            for campo, val in b["res"].items():
+                self.res_data.setdefault(campo, []).append(val)
+        # Rellenar series incompletas hasta la misma longitud
+        n = len(self.res_iters)
+        for campo in self.res_data:
+            serie = self.res_data[campo]
+            if len(serie) < n:
+                serie.extend([serie[-1] if serie else 1.0] * (n - len(serie)))
+        self._update_progress_label()
+        self._pending_redraw = True
 
     def _update_progress_label(self) -> None:
         """Rellena el panel de avance con los datos ya cargados."""

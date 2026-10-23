@@ -20,6 +20,9 @@ from core.meshing import NacaMesher
 import time
 
 class MainWindow(QMainWindow):
+    # Señal para devolver al hilo de la GUI los datos leídos en segundo plano.
+    _conv_ready = Signal(object)
+
     log_signal = Signal(str)
 
     def _ensure_workdir(self) -> str:
@@ -142,14 +145,19 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.aero_plot, "Cl / Cd")
         self.tabs.addTab(self.cp_plot, "Presión (Cp)")
 
-        # Cargar la convergencia de una corrida existente y refrescarla cada
-        # 10 s. Sin esto la pestaña de Residuales sólo se llena si la
-        # simulación se lanzó desde esta misma ventana.
+        # Cargar la convergencia de una corrida existente y refrescarla
+        # periódicamente. La lectura del run.log corre en un hilo aparte: un
+        # log de decenas de MB leído en el hilo de la interfaz congelaba la
+        # ventana (se observó al 17% de CPU sin responder).
         from qtpy.QtCore import QTimer
+        self._conv_ready.connect(self._apply_convergence)
         self._conv_timer = QTimer(self)
-        self._conv_timer.timeout.connect(self.load_convergence_from_log)
-        self._conv_timer.start(10000)
-        self.load_convergence_from_log()
+        self._conv_timer.timeout.connect(self._refresh_convergence)
+        self._conv_timer.start(15000)
+        self._refresh_convergence()
+
+        # Solo se refresca mientras la pestaña de Residuales está visible.
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         
         right_layout.addWidget(self.tabs, 7)
         
@@ -557,6 +565,87 @@ class MainWindow(QMainWindow):
         self._refresh_cp_plot()
 
 
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Activa el refresco sólo cuando se mira la pestaña de Residuales."""
+        try:
+            activo = self.tabs.widget(index) is self.res_plot
+            if activo:
+                if not self._conv_timer.isActive():
+                    self._conv_timer.start(15000)
+                self._refresh_convergence()
+            else:
+                self._conv_timer.stop()
+        except Exception:
+            pass
+
+    def _refresh_convergence(self) -> None:
+        """Lanza la lectura del log en un hilo, sin bloquear la interfaz."""
+        try:
+            if getattr(self, "_conv_busy", False):
+                return
+            log_path = os.path.join(self.case_dir, "run.log")
+            if not os.path.exists(log_path):
+                return
+
+            self._conv_busy = True
+            import threading
+
+            def trabajo():
+                try:
+                    datos = self._parse_log(log_path)
+                except Exception as e:  # noqa: BLE001
+                    datos = ("error", str(e))
+                # Señal en lugar de invokeMethod con Q_ARG: Qt no sabe
+                # serializar una tupla de Python ("Unable to find a QMetaType
+                # for object"), pero una Signal(object) la pasa sin problema.
+                self._conv_ready.emit(datos)
+
+            threading.Thread(target=trabajo, daemon=True).start()
+        except Exception as e:  # noqa: BLE001
+            self._conv_busy = False
+            self.log(f"⚠️ No se pudo refrescar la convergencia: {e}")
+
+    def _parse_log(self, log_path: str):
+        """Parsea el log fuera del hilo principal. Devuelve datos serializables."""
+        import re
+        eq_re = re.compile(
+            r"Solving for (Ux|Uy|Uz|p|k|omega|epsilon|nuTilda),\s*"
+            r"Initial residual = ([-+0-9.eE]+)")
+        time_re = re.compile(r"^Time = ([-+0-9.eE]+)")
+
+        bloques = []
+        actual = None
+        with open(log_path, errors="replace") as fh:
+            for ln in fh:
+                mt = time_re.match(ln)
+                if mt:
+                    actual = {"t": float(mt.group(1)), "res": {}}
+                    bloques.append(actual)
+                elif actual is not None:
+                    me = eq_re.search(ln)
+                    if me:
+                        actual["res"].setdefault(me.group(1), float(me.group(2)))
+
+        # Submuestreo para no dibujar decenas de miles de puntos
+        if len(bloques) > 400:
+            paso = max(1, len(bloques) // 400)
+            bloques = bloques[::paso]
+        return ("ok", bloques)
+
+    def _apply_convergence(self, datos) -> None:
+        """Aplica en el hilo de la GUI lo que devolvió el hilo de lectura."""
+        self._conv_busy = False
+        try:
+            estado, payload = datos
+            if estado == "error":
+                self.log(f"⚠️ Error leyendo run.log: {payload}")
+                return
+            if payload:
+                self.res_plot.set_series(payload)
+                self.res_plot.redraw()
+        except Exception as e:  # noqa: BLE001
+            self.log(f"⚠️ Error aplicando convergencia: {e}")
 
     def load_convergence_from_log(self) -> None:
         """Carga la curva de residuales de una corrida ya existente.
