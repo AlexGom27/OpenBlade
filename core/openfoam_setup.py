@@ -116,10 +116,15 @@ functions
         pitchAxis       (0 0 1);
         magUInf         {float(u_inlet)};
         lRef            {chord};
-        Aref            {chord * (0.1 * chord)};
+        // Aref = cuerda x unidad de envergadura.
+        // 
+        // Estaba como chord * 0.1*chord (el espesor de extrusion), lo que
+        // hacia que Cl y Cd salieran 10 veces mayores que los de la
+        // literatura. Ladson y el resto de referencias dan coeficientes por
+        // unidad de envergadura en 2D.
+        Aref            {chord};
     }}
-}}
-"""
+}}"""
         with open(os.path.join(self.case_dir, "system", "controlDict"), "w") as f:
             f.write(controlDict)
 
@@ -204,8 +209,8 @@ wallDist {{ method meshWave; }}
     }}
 }}
 relaxationFactors {{
-    fields {{ p 0.3; }}
-    equations {{ U 0.7; k 0.7; omega 0.7; epsilon 0.7; nuTilda 0.7; gammaInt 0.7; ReThetat 0.7; }}
+    fields {{ p 0.2; }}
+    equations {{ U 0.5; k 0.5; omega 0.5; epsilon 0.5; nuTilda 0.5; gammaInt 0.5; ReThetat 0.5; }}
 }}
 """ if not transient else f"""
 {alg} {{
@@ -219,8 +224,8 @@ relaxationFactors {{
     }}
 }}
 relaxationFactors {{
-    fields {{ p 0.3; }}
-    equations {{ U 0.7; k 0.7; omega 0.7; epsilon 0.7; nuTilda 0.7; gammaInt 0.7; ReThetat 0.7; }}
+    fields {{ p 0.2; }}
+    equations {{ U 0.5; k 0.5; omega 0.5; epsilon 0.5; nuTilda 0.5; gammaInt 0.5; ReThetat 0.5; }}
 }}
 """
 
@@ -323,12 +328,30 @@ boundaryField {{
 
         if is_laminar: return
 
-        # Turbulence estimations using the calculated nu
+        # --- Condiciones de turbulencia en la entrada ---------------------
+        #
+        # Fórmulas estándar (OpenFOAM User Guide, Boundary conditions ->
+        # turbulence):
+        #     k     = 1.5 * (U * I)^2
+        #     omega = sqrt(k) / (Cmu^0.25 * l)
+        # con Cmu = 0.09 y l = 0.07 * L (longitud de mezcla, L = cuerda).
+        #
+        # Antes se usaba I = 0.01 y omega = k / (10 * nu). Ese cociente no
+        # tiene base física: para Re = 6e6 daba omega = 1350, unas 56 veces
+        # el valor correcto (~24). Una omega inflada genera viscosidad
+        # turbulenta desmedida, el campo de presión colapsa y el solver muere
+        # con SIGFPE tras unas pocas iteraciones.
         u_flt = float(u_inlet)
-        I = 0.01
+        I = 0.05                        # 5 %: intensidad típica de túnel
         k_val = max(1.5 * (u_flt * I)**2, 1e-5)
-        omega_val = max(k_val / (10.0 * nu), 1e-3)
-        epsilon_val = max(0.09 * (k_val**1.5) / (0.07 * chord), 1e-4)
+
+        Cmu = 0.09
+        l_mix = 0.07 * chord
+        omega_val = max((k_val ** 0.5) / (Cmu ** 0.25 * l_mix), 1e-3)
+
+        # epsilon coherente con k y l (relación k-epsilon: eps = Cmu^0.75 *
+        # k^1.5 / l)
+        epsilon_val = max((Cmu ** 0.75) * (k_val ** 1.5) / l_mix, 1e-4)
         nuTilda_val = 3.0 * nu
         is_transition = "SST-LM" in turbulence_ui or "gamma-ReTheta" in turbulence_ui
 
