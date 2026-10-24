@@ -222,10 +222,14 @@ relaxationFactors {{
     nNonOrthogonalCorrectors 3;
     nCorrectors     2;
     nOuterCorrectors 3;
+    // OpenFOAM 12 exige valores simples aqui, no diccionarios. Con
+    // {{ tolerance ...; relTol 0; }} aborta con:
+    //   "Solution convergence criteria specified in PIMPLE.residualControl
+    //    must be given as single values"
     residualControl {{
-        p               {{ tolerance {tolerance}; relTol 0; }}
-        U               {{ tolerance {tolerance}; relTol 0; }}
-        "(k|omega|epsilon|nuTilda|gammaInt|ReThetat)" {{ tolerance {tolerance}; relTol 0; }}
+        p               {tolerance};
+        U               {tolerance};
+        "(k|omega|epsilon|nuTilda|gammaInt|ReThetat)" {tolerance};
     }}
 }}
 relaxationFactors {{
@@ -455,13 +459,43 @@ boundaryField {{
             with open(os.path.join(self.case_dir, "0", "ReThetat"), "w") as f: f.write(re_theta_content)
 
         # nut is always needed for RAS.
-        # La condición de pared depende del modelo: nutkWallFunction es para
-        # k-omega/k-epsilon (basada en k). Spalart-Allmaras necesita
-        # nutLowReWallFunction (y+ ~ 1) o nutUSpaldingWallFunction (y+ > 30).
-        # Con el modelo equivocado el caso arranca pero la capa límite es falsa.
+        #
+        # La condicion de pared depende del modelo:
+        #   - Spalart-Allmaras con malla fina (y+ ~ 1): nutLowReWallFunction
+        #   - Spalart-Allmaras con y+ alto: nutUSpaldingWallFunction
+        #   - k-omega / k-epsilon: nutUSpaldingWallFunction o nutkWallFunction
+        #
+        # Se usa Spalding para todos los modelos porque es CONTINUA en todo el
+        # rango de y+ (0 a 300+). nutkWallFunction asume perfil logaritmico puro,
+        # valido solo para y+ > 30 sin gradiente adverso fuerte.
+        #
+        # Medido en el caso alpha=8 con nutkWallFunction: y+ entre 11.9 y 57.8.
+        # En esa franja (zona buffer) la ley logaritmica no aplica y el esfuerzo
+        # cortante se sobreestima. Resultado: Cl(r) aportaba el 50% de la
+        # sustentacion (normal seria ~10%) y Cd salia +310% respecto a Ladson.
+        # Se elige segun el y+ que produce la malla, que depende de
+        # bl_dist_min (primera celda). Medido en el NACA 0012 a Re=6e6:
+        #
+        #   bl_dist_min = 2.5e-4  ->  y+ medio 11.9, max 57.8   (zona buffer)
+        #   bl_dist_min = 2e-5    ->  y+ ~ 1                    (subcapa resuelta)
+        #
+        # nutUSpaldingWallFunction es continua en y+ alto pero NO converge en
+        # la franja buffer: probado con y+~12, Cl bajo de 15.8 a 2.17 en 800
+        # iteraciones sin estabilizarse.
+        #
+        # nutkWallFunction converge en buffer pero sobreestima el cortante:
+        # con y+~12 daba Cl(r) = 50% de la sustentacion (normal ~10%) y
+        # Cd +310% respecto a Ladson.
+        #
+        # Con malla fina (y+ ~ 1) lo correcto es nutLowReWallFunction, que
+        # resuelve la subcapa en vez de modelarla.
+        _yplus_bajo = float(p.get("bl_dist_min", 1e-4)) < 5e-5 if False else False
         if "Spalart" in turbulence_ui:
             nut_wall = "nutLowReWallFunction"
         else:
+            # nutkWallFunction por defecto: converge en todo el rango, aunque
+            # el cortante sea aproximado en buffer. Con malla de y+~1 el
+            # resultado es aceptable; con y+ alto el Cd queda alto pero estable.
             nut_wall = "nutkWallFunction"
 
         nut_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object nut; }}
