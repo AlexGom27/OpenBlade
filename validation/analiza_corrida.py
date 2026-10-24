@@ -78,11 +78,12 @@ def yplus_medio(case: str):
                 pass
     if not filas:
         return None
-    # columnas tras el tiempo: yPlus medio, mínimo, máximo
-    medios = [r[0] for r in filas]
-    mins = [r[1] for r in filas]
-    maxs = [r[2] for r in filas]
-    return {"medio": st.mean(medios), "min": min(mins), "max": max(maxs)}
+    # columnas reales del yPlus.dat: Time, patch, min, max, average
+    # (estaban leídas como medio/min/max, que daba el mínimo por media)
+    mins = [r[0] for r in filas]
+    maxs = [r[1] for r in filas]
+    medias = [r[2] for r in filas]
+    return {"medio": st.mean(medias), "min": min(mins), "max": max(maxs)}
 
 
 def comprobar_proceso(case: str) -> int:
