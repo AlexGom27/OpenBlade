@@ -132,8 +132,24 @@ def analizar(case: str, aoa: float, fraccion: float = 0.25) -> dict:
         "amplitud_cl": max(cl) - min(cl),
         "amplitud_cd": max(cd) - min(cd),
     }
-    res["frac_friccion"] = (
-        abs(res["cl_friccion"]) / abs(res["cl"]) if res["cl"] else None)
+    # OJO: Cl(f) y Cl(r) NO son presion y friccion.
+    #
+    # En el codigo fuente de OpenFOAM 12
+    # (src/functionObjects/forces/forceCoeffs/forceCoeffs.C, linea ~216):
+    #
+    #     scalar Clf = Cl/2.0 + Cm;
+    #     scalar Clr = Cl/2.0 - Cm;
+    #
+    # Es decir: la mitad de la sustentacion mas/menos el momento de cabeceo.
+    # Siempre cumplen Clf + Clr = Cl, y con Cm ~ 0 (perfil simetrico) ambas
+    # valen casi lo mismo. Interpretarlas como presion/friccion lleva a
+    # conclusiones falsas: en una version anterior de este script se afirmo
+    # que "la friccion aporta el 48% del Cl", que era un error de lectura.
+    #
+    # Para separar presion de friccion hay que usar el objeto `forces` y mirar
+    # las componentes pressure/viscous, no el forceCoeffs.
+    res["clf_momento"] = res.pop("cl_friccion", None)
+    res["clr_momento"] = res.pop("cl_presion", None)
 
     y = yplus_medio(case)
     if y:
@@ -142,7 +158,15 @@ def analizar(case: str, aoa: float, fraccion: float = 0.25) -> dict:
     ref = LADSON.get(float(aoa))
     if ref:
         res["cl_ref"], res["cd_ref"] = ref
-        res["err_cl"] = 100 * (res["cl"] - ref[0]) / abs(ref[0])
+        # El error relativo de Cl no tiene sentido cuando la referencia es
+        # casi cero (alpha=0 en perfil simetrico: -0.0121). Dividir por ahi
+        # da "+100%" aunque el valor calculado sea -0.0000, que es correcto.
+        # Se usa diferencia absoluta en ese caso.
+        if abs(ref[0]) > 0.05:
+            res["err_cl"] = 100 * (res["cl"] - ref[0]) / abs(ref[0])
+        else:
+            res["err_cl_abs"] = res["cl"] - ref[0]
+            res["err_cl"] = None
         res["err_cd"] = 100 * (res["cd"] - ref[1]) / ref[1]
 
     return res
@@ -154,7 +178,7 @@ def veredicto(r: dict) -> str:
         return f"FALLO: {r.get('error')}"
 
     L = []
-    fr = r.get("frac_friccion")
+    L = []
     L.append("=" * 64)
     L.append(f"NACA 0012   alpha = {r['aoa']:g} deg")
     L.append("=" * 64)
@@ -168,44 +192,39 @@ def veredicto(r: dict) -> str:
                  f"{r['err_cl']:+8.1f}%")
         L.append(f"  {'Cd':14s} {r['cd']:10.5f} {r['cd_ref']:10.5f} "
                  f"{r['err_cd']:+8.1f}%")
+        L.append(f"  {'Cm':14s} {r['cm']:10.4f}")
     L.append("")
     L.append(f"  oscilacion Cl: +/- {r['amplitud_cl']/2:.4f}   "
              f"(std {r['cl_std']:.4f})")
-    L.append(f"  Cl presion:  {r['cl_presion']:+.4f}")
-    L.append(f"  Cl friccion: {r['cl_friccion']:+.4f}"
-             + (f"   ({100*fr:.0f}% del total)" if fr is not None else ""))
     if "yplus" in r:
         y = r["yplus"]
-        L.append(f"  y+: medio {y['medio']:.1f}  rango [{y['min']:.1f}, "
+        L.append(f"  y+: media {y['medio']:.1f}  rango [{y['min']:.1f}, "
                  f"{y['max']:.1f}]")
     L.append("")
 
-    if fr is None:
-        L.append("  SIN VEREDICTO: falta el desglose de friccion.")
-    elif fr < 0.15:
-        L.append("  ✅ MODELO DE PARED OK")
-        L.append(f"     La friccion aporta {100*fr:.0f}% del Cl (esperado ~10%).")
-        if r.get("err_cd", 999) < 50:
-            L.append("     -> LANZAR la campana alpha = 0..6")
+    # Veredicto por separado para Cl y Cd.
+    if "err_cl" in r:
+        if abs(r["err_cl"]) < 10:
+            L.append(f"  ✅ Cl dentro del 10% ({r['err_cl']:+.1f}%)")
         else:
-            L.append(f"     Pero Cd sigue a {r['err_cd']:+.0f}%: revisar antes.")
-    elif fr < 0.30:
-        L.append("  ⚠️  PARCIALMENTE ALTO")
-        L.append(f"     Friccion {100*fr:.0f}% (esperado ~10%). Mejorable.")
-        L.append("     -> Refinar y+ o revisar la ley de pared.")
-    else:
-        L.append("  ❌ MODELO DE PARED NO VALE")
-        L.append(f"     Friccion {100*fr:.0f}% del Cl (esperado ~10%).")
-        L.append("     -> INVESTIGAR: el cortante se sobreestima.")
-        if "yplus" in r:
-            y = r["yplus"]
-            if 5 < y["medio"] < 30:
-                L.append("     y+ en zona buffer: ni resuelta ni logaritmica.")
-                L.append("     Opciones: y+ ~1 (LowRe, dt inviable) o")
-                L.append("               y+ > 30 (nutk, ya es el caso)")
-                L.append("               -> probar nutUWallFunction / kqRWallFunction")
-            elif y["medio"] <= 5:
-                L.append("     y+ bajo: usar nutLowReWallFunction")
+            L.append(f"  ❌ Cl fuera del 10% ({r['err_cl']:+.1f}%)")
+
+    if "err_cd" in r:
+        if abs(r["err_cd"]) < 15:
+            L.append(f"  ✅ Cd dentro del 15% ({r['err_cd']:+.1f}%)")
+        elif abs(r["err_cd"]) < 50:
+            L.append(f"  ⚠️  Cd alto ({r['err_cd']:+.1f}%)")
+        else:
+            L.append(f"  ❌ Cd muy alto ({r['err_cd']:+.1f}%)")
+            L.append("")
+            L.append("  El Cd NO se desglosa en el forceCoeffs: solo da el total.")
+            L.append("  Para separar presion de friccion hace falta el objeto")
+            L.append("  `forces` con las componentes pressure y viscous.")
+            if "yplus" in r:
+                y = r["yplus"]
+                if y["min"] < 30:
+                    L.append(f"  y+ minimo {y['min']:.1f} < 30: parte del perfil")
+                    L.append("  esta en zona buffer, donde ninguna ley de pared vale.")
 
     return "\n".join(L)
 
