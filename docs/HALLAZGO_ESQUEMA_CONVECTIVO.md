@@ -1,68 +1,58 @@
-# El esquema convectivo de primer orden arruina el Cd
 
-Medido el 2026-10-24 sobre el mismo caso, la misma malla y la misma
-configuración. La única variable es el esquema de convección de la velocidad.
+---
 
-| Esquema | Cd | Error vs Ladson (0.00807) |
-|---|---|---|
-| `upwind` (1er orden) | 0.01758 | **+118 %** |
-| `linearUpwind` (2º orden) | 0.01079 | **+34.5 %** |
+# Refinado de malla: cuatro intentos, ninguno mejora
 
-NACA 0012, α = 0°, Re = 6×10⁶, malla de 44 145 celdas, y⁺ ≈ 57.
+Después de identificar el esquema convectivo como causa principal del Cd alto,
+se intentó refinar la malla siguiendo el NASA TMR. Todos los intentos fallaron.
 
-## Por qué ocurre
+## Referencia: qué hace el NASA TMR
 
-`upwind` de primer orden introduce difusión numérica en la dirección del flujo.
-Esa difusión engorda artificialmente la estela. Una estela más gruesa produce
-una depresión falsa detrás del perfil, y esa depresión se integra como arrastre
-de presión.
+Malla más fina del caso de análisis numérico:
 
-El efecto es de un factor **1.6** en el Cd. Es el error individual más grande
-encontrado en todo el proyecto, por encima del efecto de la ley de pared (que
-resultó no influir) y del refinado de malla.
+    puntos totales:        7 169 x 2 049  (14.7 M)
+    primera celda en pared: 1 x 10^-7
+    ratio de crecimiento:   1.02
+    puntos en superficie:   4 097
+    puntos en estela:       1 537
+    dominio:                500 c
 
-## Por qué pasó desapercibido
+## Lo que probó OpenBlade
 
-Durante la depuración de la divergencia a α = 8 se cambió a `upwind` para
-estabilizar el solver. Eso resolvió la divergencia, pero introdujo este sesgo.
+| Intento | Celdas | ratio | capas | Resultado |
+|---|---|---|---|---|
+| 1 | 71 262 | 1.12 | 30 | converge, Cd +118 % |
+| 2 | 71 262 | 1.2174 | 30 | aspect ratio empeora (80 860) |
+| 3 | 326 952 | 1.05 | 120 | SIGFPE en iteración 25 |
+| 4 | 71 262 (bl=2e-5) | 1.12 | 30 | converge con upwind (+114 %), **diverge con linearUpwind** |
 
-No se detectó porque **el Cl apenas se ve afectado**: depende de la circulación
-global, que es robusta frente a la difusión. El Cd, en cambio, depende del
-detalle de la estela y se dispara.
+## Por qué el ratio pequeño no basta
 
-## Consecuencia
+El salto de escala total es:
 
-`linearUpwind` —o cualquier esquema de segundo orden limitado— es obligatorio
-para validar arrastre. Con primer orden el Cd no es comparable con la
-literatura, por bien resuelta que esté la malla.
+    mesh_size_max / bl_dist_min = 0.5 / 2e-5 = 25 000x
 
-## Estado con `linearUpwind` y la malla actual
+Con 120 capas y ratio 1.05 la progresión llega a 2e-5 x 1.05^120 = 7e-3.
+Queda un salto de 0.5 / 0.007 = 71x hasta el campo lejano.
 
-```
-α = 0°:   Cl = −0.0003  (correcto, perfil simétrico)
-          Cd =  0.01085  vs 0.00807  →  +34.5 %
-```
+Cubrirlo entero exige ~220 capas y unos 2 000 puntos en la dirección normal,
+como la malla NASA. Eso son millones de celdas, fuera del alcance de este equipo.
 
-El 34.5 % restante es coherente con y⁺ ≈ 57, donde la subcapa viscosa se
-modela en vez de resolverse.
+## Conclusión
 
-## Opción A (y⁺ ≈ 1): bloqueada por la malla
+El cuello de botella es la **topología**, no los parámetros. El C-Grid proyecta
+la capa límite radialmente sobre 50 cuerdas, lo que fuerza un gradiente de
+escala que ningún ajuste de ratio/capas resuelve sin llegar a millones de celdas.
 
-Se intentó con 252 048 celdas y primera celda de 2×10⁻⁶. Tres configuraciones,
-todas fallidas:
+Para validar arrastre de verdad hay que cambiar de topología: capa límite
+confinada alrededor del perfil y transición isotrópica al exterior (malla no
+estructurada u O-grid con bloque exterior independiente).
 
-| Intento | Configuración | Resultado |
-|---|---|---|
-| 1 | `dt` adaptativo, maxCo 3 | dt → 2.6×10⁻¹⁷, inviable |
-| 2 | `dt` fijo 10⁻⁶ | SIGFPE en GAMG |
-| 3 | `adjustTimeStep no` | Cd = 0.76 en el primer paso |
+## Estado utilizable hoy
 
-Además el y⁺ no bajó de **2.25** con celda de 2×10⁻⁶; haría falta ~8×10⁻⁷.
+    alpha = 0, malla gruesa, linearUpwind:  Cd +34.5 %
+    alpha = 4, malla gruesa, linearUpwind:  Cd +0.6 %   <- mejor caso
+    Cl en todos los casos:                  -4 % a +11 %
 
-**Causa:** la malla pasa de celdas de 2×10⁻⁶ junto a la pared a celdas de 0.4
-en el farfield. Cinco órdenes de magnitud en un solo salto dejan el sistema mal
-condicionado y GAMG no lo resuelve.
-
-Para que la opción A sea viable hace falta rediseñar la transición de la capa
-límite al farfield de forma gradual. Es trabajo de rediseño del generador, no
-de ajuste de parámetros.
+Suficiente para uso ingenieril en el rango bajo de incidencia. No para
+certificación, que exige Cd dentro del 2-3 %.
