@@ -5,7 +5,7 @@ class OpenFoamSetup:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
         self.case_dir = case_dir
         
-    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "upwind", depth: float = 0.1) -> None:
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "linearUpwind", depth: float = 0.1, bl_dist_min: float = 1e-4) -> None:
         # Create directories
         for d in ["0", "constant", "system"]:
             os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
@@ -41,10 +41,14 @@ class OpenFoamSetup:
         nu = (float(u_inlet) * float(chord)) / float(reynolds)
             
         self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co, max_iters, momentum_scheme, depth)
+        # Se guarda la primera celda: _write_0 la usa para elegir el modelo de
+        # pared (LowRe con y+~1, nutk con y+ alto).
+        self.bl_dist_min = bl_dist_min
+
         self._write_constant(turbulence, nu)
         self._write_0(u_inlet, p_outlet, chord, turbulence, nu)
         
-    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "upwind", depth: float = 0.1) -> None:
+    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "linearUpwind", depth: float = 0.1) -> None:
         app_name = "pimpleFoam" if transient else "simpleFoam"
         initial_dt = delta_t if transient else "1"
         endTime  = end_time if transient else str(max_iters)
@@ -460,42 +464,32 @@ boundaryField {{
 
         # nut is always needed for RAS.
         #
-        # La condicion de pared depende del modelo:
-        #   - Spalart-Allmaras con malla fina (y+ ~ 1): nutLowReWallFunction
-        #   - Spalart-Allmaras con y+ alto: nutUSpaldingWallFunction
-        #   - k-omega / k-epsilon: nutUSpaldingWallFunction o nutkWallFunction
+        # La condicion de pared se elige segun el y+ que produce la malla, que
+        # depende de la primera celda (bl_dist_min). Medido en el NACA 0012 a
+        # Re = 6e6:
         #
-        # Se usa Spalding para todos los modelos porque es CONTINUA en todo el
-        # rango de y+ (0 a 300+). nutkWallFunction asume perfil logaritmico puro,
-        # valido solo para y+ > 30 sin gradiente adverso fuerte.
-        #
-        # Medido en el caso alpha=8 con nutkWallFunction: y+ entre 11.9 y 57.8.
-        # En esa franja (zona buffer) la ley logaritmica no aplica y el esfuerzo
-        # cortante se sobreestima. Resultado: Cl(r) aportaba el 50% de la
-        # sustentacion (normal seria ~10%) y Cd salia +310% respecto a Ladson.
-        # Se elige segun el y+ que produce la malla, que depende de
-        # bl_dist_min (primera celda). Medido en el NACA 0012 a Re=6e6:
-        #
-        #   bl_dist_min = 2.5e-4  ->  y+ medio 11.9, max 57.8   (zona buffer)
+        #   bl_dist_min = 2.5e-4  ->  y+ medio 11.9, max 57.8   (buffer)
         #   bl_dist_min = 2e-5    ->  y+ ~ 1                    (subcapa resuelta)
         #
-        # nutUSpaldingWallFunction es continua en y+ alto pero NO converge en
-        # la franja buffer: probado con y+~12, Cl bajo de 15.8 a 2.17 en 800
-        # iteraciones sin estabilizarse.
+        # Modelos y donde valen:
+        #   nutLowReWallFunction      y+ ~ 1   resuelve la subcapa
+        #   nutkWallFunction          y+ > 30  ley logaritmica pura
+        #   nutUSpaldingWallFunction  continuo, pero NO converge en buffer
         #
-        # nutkWallFunction converge en buffer pero sobreestima el cortante:
-        # con y+~12 daba Cl(r) = 50% de la sustentacion (normal ~10%) y
-        # Cd +310% respecto a Ladson.
+        # Medido con y+ ~ 12 (buffer):
+        #   nutkWallFunction  -> converge, pero Cl(r) = 50% de la sustentacion
+        #                        (normal ~10%) y Cd +310% respecto a Ladson
+        #   nutUSpalding      -> no converge: Cl cae de 15.8 a 2.17 en 800 iter
         #
-        # Con malla fina (y+ ~ 1) lo correcto es nutLowReWallFunction, que
-        # resuelve la subcapa en vez de modelarla.
-        _yplus_bajo = float(p.get("bl_dist_min", 1e-4)) < 5e-5 if False else False
-        if "Spalart" in turbulence_ui:
+        # Con malla fina (primera celda < 5e-5) se usa LowRe, el unico que
+        # resuelve la region donde se genera el cortante.
+        # La primera celda se guarda en la instancia desde create_case; si no
+        # estuviera, se asume un valor intermedio y se usa nutkWallFunction.
+        _bl = float(getattr(self, "bl_dist_min", 1e-4))
+
+        if "Spalart" in turbulence_ui or _bl < 5e-5:
             nut_wall = "nutLowReWallFunction"
         else:
-            # nutkWallFunction por defecto: converge en todo el rango, aunque
-            # el cortante sea aproximado en buffer. Con malla de y+~1 el
-            # resultado es aceptable; con y+ alto el Cd queda alto pero estable.
             nut_wall = "nutkWallFunction"
 
         nut_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object nut; }}
