@@ -5,7 +5,7 @@ class OpenFoamSetup:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
         self.case_dir = case_dir
         
-    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "linearUpwind", depth: float = 0.1, bl_dist_min: float = 1e-4) -> None:
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4) -> None:
         # Create directories
         for d in ["0", "constant", "system"]:
             os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
@@ -48,7 +48,7 @@ class OpenFoamSetup:
         self._write_constant(turbulence, nu)
         self._write_0(u_inlet, p_outlet, chord, turbulence, nu)
         
-    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "linearUpwind", depth: float = 0.1) -> None:
+    def _write_system(self, u_inlet: float, chord: float, transient: bool, tolerance: str, turbulence_ui: str, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1) -> None:
         app_name = "pimpleFoam" if transient else "simpleFoam"
         initial_dt = delta_t if transient else "1"
         endTime  = end_time if transient else str(max_iters)
@@ -159,6 +159,18 @@ functions
 
         # linearUpwind necesita el esquema de gradiente como argumento;
         # con upwind (1er orden) no aplica.
+        # Esquema por defecto: limitedLinearV 1.
+        #
+        # Medido en el NACA 0012 a Re=6e6, alpha=0, malla no estructurada
+        # (117 854 celdas, 434 caras con no-ortogonalidad > 70 grados):
+        #
+        #   upwind          -> Cd = 0.01758  (+118%)  converge
+        #   linearUpwind    -> inestable en esa malla (Cl de -0.01 a -61950)
+        #   limitedLinearV  -> Cd = 0.00797  (-1.2%)  converge
+        #
+        # El limitador de van Leer tolera mallas irregulares donde el
+        # segundo orden sin limitar explota, sin perder precision.
+        #
         # Cada esquema de convección tiene su sintaxis:
         #   upwind                          -> sin argumentos
         #   linearUpwind                    -> requiere el gradiente: grad(U)

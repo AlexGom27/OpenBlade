@@ -86,6 +86,34 @@ def yplus_medio(case: str):
     return {"medio": st.mean(medias), "min": min(mins), "max": max(maxs)}
 
 
+def comprobar_tiempo(case: str) -> dict:
+    """Detecta corridas que murieron demasiado rapido.
+
+    Un caso de 100k celdas y 2000 iteraciones tarda minutos u horas, no
+    segundos. Si ExecutionTime/nIteraciones es anormalmente bajo, el solver
+    colapso al arrancar y los coeficientes no valen nada.
+
+    Umbral: menos de 0.005 s por iteracion con mas de 50k celdas indica
+    divergencia temprana, no convergencia rapida.
+    """
+    log = os.path.join(case, "run.log")
+    if not os.path.exists(log):
+        return {}
+    texto = open(log, errors="replace").read()
+    n_iter = texto.count("Time = ")
+    m = re.findall(r"ExecutionTime = ([0-9.eE+-]+) s", texto)
+    if not m or not n_iter:
+        return {"n_iter": n_iter}
+    exec_t = float(m[-1])
+    por_iter = exec_t / n_iter if n_iter else 0
+    return {
+        "n_iter": n_iter,
+        "exec_total": exec_t,
+        "seg_por_iter": por_iter,
+        "sospechoso": por_iter < 0.005 and n_iter > 3,
+    }
+
+
 def comprobar_proceso(case: str) -> int:
     try:
         out = subprocess.run(["pgrep", "-c", "-f", "foamRun"],
@@ -154,6 +182,17 @@ def analizar(case: str, aoa: float, fraccion: float = 0.25) -> dict:
     y = yplus_medio(case)
     if y:
         res["yplus"] = y
+
+    t = comprobar_tiempo(case)
+    if t:
+        res["tiempo"] = t
+        if t.get("sospechoso"):
+            # Si murio en segundos, los coeficientes no son un resultado
+            res["ok"] = False
+            res["error"] = (
+                f"divergencia temprana: {t['n_iter']} iteraciones en "
+                f"{t['exec_total']:.1f} s ({t['seg_por_iter']:.4f} s/iter). "
+                f"Un caso sano de este tamano tarda minutos.")
 
     ref = LADSON.get(float(aoa))
     if ref:
