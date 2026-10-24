@@ -110,7 +110,12 @@ def main():
         
         # Escalar y rotar puntos manualmente
         c_rot = 0.25 * chord
-        angle = -aoa_rad 
+        # Giro horario en el plano xy: con aoa positivo el borde de ataque
+        # sube y el de salida baja, que es la convencion aerodinamica
+        # (alpha positivo = morro arriba). Verificado numericamente:
+        #   giro -8: LE y=+0.035, TE y=-0.104  -> LE arriba  (alpha > 0)
+        #   giro +8: LE y=-0.035, TE y=+0.104  -> TE arriba  (alpha < 0)
+        angle = -aoa_rad
         cos_a = math.cos(angle)
         sin_a = math.sin(angle)
         
@@ -147,6 +152,22 @@ def main():
                 
                 # PLAN A: GmshAirfoil2D (Estructurado C-Grid)
                 airfoil = AirfoilSpline(rotated_points, mesh_size, name="airfoil")
+
+                # Numero de puntos en el contorno del perfil.
+                #
+                # CType calcula este numero a partir de mesh_size, que tambien
+                # fija el tamano de celda del dominio. Con mesh_size=0.008
+                # resultaban 87 puntos por superficie: 217 caras en el patch
+                # `airfoil`, demasiado pocas para integrar presion y friccion
+                # con precision.
+                #
+                # `nb_airfoil_pts` (parche en geometry_def.py) permite fijarlo
+                # aparte, de modo que el dominio se pueda mallar grueso sin
+                # perder resolucion en la superficie del alabe.
+                nb_superficie = int(p.get("nb_airfoil_pts", 0) or 0)
+                if nb_superficie > 0:
+                    airfoil.nb_airfoil_pts = nb_superficie
+
                 gmsh.model.geo.synchronize()
                 
                 # OJO: el 4o argumento de CType es el tamaño de malla del
