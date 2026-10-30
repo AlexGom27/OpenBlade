@@ -15,6 +15,8 @@ Configuración
 -------------
 Variable de entorno (o atributo) con el destino SSH:
     OPENBLADE_REMOTE=alejandro@100.85.66.123
+OPENBLADE_REMOTE_CASE admite varios casos separados por comas: el primero se
+abre al iniciar y el resto queda en el selector.
 
 Si no se define, el panel queda inactivo y lo dice.
 """
@@ -45,7 +47,8 @@ class RemoteMonitorPanel(QWidget):
                  parent=None) -> None:
         super().__init__(parent)
         self.remote = remote or os.environ.get("OPENBLADE_REMOTE", "")
-        self.case = case
+        self.casos = [c.strip() for c in case.split(",") if c.strip()]
+        self.case = self.casos[0] if self.casos else "openfoam_case"
         self.historial = {"t": [], "res": {}, "cl": [], "cd": []}
         self._busy = False
 
@@ -57,6 +60,7 @@ class RemoteMonitorPanel(QWidget):
         self.timer.timeout.connect(self.refrescar)
         if self.remote:
             self.timer.start(15000)
+            QTimer.singleShot(300, self.refrescar)
 
     # ---------------------------------------------------------------- UI
     def _build_ui(self) -> None:
@@ -70,9 +74,12 @@ class RemoteMonitorPanel(QWidget):
         self.ed_remote.setPlaceholderText("usuario@host")
         top.addWidget(self.ed_remote, 1)
         top.addWidget(QLabel("Caso:"))
-        self.ed_case = QLineEdit(self.case)
-        self.ed_case.setMaximumWidth(160)
-        top.addWidget(self.ed_case)
+        self.cb_case = QComboBox()
+        self.cb_case.setEditable(True)
+        self.cb_case.addItems(self.casos)
+        self.cb_case.setMinimumWidth(240)
+        self.cb_case.activated.connect(lambda _i: self._conectar())
+        top.addWidget(self.cb_case)
         self.btn_conectar = QPushButton("Conectar")
         self.btn_conectar.clicked.connect(self._conectar)
         top.addWidget(self.btn_conectar)
@@ -87,18 +94,19 @@ class RemoteMonitorPanel(QWidget):
         lay.addWidget(self.lbl_estado)
 
         # gráfica
-        self.fig = Figure(figsize=(5, 2.6), dpi=90)
+        self.fig = Figure(figsize=(5, 5.2), dpi=90)
         self.canvas = FigureCanvas(self.fig)
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_yscale("log")
+        self.ax = self.fig.add_subplot(311)
+        self.ax_cl = self.fig.add_subplot(312)
+        self.ax_cd = self.fig.add_subplot(313)
         self.fig.patch.set_facecolor("#1e1e1e")
-        self.ax.set_facecolor("#1e1e1e")
-        self.ax.tick_params(colors="white", labelsize=8)
-        for sp in self.ax.spines.values():
-            sp.set_color("#555")
-        self.ax.grid(True, which="both", ls="--", alpha=0.25, color="#888")
-        self.ax.set_title("Residuales (escala log)", color="white", fontsize=10)
-        self.fig.subplots_adjust(left=0.12, right=0.97, top=0.9, bottom=0.18)
+        for ax in (self.ax, self.ax_cl, self.ax_cd):
+            self._estilo(ax)
+        self.ax.set_yscale("log")
+        self.ax.set_title("Residuales desde que se abrió el panel (escala log)",
+                          color="white", fontsize=10)
+        self.fig.subplots_adjust(left=0.12, right=0.97, top=0.95, bottom=0.08,
+                                 hspace=0.45)
         lay.addWidget(self.canvas, 1)
 
         # métricas del servidor
@@ -108,10 +116,21 @@ class RemoteMonitorPanel(QWidget):
             "border-radius:4px; font-family:Menlo,monospace; font-size:10px;")
         lay.addWidget(self.lbl_server)
 
+    @staticmethod
+    def _estilo(ax) -> None:
+        ax.set_facecolor("#1e1e1e")
+        ax.tick_params(colors="white", labelsize=8)
+        for sp in ax.spines.values():
+            sp.set_color("#555")
+        ax.grid(True, which="both", ls="--", alpha=0.25, color="#888")
+
     # ------------------------------------------------------------ control
     def _conectar(self) -> None:
         self.remote = self.ed_remote.text().strip()
-        self.case = self.ed_case.text().strip() or "openfoam_case"
+        nuevo = self.cb_case.currentText().strip() or "openfoam_case"
+        if nuevo != self.case:
+            self.historial = {"t": [], "res": {}, "cl": [], "cd": []}
+        self.case = nuevo
         if self.remote:
             self.timer.start(15000)
             self.refrescar()
@@ -147,6 +166,9 @@ class RemoteMonitorPanel(QWidget):
         self._busy = False
         if not d:
             return
+        # respuesta de un caso anterior al cambio de selector
+        if d.get("caso") and d["caso"] != os.path.basename(self.case.rstrip("/")):
+            return
         if "error" in d:
             self.lbl_estado.setText(f"⚠️ {d['error'][:200]}")
             return
@@ -177,15 +199,12 @@ class RemoteMonitorPanel(QWidget):
             self.historial["t"].append(t)
             for k, v in (d.get("residuales") or {}).items():
                 self.historial["res"].setdefault(k, []).append(v)
-            if c:
-                self.historial["cl"].append(c["Cl"])
-                self.historial["cd"].append(c["Cd"])
             # limitar para no crecer sin fin
             if len(self.historial["t"]) > 600:
                 self.historial["t"] = self.historial["t"][-600:]
                 for k in self.historial["res"]:
                     self.historial["res"][k] = self.historial["res"][k][-600:]
-            self._dibujar()
+            self._dibujar((c or {}).get("serie") or [])
 
         s = d.get("servidor") or {}
         partes = []
@@ -200,7 +219,7 @@ class RemoteMonitorPanel(QWidget):
             partes.append(f"carga {s['carga'][0]}")
         self.lbl_server.setText("   ·   ".join(partes) or "—")
 
-    def _dibujar(self) -> None:
+    def _dibujar(self, serie_fuerzas) -> None:
         self.ax.clear()
         self.ax.set_yscale("log")
         colores = {"Ux": "#4fc3f7", "Uy": "#81c784", "Uz": "#a1887f",
@@ -216,6 +235,23 @@ class RemoteMonitorPanel(QWidget):
                                  facecolor="#2a2a2a", edgecolor="#555")
             for t in leg.get_texts():
                 t.set_color("white")
-        self.ax.tick_params(colors="white", labelsize=8)
-        self.ax.grid(True, which="both", ls="--", alpha=0.25, color="#888")
+        self._estilo(self.ax)
+        self.ax.set_title("Residuales desde que se abrió el panel (escala log)",
+                          color="white", fontsize=10)
+
+        # Historia completa del caso, leida del servidor
+        for ax, col, nombre, color in ((self.ax_cl, 2, "Cl", "#4fc3f7"),
+                                       (self.ax_cd, 1, "Cd", "#ffb74d")):
+            ax.clear()
+            self._estilo(ax)
+            ax.set_title(f"{nombre} (historia del caso)", color="white",
+                         fontsize=10)
+            if serie_fuerzas:
+                ax.plot([f[0] for f in serie_fuerzas],
+                        [f[col] for f in serie_fuerzas], lw=1.0, color=color)
+                # El arranque (Cl ~ +-20) aplastaria la escala: el eje y se
+                # ajusta a la ultima mitad, que es donde se juzga la convergencia.
+                cola = [f[col] for f in serie_fuerzas[len(serie_fuerzas) // 2:]]
+                margen = 0.1 * (max(cola) - min(cola)) or abs(cola[-1]) * 0.01 or 1e-6
+                ax.set_ylim(min(cola) - margen, max(cola) + margen)
         self.canvas.draw_idle()

@@ -23,6 +23,10 @@ import sys
 import time
 
 
+PUNTOS_SERIE = 400   # puntos de la historia de Cl/Cd que se envian a la GUI
+LOG_ACTIVO_S = 120   # sin escribir en run.log este tiempo, el caso no corre
+
+
 def _read(path, limit=None):
     try:
         with open(path, errors="replace") as f:
@@ -97,15 +101,40 @@ def coeffs(case):
     if not files:
         return None
     mejor = max(files, key=os.path.getmtime)
-    lineas = [l for l in _read(mejor).splitlines()
-              if l.strip() and not l.lstrip().startswith("#")]
-    if not lineas:
+    texto = _read(mejor).splitlines()
+    # El orden de columnas cambia entre versiones de OpenFOAM (en la 12:
+    # Time Cm Cd Cl Cl(f) Cl(r)), asi que se toma de la cabecera del archivo.
+    nombres = []
+    for l in texto:
+        if l.startswith("#") and l[1:].split()[:1] == ["Time"]:
+            nombres = l[1:].split()
+    if "Cd" not in nombres or "Cl" not in nombres:
         return None
-    v = lineas[-1].split()
+    i_cd, i_cl = nombres.index("Cd"), nombres.index("Cl")
+
+    filas = []
+    for l in texto:
+        if l.strip() and not l.lstrip().startswith("#"):
+            v = l.split()
+            try:
+                filas.append((float(v[0]), float(v[i_cd]), float(v[i_cl])))
+            except (IndexError, ValueError):
+                pass
+    if not filas:
+        return None
+    paso = max(1, len(filas) // PUNTOS_SERIE)
+    serie = filas[-1::-paso][::-1]
+    t, cd, cl = filas[-1]
+    return {"t": t, "Cd": cd, "Cl": cl, "n": len(filas), "serie": serie}
+
+
+def log_reciente(case):
+    """solver_vivo cuenta cualquier solver del servidor; esto mira ESTE caso."""
     try:
-        return {"t": float(v[0]), "Cd": float(v[1]), "Cl": float(v[4])}
-    except (IndexError, ValueError):
-        return None
+        return time.time() - os.path.getmtime(
+            os.path.join(case, "run.log")) < LOG_ACTIVO_S
+    except OSError:
+        return False
 
 
 def solver_vivo():
@@ -184,7 +213,7 @@ def recoger(case):
     n_proc = solver_vivo()
     if ls.get("divergido"):
         estado = "DIVERGIDO"
-    elif n_proc > 0:
+    elif n_proc > 0 and log_reciente(case):
         estado = "EN_CURSO"
     elif end and t is not None and t >= end - 1e-9:
         estado = "COMPLETADA"
@@ -200,7 +229,7 @@ def recoger(case):
         "residuales": ls.get("res", {}),
         "continuidad": ls.get("continuidad"),
         "dt": ls.get("dt"),
-        "pasos": ls.get("pasos", 0),
+        "pasos": cf["n"] if cf else ls.get("pasos", 0),
         "tiempos_escritos": len(cs["tiempos"]),
         "coeffs": cf,
         "procesos": n_proc,
