@@ -221,11 +221,16 @@ def correr_est(tag, params, work, nproc, env, logfile, ref_cl=None,
 
 def correr_trans(tag, params, work, nproc, env, logfile, ref_cl=None,
                  ref_cd=None):
-    """Transitorio que arranca de un RANS convergido.
+    """Estacionario y luego transitorio EN EL MISMO CASO.
 
-    Es la correccion clave: el estacionario impone la condicion de Kutta y
-    deja un campo fisico. Arrancar de ahi elimina el transiente espurio que
-    disparaba el Cl a 2.7.
+    Copiar campos entre dos casos no funciona: gmsh no es determinista y dos
+    ejecuciones con los mismos parametros dan mallas con igual numero de
+    celdas pero distinta numeracion. scotch reparte distinto y el solver
+    aborta con "size 791 is not equal to the given value of 770".
+
+    En el mismo caso la malla y la descomposicion son unicas: se corre RANS
+    hasta converger, se reescriben fvSchemes/fvSolution/controlDict para
+    transitorio y se continua desde el ultimo campo escrito.
     """
     caso = os.path.join(work, tag)
     c = leer_coeffs(caso, 0.6)
@@ -235,43 +240,61 @@ def correr_trans(tag, params, work, nproc, env, logfile, ref_cl=None,
         _errs(r, ref_cl, ref_cd)
         return r
 
-    warm = caso + "_warm"
     t0 = time.time()
     try:
-        log(f"  {tag}: calentando en estacionario", logfile)
-        preparar(warm, params, nproc, env, transient=False, iters=ITER_EST)
-        with open(os.path.join(warm, "run.log"), "w") as fh:
+        # --- fase 1: estacionario ---
+        log(f"  {tag}: RANS estacionario", logfile)
+        preparar(caso, params, nproc, env, transient=False, iters=ITER_EST)
+        with open(os.path.join(caso, "run.log"), "w") as fh:
             subprocess.run(["mpirun", "-np", str(nproc), "foamRun",
                             "-parallel", "-solver", "incompressibleFluid"],
-                           cwd=warm, env=env, stdout=fh,
+                           cwd=caso, env=env, stdout=fh,
                            stderr=subprocess.STDOUT,
                            stdin=subprocess.DEVNULL, timeout=21600)
 
-        log(f"  {tag}: lanzando transitorio desde el campo caliente", logfile)
-        preparar(caso, params, nproc, env, transient=True)
-        # La descomposicion del caso transitorio debe ser EXACTAMENTE la del
-        # calentamiento; si scotch reparte distinto, los campos copiados
-        # tienen otro numero de celdas por procesador y el solver aborta con
-        # "size 11900 is not equal to the given value of 11826".
-        import shutil
-        shutil.copy2(os.path.join(warm, "system", "decomposeParDict"),
-                     os.path.join(caso, "system", "decomposeParDict"))
-        run(["decomposePar", "-force"], caso, env, 3600)
-        # copiar el campo convergido a 0/ del caso transitorio
-        ult = sorted((d for d in glob.glob(os.path.join(warm, "processor0", "*"))
+        est = leer_coeffs(caso, 0.8)
+        log(f"  {tag}: RANS listo Cl={est['cl']:+.4f} Cd={est['cd']:.5f}"
+            if est else f"  {tag}: RANS sin coeficientes, se sigue igual",
+            logfile)
+
+        # --- fase 2: reescribir a transitorio sobre el MISMO caso ---
+        sys.path.insert(0, ROOT)
+        from core.openfoam_setup import OpenFoamSetup
+        # conservar el ultimo campo como tiempo inicial: se renombra el
+        # directorio del ultimo paso escrito a `0`? No: OpenFOAM arranca en
+        # startTime. Se fija startFrom latestTime, que es lo correcto.
+        OpenFoamSetup(case_dir=caso).create_case(
+            u_inlet=15.0, p_outlet=0.0, chord=1.0, transient=True,
+            tolerance="1e-5",
+            turbulence=params.get("turbulence", "k-Omega SST (RAS)"),
+            reynolds=params.get("reynolds", 6e6),
+            momentum_scheme="limitedLinearV", depth=0.1,
+            bl_dist_min=params.get("bl_dist_min", 8e-4),
+            delta_t="1e-5", end_time=str(params.get("end_time", 0.4)),
+            write_interval="0.02", max_co=1.0, max_iters=500000)
+
+        # create_case reescribe 0/ con campos uniformes; hay que restaurar el
+        # campo convergido en 0/ para que latestTime no arranque del inicial.
+        ult = sorted((d for d in glob.glob(os.path.join(caso, "processor0", "*"))
                       if re.fullmatch(r"[\d.eE+-]+", os.path.basename(d))),
                      key=lambda x: float(os.path.basename(x)))
-        src = ult[-1] if ult else os.path.join(warm, "processor0", "0")
-        for i in range(nproc):
-            dst = os.path.join(caso, f"processor{i}", "0")
-            sd = os.path.join(warm, f"processor{i}", os.path.basename(src))
-            if os.path.isdir(sd):
-                run(["cp", "-f"] + [os.path.join(sd, f) for f in
-                                    ("U", "p", "k", "omega", "nut") if
-                                    os.path.exists(os.path.join(sd, f))] +
-                    [dst + "/"], caso, env, 600, check=False)
+        if ult:
+            src = ult[-1]
+            for i in range(nproc):
+                dst = os.path.join(caso, f"processor{i}", "0")
+                sd = os.path.join(caso, f"processor{i}", os.path.basename(src))
+                if not os.path.isdir(sd):
+                    continue
+                for f in ("U", "p", "k", "omega", "nut"):
+                    sp = os.path.join(sd, f)
+                    if os.path.exists(sp):
+                        run(["cp", "-f", sp, dst + "/"], caso, env, 600,
+                            check=False)
+            log(f"  {tag}: campo de t={os.path.basename(src)} copiado a 0/",
+                logfile)
 
-        with open(os.path.join(caso, "run.log"), "w") as fh:
+        # la malla es la misma: no se vuelve a descomponer
+        with open(os.path.join(caso, "run.log"), "a") as fh:
             subprocess.run(["mpirun", "-np", str(nproc), "foamRun",
                             "-parallel", "-solver", "incompressibleFluid"],
                            cwd=caso, env=env, stdout=fh,

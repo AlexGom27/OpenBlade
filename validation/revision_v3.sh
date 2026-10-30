@@ -3,8 +3,7 @@
 #
 # Pensado para el cron de OpenClaw: lo que imprime se anuncia por Telegram.
 #
-#   - Si el programa sigue vivo: imprime una linea de progreso como mucho
-#     cada 4 horas (para no spamear).
+#   - Si el programa sigue vivo: no imprime nada (silencio).
 #   - Si ha terminado y aun no se ha avisado: imprime el informe completo y
 #     marca el aviso para no repetirlo.
 #   - Si ha terminado y ya se aviso: no imprime nada.
@@ -96,14 +95,5 @@ if [ "${MUERTO:-0}" = "1" ]; then
     exit 0
 fi
 
-# sigue vivo: aviso de progreso cada 4h como mucho
-AHORA=$(date +%s)
-ULTIMO=0
-[ -f "$ESTADO.prog" ] && ULTIMO=$(cat "$ESTADO.prog" 2>/dev/null || echo 0)
-if [ $((AHORA - ULTIMO)) -ge 14400 ]; then
-    echo "$AHORA" > "$ESTADO.prog"
-    echo "v3 en curso: ${VIVO:-?} proceso(s), ${CASOS:-?} casos cerrados."
-    echo
-    echo "$RESUMEN" | head -12
-fi
+# sigue vivo: NO se avisa. Solo se reporta al terminar o al caerse.
 exit 0
