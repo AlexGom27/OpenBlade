@@ -78,20 +78,20 @@ campo inicial**.
 
 Dos mecanismos visibles en `run.log`:
 
-**a) El PIMPLE no converge dentro de cada paso.** En cada paso el residuo
-inicial de p arranca en ~1 y baja solo ×0.73 por iteración externa:
+**a) La presión se sub-relaja también en la última iteración, y el PIMPLE no
+puede cortar por convergencia.** *(Corregido tras la ronda 1 con OpenClaw: en
+la versión anterior afirmé que el residuo de p arrancaba en ~1 en cada paso;
+eso solo ocurre en el primer paso. Después arranca en ~5×10⁻⁴.)*
 
-```
-PIMPLE: Iteration 1   p initial residual 0.986
-PIMPLE: Iteration 2   0.654
-PIMPLE: Iteration 3   0.455
-...                   (×0.73 por iteración)
-PIMPLE: Iteration 12  ~0.03
-```
-
-Es la huella de `relaxationFactors { fields { p 0.2; } }` aplicada dentro del
-bucle transitorio sin factores `Final` = 1. Cada paso termina sin converger y el
-error se acumula durante cientos de miles de pasos.
+- En el primer paso el residuo de p baja ×0.73 por iteración (0.986 → 0.654 →
+  0.455 …), la huella de `p 0.2`.
+- OF-12 aplica `p 0.2` y `U 0.35` también en la iteración final si no existen
+  `pFinal`/`UFinal` (`GeometricField.C:1120-1143`, `fvMatrix.C:578-599`).
+- El log dice `PIMPLE: No corrector convergence criteria found` y hace siempre
+  12 iteraciones: el `residualControl` simple no vale como criterio de
+  iteraciones externas; OF-12 exige `outerCorrectorResidualControl` con
+  diccionarios `{tolerance; relTol;}`
+  (`singleRegionCorrectorConvergenceControl.C:57`).
 
 **b) `phi` no se copia al reiniciar.** `correr_trans` copia
 `U p k omega nut` de `processorN/2500/` a `processorN/0/`, pero no `phi`, que sí
@@ -342,3 +342,56 @@ donde |E| ≤ u_val. Por separado, verificación contra TMR (§2.6): banda ±1 %
 3. ¿Hubo SIGFPE con ω alto en la malla actual (117 874 celdas) o solo en mallas
    anteriores? E1 lo responde de paso.
 4. ¿Se puede añadir el lockfile y la marca `DONE` antes de relanzar?
+
+---
+
+## 6. Ronda 1 de contraste con OpenClaw (2026-10-30 ~05:10)
+
+OpenClaw revisó este documento en el servidor (152 llamadas a herramientas,
+solo lectura). Claude verificó cada punto de su respuesta antes de incorporarlo.
+
+| Punto | Veredicto OpenClaw | Verificación Claude |
+|---|---|---|
+| H1 salto de Cl y phi no copiado | De acuerdo | — |
+| H1 "residuo de p ≈1 en cada paso" | **Falso: solo el 1er paso** | Confirmado. Corregido en §2.1 |
+| H2 coste ~55-60 h/ángulo | De acuerdo | — |
+| H3 νt/ν mediana ≈12 000 | De acuerdo (12 046); p10 = 173, no 581 | Aceptado |
+| H3 como causa principal | **Plausible, no demostrada**: con ley de pared el cortante lo fija la ley de pared | Aceptado. Sigue siendo hipótesis hasta E1 |
+| H4 RANS no convergido | De acuerdo, y afecta también la campaña de 44 casos | — |
+| H5, H6 | De acuerdo | — |
+
+**Hallazgos nuevos de OpenClaw, verificados por Claude:**
+
+1. **`residualControl` del PIMPLE no registrado** (ver §2.1a). Bug real de
+   configuración del transitorio.
+2. **`timeout=86400` en `programa_v3.py:302`**: el transitorio se corta a las
+   24 h. V1 no puede terminar.
+3. **I = 5 % entró en `ba966cd` (2026-10-23), antes de la campaña de 44 casos
+   (`210b172`, 2026-10-26).** `/tmp/prog/b_0012_a8/0/k` inlet = 0.84375, igual
+   que v3. Los resultados α=0-6 "validados" ya incluyen la turbulencia inflada
+   (mediana νt/ν ≈ 5 363 en ese caso). El commit justificó el cambio con un
+   cálculo invertido: con I = 1 % y ω = k/(10ν) el flujo libre tenía νt/ν = 10,
+   no un valor inflado.
+4. **V4 cambia a la vez malla y modelo** (`Spalart-Allmaras`, línea 455): no
+   permite separar el efecto de y+ del efecto del modelo.
+5. **`decayControl` no existe en OF-12 (Foundation).** Retirado de E1; no hace
+   falta.
+6. En V2 las razones r hay que **medirlas** con el conteo real de celdas, no
+   suponerlas.
+
+**Matiz de Claude:** las 2807 resoluciones de Ux con `No Iterations 0` son
+consecuencia del Δt diminuto (el residuo inicial, ~10⁻⁸, ya está bajo la
+tolerancia 10⁻⁶), no un fallo independiente. Desaparece con el Δt de E5.
+
+**Conclusiones consensuadas:**
+
+- V1 tal como está no puede producir un resultado válido (configuración PIMPLE,
+  `timeout`, Δt). Detenerla no pierde información.
+- La tabla de α=0-6 con 2.27 % de error medio **debe reevaluarse**: sus casos
+  tampoco alcanzaron convergencia iterativa estricta y usan la turbulencia de
+  entrada inflada. Su acuerdo con Ladson puede ser en parte compensación de
+  errores.
+- Orden de trabajo: **E1** (entrada TMR) + **E2** (criterio de convergencia) →
+  **E3** (farfield) → **E4** (GCI anidado) → **E5** (transitorio, solo si hace
+  falta), con `pFinal 1`, `".*Final" 1` y `outerCorrectorResidualControl` en
+  diccionarios.
