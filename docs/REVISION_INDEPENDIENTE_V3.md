@@ -395,3 +395,48 @@ tolerancia 10⁻⁶), no un fallo independiente. Desaparece con el Δt de E5.
   **E3** (farfield) → **E4** (GCI anidado) → **E5** (transitorio, solo si hace
   falta), con `pFinal 1`, `".*Final" 1` y `outerCorrectorResidualControl` en
   diccionarios.
+
+---
+
+## 7. Ronda 2: diseño consensuado de E1 (pendiente de aprobación de Alejandro)
+
+Propuestas de OpenClaw adoptadas:
+
+1. **Criterio de convergencia por fuerzas, no por residuo.** |ΔCl|/Cl < 0.1 % y
+   |ΔCd|/Cd < 0.5 % (máx − mín sobre las últimas 500 iteraciones, relativo a la
+   media). El plateau del residuo de p (~4×10⁻³) se **reporta** como
+   diagnóstico, no bloquea. `ITER_EST` = 6000-8000.
+2. **Controles de pared**: α = 0 y 8 con `bl_dist_min = 2e-5` +
+   `nutLowReWallFunction`, para separar el efecto de la turbulencia de entrada
+   del de pared/malla (riesgo conocido: celdas degeneradas con 2e-5, ver
+   comentario en `mesh_script.py`).
+3. **Smoke test α = 0 primero** (~3 min). Es la puerta antes de lanzar el
+   resto, porque ω pasa de 24 a 4000 (por encima del valor culpado del SIGFPE
+   en `ba966cd`).
+4. **Implementación**: factores de relajación escritos explícitamente (no por
+   `str.replace`), `--work /tmp/e1` con `resultados_e1.json` propio, lockfile,
+   marca `DONE`, y registrar en el JSON el νt/ν medido a la entrada del campo
+   final (prueba de que la BC aterrizó).
+5. **Referencias**: Ladson 80 grit como primaria (α=8: Cd 0.01028); TMR para Cl
+   (α=10: 1.0778). Métrica de éxito de E1 = **delta frente a `b_0012_a8` en la
+   misma malla**, no el valor absoluto.
+
+**Corrección de Claude al punto 1** (verificado en
+`/tmp/prog/b_0012_a8/run.log`): OpenClaw afirmó que en ese caso las fuerzas
+estaban quietas (Cl 0.861006 → 0.861047). Son dos escrituras consecutivas. En las
+últimas 500 iteraciones:
+
+```
+Cl 0.8562 ± 0.0021   [0.8530, 0.8613]
+Cd 0.01050 ± 0.00041 [0.00945, 0.01162]   ← oscilación de ±10 %
+it 2490 → 2500:  Cd 0.01117 → 0.01061      (−5 % en 10 iteraciones)
+```
+
+El Cd "validado" de 0.01050 es la media de una oscilación de ±10 %. El criterio
+por fuerzas lo marcaría NO CONVERGIDO. Se espera que parte de E1 también salga
+así; si ocurre, el siguiente paso es atacar la convergencia iterativa misma
+(malla de borde de salida, esquemas, relajación), no promediar.
+
+**Matiz de Claude a las referencias**: el +0.88 % de espesor cambia el Cd a α=0
+en ~0.5 %, así que TMR sigue sirviendo como referencia secundaria de Cd a α=0
+(banda ±3 %). El farfield de 40c afecta sobre todo a ángulo con sustentación.
