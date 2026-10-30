@@ -253,8 +253,11 @@ relaxationFactors {{
     }}
 }}
 relaxationFactors {{
-    fields {{ p 0.2; }}
-    equations {{ U 0.5; k 0.5; omega 0.5; epsilon 0.5; nuTilda 0.5; gammaInt 0.5; ReThetat 0.5; }}
+    // Transitorio: sin relajacion. Los factores del estacionario (p 0.2,
+    // U/k/omega 0.5) frenan la respuesta temporal y no tienen sentido en
+    // PIMPLE, donde el avance lo marca dt, no las iteraciones.
+    fields {{ p 1; }}
+    equations {{ U 1; k 1; omega 1; epsilon 1; nuTilda 1; gammaInt 1; ReThetat 1; }}
 }}
 """
 

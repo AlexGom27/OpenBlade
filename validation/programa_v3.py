@@ -285,7 +285,11 @@ def correr_trans(tag, params, work, nproc, env, logfile, ref_cl=None,
                 sd = os.path.join(caso, f"processor{i}", os.path.basename(src))
                 if not os.path.isdir(sd):
                     continue
-                for f in ("U", "p", "k", "omega", "nut"):
+                # phi incluido: sin el flujo masico el primer paso
+                # transitorio tiene que reconstruirlo y da un salto de
+                # Cl (medido: +12% en un solo paso). Con phi el arranque
+                # es continuo.
+                for f in ("U", "p", "k", "omega", "nut", "phi"):
                     sp = os.path.join(sd, f)
                     if os.path.exists(sp):
                         run(["cp", "-f", sp, dst + "/"], caso, env, 600,
