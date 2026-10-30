@@ -85,3 +85,23 @@ def test_cleanup_preserves_user_mesh(window, tmp_path, monkeypatch):
 
     assert keep.exists(), "cleanup borró la malla del usuario"
     assert not sweep.exists(), "cleanup dejó la malla temporal del barrido"
+
+
+def test_exec_mode_defaults_to_local_and_round_trips(window):
+    panel = window.input_panel
+    p = panel.get_params()
+    assert p["exec_mode"] == "local"
+    panel.set_params({"exec_mode": "server", "server_host": "u@h", "server_nproc": 6})
+    p = panel.get_params()
+    assert (p["exec_mode"], p["server_host"], p["server_nproc"]) == ("server", "u@h", 6)
+    panel.set_params({"exec_mode": "local"})
+
+
+def test_aero_coefficients_have_their_own_subtabs(window):
+    tabs = window.aero_plot.subtabs
+    assert [tabs.tabText(i) for i in range(tabs.count())] == ["Cl", "Cd", "Cm"]
+    window.aero_plot.update_plots([0.0, 10.0], [0.0, 1.1], [0.01, 0.02], [0.0, 0.1])
+    window.aero_plot.redraw()
+    _, _, ax, _ = window.aero_plot._charts["cl"]
+    ymin, ymax = ax.get_ylim()
+    assert ymin <= 0.0 and ymax >= 1.1

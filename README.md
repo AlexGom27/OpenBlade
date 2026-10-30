@@ -75,6 +75,12 @@ python3 main.py
 
 ---
 
+## Correr en un servidor
+
+En la sección **Ejecución** del panel elige *Servidor (SSH)*, escribe `usuario@host`, pulsa **Probar conexión** e indica los procesos. El programa genera la malla y prepara el caso en esta máquina, lo sube con `rsync`, lo ejecuta en el servidor y descarga los resultados al terminar.
+
+Requisitos: clave SSH sin contraseña, y `rsync`, `python3` y OpenFOAM en el servidor. Los trabajos quedan en `~/openblade_jobs/`. Cerrar la app no los detiene: al volver a iniciar en modo servidor se ofrece reconectar.
+
 ## 🐧 Instalación en Linux (Ubuntu/Debian)
 
 ### 1. Instalar Python y dependencias del sistema

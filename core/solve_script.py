@@ -5,6 +5,27 @@ import time
 from core.solver import SolverRunner
 from core.openfoam_setup import OpenFoamSetup
 
+def configure_case(case_dir, p):
+    """Escribe el caso de OpenFOAM. Lo comparten la corrida local y la de servidor."""
+    setup = OpenFoamSetup(case_dir)
+    is_transient = "pimpleFoam" in p.get("regime", "")
+    setup.create_case(
+        u_inlet=p["u_inlet"],
+        p_outlet=p["p_outlet"],
+        chord=p["chord"],
+        transient=is_transient,
+        tolerance=p.get("tolerance", "1e-4"),
+        turbulence=p.get("turbulence", "kEpsilon"),
+        reynolds=p.get("reynolds", 1000000.0),
+        delta_t=p.get("delta_t", "1e-3"),
+        end_time=p.get("end_time", "0.5"),
+        write_interval=p.get("write_interval", "0.01"),
+        max_co=p.get("max_co", 2.0),
+        max_iters=p.get("max_iters", 500)
+    )
+    return is_transient
+
+
 def main():
     if len(sys.argv) < 3:
         print("Uso: python3 solve_script.py params.json mesh_file.msh")
@@ -24,22 +45,7 @@ def main():
         # 1. Configuración del caso
         print(f"DEBUG: Iniciando solución para AoA = {p.get('aoa', 0.0)} deg")
         print("📝 Configurando túnel de viento...")
-        setup = OpenFoamSetup(case_dir)
-        is_transient = "pimpleFoam" in p.get("regime", "")
-        setup.create_case(
-            u_inlet=p["u_inlet"],
-            p_outlet=p["p_outlet"],
-            chord=p["chord"],
-            transient=is_transient,
-            tolerance=p.get("tolerance", "1e-4"),
-            turbulence=p.get("turbulence", "kEpsilon"),
-            reynolds=p.get("reynolds", 1000000.0),
-            delta_t=p.get("delta_t", "1e-3"),
-            end_time=p.get("end_time", "0.5"),
-            write_interval=p.get("write_interval", "0.01"),
-            max_co=p.get("max_co", 2.0),
-            max_iters=p.get("max_iters", 500)
-        )
+        is_transient = configure_case(case_dir, p)
 
         # 2. Inicialización del Solver
         solver = SolverRunner(case_dir=case_dir, native=p.get("native_foam", False))

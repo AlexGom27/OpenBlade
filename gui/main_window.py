@@ -15,6 +15,7 @@ from .results_panel import ResultsPanel
 from .plots import ResidualPlot, AeroPlot, PressurePlot
 from .workers import MeshWorker, SweepWorker
 
+from core import paths
 from core.geometry import NacaGeometry
 from core.meshing import NacaMesher
 import time
@@ -134,6 +135,7 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right_widget)
         
         self.tabs = QTabWidget()
+        self.tabs.setElideMode(Qt.ElideNone)
         self.results_panel = ResultsPanel(self.case_dir)
         self.results_panel.log_signal.connect(self.log)
         self.res_plot = ResidualPlot()
@@ -328,8 +330,15 @@ class MainWindow(QMainWindow):
             self._run_sweep(p)
             return
         
-        msh_file = f"perfil_{p['naca']}.msh"
-        if not os.path.exists(msh_file):
+        en_servidor = p.get("exec_mode") == "server"
+        if en_servidor and not self._check_server(p):
+            return
+        attach_dir = self._ask_reattach(p) if en_servidor else None
+        if attach_dir is False:
+            return
+
+        msh_file = paths.mesh_path(p['naca'] or "custom")
+        if not attach_dir and not os.path.exists(msh_file):
             self.log("❌ Error: Debes generar la malla antes de iniciar el análisis.")
             return
 
@@ -338,7 +347,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'res_plot'):
             self.res_plot.reset()
 
-        from .workers import SimWorker
+        from .workers import RemoteSimWorker, SimWorker
         self._current_aoa = float(p.get("aoa", 0.0))
         self._sim_running = True
         self.input_panel.btn_run.setEnabled(False)
@@ -354,7 +363,11 @@ class MainWindow(QMainWindow):
         self._sim_end_time = float(p.get("end_time", 0.5))
         self.input_panel.progress_label.setVisible(True)
         self.input_panel.progress_label.setText("Iniciando...")
-        self.sim_worker = SimWorker(self.solver_runner, p, msh_file)
+        if en_servidor:
+            self.sim_worker = RemoteSimWorker(p, msh_file, self.case_dir, attach_dir)
+            self.sim_worker.job_started.connect(self._on_remote_job_started)
+        else:
+            self.sim_worker = SimWorker(self.solver_runner, p, msh_file)
         self.sim_worker.log_msg.connect(self.log)
         self.sim_worker.residual_data.connect(self.on_residual_data)
         self.sim_worker.force_data.connect(self.on_force_data)
@@ -362,8 +375,50 @@ class MainWindow(QMainWindow):
         self.sim_worker.error.connect(self.log)
         self.sim_worker.start_sim()
     
+    def _check_server(self, p: Dict[str, Any]) -> bool:
+        from core.remote_runner import RemoteError, validar_host
+        try:
+            validar_host(p.get("server_host", ""))
+        except RemoteError as e:
+            self.log(f"❌ {e}")
+            return False
+        self.input_panel.remember_server(p["server_host"])
+        return True
+
+    def _ask_reattach(self, p: Dict[str, Any]):
+        """Directorio del trabajo a retomar, None para uno nuevo, False si se cancela."""
+        import json
+        ruta = paths.temp_path("remote_job.json")
+        try:
+            with open(ruta) as f:
+                previo = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if previo.get("host") != p.get("server_host"):
+            return None
+        boton = QMessageBox.question(
+            self, "Trabajo en el servidor",
+            f"Hay un trabajo sin descargar en {previo['host']}:\n"
+            f"{previo['job_dir']}\n\n¿Reconectar con él? "
+            "Con «No» se lanza uno nuevo y el anterior sigue en el servidor.",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Yes)
+        if boton == QMessageBox.Cancel:
+            return False
+        if boton == QMessageBox.Yes:
+            return previo["job_dir"]
+        os.remove(ruta)
+        return None
+
+    def _on_remote_job_started(self, host: str, job_dir: str) -> None:
+        self.log(f"🖥️ Trabajo en {host}:{job_dir}")
+        if self.remote_panel is not None:
+            self.remote_panel.watch(host, "~/" + job_dir)
+
     def _run_sweep(self, p: Dict[str, Any]) -> None:
         """Ejecuta un barrido paramétrico de ángulos de ataque (polar)."""
+        en_servidor = p.get("exec_mode") == "server"
+        if en_servidor and not self._check_server(p):
+            return
         self._has_unsaved_work = True
         self._sim_running = True
         self.input_panel.btn_run.setEnabled(False)
@@ -374,8 +429,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'res_plot'):
             self.res_plot.reset()
         
-        from .workers import SweepWorker
-        self.sweep_worker = SweepWorker(p, self.case_dir)
+        from .workers import RemoteSweepWorker, SweepWorker
+        clase = RemoteSweepWorker if en_servidor else SweepWorker
+        self.sweep_worker = clase(p, self.case_dir)
         self.sweep_worker.log_msg.connect(self.log)
         self.sweep_worker.error.connect(self._on_sweep_error)
         self.sweep_worker.progress.connect(self._on_sweep_progress)
@@ -420,7 +476,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        msh = f"perfil_{p.get('naca') or 'custom'}.msh"
+        msh = paths.mesh_path(p.get('naca') or 'custom')
         if not os.path.exists(msh):
             self.log("❌ Genera la malla antes de lanzar FSI.")
             return
@@ -464,6 +520,19 @@ class MainWindow(QMainWindow):
         desde donde iba.
         """
         import subprocess as sp
+        from .workers import RemoteSimWorker
+
+        if isinstance(self.sim_worker, RemoteSimWorker):
+            pausar = not getattr(self, "_paused", False)
+            try:
+                self.sim_worker.set_paused(pausar)
+            except Exception as e:  # noqa: BLE001
+                self.log(f"⚠️ No se pudo cambiar la pausa en el servidor: {e}")
+                return
+            self._paused = pausar
+            self.input_panel.btn_pause_sim.setText("▶️ Reanudar" if pausar else "⏸️ Pausar")
+            self.log("⏸️ Pausada en el servidor." if pausar else "▶️ Reanudada en el servidor.")
+            return
 
         if getattr(self, "_paused", False):
             action, label = "unpause", "⏸️ Pausar"
@@ -532,8 +601,13 @@ class MainWindow(QMainWindow):
         if self.sim_worker is None:
             return
         self.log("⏳ Deteniendo simulación...")
-        self.sim_worker.stop()
-        self.solver_runner.stop()
+        try:
+            self.sim_worker.stop()
+        except Exception as e:  # noqa: BLE001
+            self.log(f"⚠️ No se pudo detener: {e}")
+        from .workers import RemoteSimWorker
+        if not isinstance(self.sim_worker, RemoteSimWorker):
+            self.solver_runner.stop()
         self.input_panel.btn_stop_sim.setEnabled(False)
 
     def on_stop_sweep(self) -> None:
@@ -557,6 +631,7 @@ class MainWindow(QMainWindow):
         self.input_panel.btn_stop_sweep.setEnabled(True)
         self.input_panel.btn_stop_sim.setVisible(False)
         self.input_panel.btn_stop_sim.setEnabled(True)
+        self.input_panel.btn_pause_sim.setVisible(False)
 
     def _on_sweep_done(self, aoa_list, cl_list, cd_list, cm_list) -> None:
         self.log(f"✅ Barrido completado: {len(aoa_list)} puntos")
@@ -655,6 +730,7 @@ class MainWindow(QMainWindow):
                 self.log(f"⚠️ Error leyendo run.log: {payload}")
                 return
             if payload:
+                self.res_plot.set_log_path(os.path.join(self.case_dir, "run.log"))
                 self.res_plot.set_series(payload)
                 self.res_plot.redraw()
         except Exception as e:  # noqa: BLE001
@@ -909,7 +985,12 @@ class MainWindow(QMainWindow):
         # Detener todo lo que pueda quedar vivo: QProcess del solver, hilos y Docker.
         if self.sim_worker is not None:
             try:
-                self.sim_worker.stop()
+                # Un trabajo de servidor sigue corriendo: cerrar la app no lo mata.
+                if hasattr(self.sim_worker, "detach"):
+                    self.sim_worker.detach()
+                    self.sim_worker.wait(8000)
+                else:
+                    self.sim_worker.stop()
             except Exception:
                 pass
         if self.solver_runner:

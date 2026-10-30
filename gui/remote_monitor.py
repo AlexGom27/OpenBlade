@@ -30,12 +30,9 @@ import threading
 
 from qtpy.QtCore import Qt, QTimer, Signal
 from qtpy.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit,
-                            QPushButton, QVBoxLayout, QWidget)
+                            QPushButton, QTabWidget, QVBoxLayout, QWidget)
 
-import matplotlib
-matplotlib.use("QtAgg")
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas  # noqa: E402
-from matplotlib.figure import Figure  # noqa: E402
+from .plots import new_chart, style_axes
 
 
 class RemoteMonitorPanel(QWidget):
@@ -50,6 +47,7 @@ class RemoteMonitorPanel(QWidget):
         self.casos = [c.strip() for c in case.split(",") if c.strip()]
         self.case = self.casos[0] if self.casos else "openfoam_case"
         self.historial = {"t": [], "res": {}, "cl": [], "cd": []}
+        self._serie = []
         self._busy = False
 
         self._build_ui()
@@ -94,20 +92,27 @@ class RemoteMonitorPanel(QWidget):
         lay.addWidget(self.lbl_estado)
 
         # gráfica
-        self.fig = Figure(figsize=(5, 5.2), dpi=90)
-        self.canvas = FigureCanvas(self.fig)
-        self.ax = self.fig.add_subplot(311)
-        self.ax_cl = self.fig.add_subplot(312)
-        self.ax_cd = self.fig.add_subplot(313)
-        self.fig.patch.set_facecolor("#1e1e1e")
-        for ax in (self.ax, self.ax_cl, self.ax_cd):
-            self._estilo(ax)
-        self.ax.set_yscale("log")
-        self.ax.set_title("Residuales desde que se abrió el panel (escala log)",
-                          color="white", fontsize=10)
-        self.fig.subplots_adjust(left=0.12, right=0.97, top=0.95, bottom=0.08,
-                                 hspace=0.45)
-        lay.addWidget(self.canvas, 1)
+        # selector de escala
+        escala = QHBoxLayout()
+        escala.addWidget(QLabel("Escala:"))
+        self.cb_escala = QComboBox()
+        self.cb_escala.addItems(["Toda la gráfica", "Últimos 50 % (ignora el arranque)"])
+        self.cb_escala.currentIndexChanged.connect(lambda _i: self._dibujar())
+        escala.addWidget(self.cb_escala)
+        escala.addStretch()
+        lay.addLayout(escala)
+
+        # Una subpestaña por gráfica, cada una con toda el área disponible.
+        self.subtabs = QTabWidget()
+        self.subtabs.setElideMode(Qt.ElideNone)
+        self.fig, self.canvas, self.ax = new_chart()
+        self.fig_cl, self.canvas_cl, self.ax_cl = new_chart()
+        self.fig_cd, self.canvas_cd, self.ax_cd = new_chart()
+        self.subtabs.addTab(self.canvas_cl, "Cl")
+        self.subtabs.addTab(self.canvas_cd, "Cd")
+        self.subtabs.addTab(self.canvas, "Residuales")
+        self.subtabs.currentChanged.connect(lambda _i: self._dibujar())
+        lay.addWidget(self.subtabs, 1)
 
         # métricas del servidor
         self.lbl_server = QLabel("—")
@@ -116,20 +121,13 @@ class RemoteMonitorPanel(QWidget):
             "border-radius:4px; font-family:Menlo,monospace; font-size:10px;")
         lay.addWidget(self.lbl_server)
 
-    @staticmethod
-    def _estilo(ax) -> None:
-        ax.set_facecolor("#1e1e1e")
-        ax.tick_params(colors="white", labelsize=8)
-        for sp in ax.spines.values():
-            sp.set_color("#555")
-        ax.grid(True, which="both", ls="--", alpha=0.25, color="#888")
-
     # ------------------------------------------------------------ control
     def _conectar(self) -> None:
         self.remote = self.ed_remote.text().strip()
         nuevo = self.cb_case.currentText().strip() or "openfoam_case"
         if nuevo != self.case:
             self.historial = {"t": [], "res": {}, "cl": [], "cd": []}
+            self._serie = []
         self.case = nuevo
         if self.remote:
             self.timer.start(15000)
@@ -137,6 +135,14 @@ class RemoteMonitorPanel(QWidget):
         else:
             self.timer.stop()
             self.lbl_estado.setText("Sin servidor configurado")
+
+    def watch(self, host: str, case: str) -> None:
+        """Muestra un caso concreto, p. ej. el trabajo recien lanzado."""
+        self.ed_remote.setText(host)
+        if self.cb_case.findText(case) < 0:
+            self.cb_case.addItem(case)
+        self.cb_case.setCurrentText(case)
+        self._conectar()
 
     def refrescar(self) -> None:
         """Pide los datos al servidor en un hilo aparte."""
@@ -204,7 +210,8 @@ class RemoteMonitorPanel(QWidget):
                 self.historial["t"] = self.historial["t"][-600:]
                 for k in self.historial["res"]:
                     self.historial["res"][k] = self.historial["res"][k][-600:]
-            self._dibujar((c or {}).get("serie") or [])
+            self._serie = (c or {}).get("serie") or []
+            self._dibujar()
 
         s = d.get("servidor") or {}
         partes = []
@@ -219,39 +226,43 @@ class RemoteMonitorPanel(QWidget):
             partes.append(f"carga {s['carga'][0]}")
         self.lbl_server.setText("   ·   ".join(partes) or "—")
 
-    def _dibujar(self, serie_fuerzas) -> None:
+    def _dibujar(self) -> None:
+        solo_final = self.cb_escala.currentIndex() == 1
+        tiempos = self.historial["t"]
+        inicio = len(tiempos) // 2 if solo_final else 0
+
         self.ax.clear()
+        style_axes(self.ax)
         self.ax.set_yscale("log")
+        self.ax.set_title("Residuales desde que se abrió el panel", color="white", fontsize=11)
+        self.ax.set_xlabel("Iteración / tiempo", color="white")
+        self.ax.set_ylabel("Residuo inicial", color="white")
         colores = {"Ux": "#4fc3f7", "Uy": "#81c784", "Uz": "#a1887f",
                    "p": "#ffb74d", "k": "#e57373", "omega": "#ba68c8",
                    "epsilon": "#4db6ac", "nuTilda": "#90a4ae"}
         for k, serie in self.historial["res"].items():
             if serie:
-                self.ax.plot(self.historial["t"][:len(serie)], serie,
-                             label=k, lw=1.2,
-                             color=colores.get(k, "#cccccc"))
+                self.ax.plot(tiempos[inicio:len(serie)], serie[inicio:],
+                             label=k, lw=1.2, color=colores.get(k, "#cccccc"))
         if self.historial["res"]:
-            leg = self.ax.legend(fontsize=7, loc="upper right",
+            leg = self.ax.legend(fontsize=8, loc="upper right",
                                  facecolor="#2a2a2a", edgecolor="#555")
             for t in leg.get_texts():
                 t.set_color("white")
-        self._estilo(self.ax)
-        self.ax.set_title("Residuales desde que se abrió el panel (escala log)",
-                          color="white", fontsize=10)
 
         # Historia completa del caso, leida del servidor
+        filas = self._serie[len(self._serie) // 2:] if solo_final else self._serie
         for ax, col, nombre, color in ((self.ax_cl, 2, "Cl", "#4fc3f7"),
                                        (self.ax_cd, 1, "Cd", "#ffb74d")):
             ax.clear()
-            self._estilo(ax)
-            ax.set_title(f"{nombre} (historia del caso)", color="white",
-                         fontsize=10)
-            if serie_fuerzas:
-                ax.plot([f[0] for f in serie_fuerzas],
-                        [f[col] for f in serie_fuerzas], lw=1.0, color=color)
-                # El arranque (Cl ~ +-20) aplastaria la escala: el eje y se
-                # ajusta a la ultima mitad, que es donde se juzga la convergencia.
-                cola = [f[col] for f in serie_fuerzas[len(serie_fuerzas) // 2:]]
-                margen = 0.1 * (max(cola) - min(cola)) or abs(cola[-1]) * 0.01 or 1e-6
-                ax.set_ylim(min(cola) - margen, max(cola) + margen)
-        self.canvas.draw_idle()
+            style_axes(ax)
+            ax.set_title(f"{nombre}: historia del caso", color="white", fontsize=11)
+            ax.set_xlabel("Iteración / tiempo", color="white")
+            ax.set_ylabel(f"{nombre} [-]", color="white")
+            if filas:
+                ax.plot([f[0] for f in filas], [f[col] for f in filas],
+                        lw=1.0, color=color)
+
+        visible = self.subtabs.currentWidget()
+        if visible is not None:
+            visible.draw_idle()

@@ -10,7 +10,35 @@ from typing import Optional, List, Dict
 import csv
 import os
 import numpy as np
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QFileDialog, QLabel
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QFileDialog,
+                            QLabel, QTabWidget)
+
+
+def new_chart(figsize=(5, 4), dpi=90):
+    """Figura oscura con un solo eje que ocupa toda su pestana.
+
+    layout="constrained" reajusta los margenes al cambiar de tamano, para que
+    titulos y etiquetas no queden cortados.
+    """
+    fig = Figure(figsize=figsize, dpi=dpi, layout="constrained")
+    fig.patch.set_facecolor('#1e1e1e')
+    canvas = FigureCanvas(fig)
+    ax = fig.add_subplot(111)
+    style_axes(ax)
+    return fig, canvas, ax
+
+
+def style_axes(ax) -> None:
+    ax.set_facecolor('#1e1e1e')
+    ax.xaxis.label.set_color('white')
+    ax.yaxis.label.set_color('white')
+    ax.title.set_color('white')
+    ax.tick_params(colors='white', labelsize=8)
+    for spine in ax.spines.values():
+        spine.set_color('#555555')
+    ax.grid(True, which="both", ls="--", alpha=0.3, color='#888888')
+
 
 class ResidualPlot(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -18,9 +46,8 @@ class ResidualPlot(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        self.fig = Figure(figsize=(4, 2.5), dpi=80)
-        self.canvas = FigureCanvas(self.fig)
-        layout.addWidget(self.canvas)
+        self.fig, self.canvas, self.ax = new_chart()
+        layout.addWidget(self.canvas, 1)
 
         # Panel de avance junto a la grafica: tiempo simulado, porcentaje,
         # ETA y ritmo. Se rellena desde run.log, asi funciona tambien con
@@ -33,35 +60,29 @@ class ResidualPlot(QWidget):
         layout.addWidget(self.progress_label)
         self._end_time = None
         
-        self.ax = self.fig.add_subplot(111)
         self.ax.set_yscale('log')
         self.ax.set_title("Monitor de Convergencia (Residuos)", color='white', fontsize=12, pad=10)
         self.ax.set_xlabel("Iteración / Tiempo", color='white')
         self.ax.set_ylabel("Residuo Inicial (Log)", color='white')
-        
-        self.fig.patch.set_facecolor('#1e1e1e')
-        self.ax.set_facecolor('#1e1e1e')
-        self.ax.xaxis.label.set_color('white')
-        self.ax.yaxis.label.set_color('white')
-        self.ax.tick_params(colors='white', labelsize=8)
-        self.ax.spines['bottom'].set_color('#555555')
-        self.ax.spines['top'].set_color('#555555') 
-        self.ax.spines['right'].set_color('#555555')
-        self.ax.spines['left'].set_color('#555555')
-        self.ax.grid(True, which="both", ls="--", alpha=0.3, color='#888888')
-        self.fig.subplots_adjust(left=0.15, right=0.95, top=0.9, bottom=0.2)
-        
+
         self.res_data = {}
         self.res_iters = []
         self.res_lines = {}
         self._pending_redraw = False
         
-    def reset(self) -> None:
-        self.res_data = {}
-        self.res_iters = []
+    def _clear_lines(self) -> None:
+        # Vaciar solo el diccionario dejaria las curvas viejas en el eje.
         for line in self.res_lines.values():
             line.remove()
         self.res_lines = {}
+
+    def set_log_path(self, log_path: str) -> None:
+        self._log_path = log_path
+
+    def reset(self) -> None:
+        self.res_data = {}
+        self.res_iters = []
+        self._clear_lines()
         self.ax.relim()
         self.ax.autoscale_view()
         self.canvas.draw()
@@ -146,7 +167,7 @@ class ResidualPlot(QWidget):
 
         self.res_iters = []
         self.res_data = {}
-        self.res_lines = {}
+        self._clear_lines()
         for b in bloques:
             self.res_iters.append(b["t"])
             for campo, val in b["res"].items():
@@ -174,7 +195,7 @@ class ResidualPlot(QWidget):
             return
         self.res_iters = [b["t"] for b in bloques]
         self.res_data = {}
-        self.res_lines = {}
+        self._clear_lines()
         for b in bloques:
             for campo, val in b["res"].items():
                 self.res_data.setdefault(campo, []).append(val)
@@ -220,7 +241,8 @@ class ResidualPlot(QWidget):
         if n > 1:
             dt_sim = self.res_iters[-1] - self.res_iters[0]
             if dt_sim > 0:
-                mtime = os.path.getmtime(getattr(self, "_log_path", "") or "")
+                log_path = getattr(self, "_log_path", "")
+                mtime = os.path.getmtime(log_path) if log_path and os.path.exists(log_path) else 0
                 ctime = getattr(self, "_log_ctime", None)
                 if ctime and mtime > ctime:
                     sp = (mtime - ctime) / max(n - 1, 1)
@@ -317,40 +339,25 @@ class AeroPlot(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        self.fig = Figure(figsize=(5, 5), dpi=80)
-        self.canvas = FigureCanvas(self.fig)
-        layout.addWidget(self.canvas)
-        
-        self.fig.patch.set_facecolor('#1e1e1e')
-        self.ax_cl = self.fig.add_subplot(311)
-        self.ax_cd = self.fig.add_subplot(312)
-        self.ax_cm = self.fig.add_subplot(313)
-        
-        for ax in [self.ax_cl, self.ax_cd, self.ax_cm]:
-            ax.set_facecolor('#1e1e1e')
-            ax.xaxis.label.set_color('white')
-            ax.yaxis.label.set_color('white')
-            ax.tick_params(colors='white', labelsize=8)
-            for spine in ax.spines.values():
-                spine.set_color('#555555')
-            ax.grid(True, ls="--", alpha=0.3, color='#888888')
-            
-        self.ax_cl.set_title("Coeficiente de Sustentación (Cl) vs AoA", color='white', fontsize=10)
-        self.ax_cl.set_ylabel("Cl [-]", color='white')
-        
-        self.ax_cd.set_title("Coeficiente de Arrastre (Cd) vs AoA", color='white', fontsize=10)
-        self.ax_cd.set_ylabel("Cd [-]", color='white')
-        
-        self.ax_cm.set_title("Coeficiente de Momento (Cm) vs AoA", color='white', fontsize=10)
-        self.ax_cm.set_xlabel("Ángulo de Ataque (AoA) [°]", color='white')
-        self.ax_cm.set_ylabel("Cm [-]", color='white')
-        
-        self.fig.subplots_adjust(hspace=0.6, bottom=0.15, top=0.9, left=0.15, right=0.95)
-        
-        self.line_cl, = self.ax_cl.plot([], [], 'o-', color='#4CAF50', linewidth=2, markersize=5)
-        self.line_cd, = self.ax_cd.plot([], [], 'o-', color='#F44336', linewidth=2, markersize=5)
-        self.line_cm, = self.ax_cm.plot([], [], 'o-', color='#FFC107', linewidth=2, markersize=5)
-        
+        # Una subpestaña por coeficiente, cada una con toda el área disponible.
+        self.subtabs = QTabWidget()
+        self.subtabs.setElideMode(Qt.ElideNone)
+        layout.addWidget(self.subtabs, 1)
+
+        self._charts = {}
+        for clave, titulo, ylabel, color in (
+                ("cl", "Coeficiente de Sustentación (Cl) vs AoA", "Cl [-]", '#4CAF50'),
+                ("cd", "Coeficiente de Arrastre (Cd) vs AoA", "Cd [-]", '#F44336'),
+                ("cm", "Coeficiente de Momento (Cm) vs AoA", "Cm [-]", '#FFC107')):
+            fig, canvas, ax = new_chart()
+            ax.set_title(titulo, color='white', fontsize=11)
+            ax.set_xlabel("Ángulo de Ataque (AoA) [°]", color='white')
+            ax.set_ylabel(ylabel, color='white')
+            line, = ax.plot([], [], 'o-', color=color, linewidth=2, markersize=5)
+            self._charts[clave] = (fig, canvas, ax, line)
+            self.subtabs.addTab(canvas, ylabel.split()[0])
+        self.subtabs.currentChanged.connect(lambda _i: self._draw_visible())
+
         self.aoas = []
         self.cls = []
         self.cds = []
@@ -391,20 +398,35 @@ class AeroPlot(QWidget):
     def redraw(self) -> None:
         if not self._pending_redraw:
             return
-        self.line_cl.set_data(self.aoas, self.cls)
-        self.ax_cl.relim()
-        self.ax_cl.autoscale_view()
-
-        self.line_cd.set_data(self.aoas, self.cds)
-        self.ax_cd.relim()
-        self.ax_cd.autoscale_view()
-
-        self.line_cm.set_data(self.aoas, self.cms)
-        self.ax_cm.relim()
-        self.ax_cm.autoscale_view()
-
-        self.canvas.draw_idle()
+        for clave, datos in (("cl", self.cls), ("cd", self.cds), ("cm", self.cms)):
+            _, _, ax, line = self._charts[clave]
+            line.set_data(self.aoas, datos)
+            ax.relim()
+            ax.autoscale_view()
+        self._draw_visible()
         self._pending_redraw = False
+
+    def _draw_visible(self) -> None:
+        """Solo se pinta la subpestaña a la vista; las otras al seleccionarlas."""
+        for fig, canvas, _, _ in self._charts.values():
+            if canvas is self.subtabs.currentWidget():
+                canvas.draw_idle()
+
+    @property
+    def fig(self) -> Figure:
+        """Los tres coeficientes en una sola figura, para el informe PDF."""
+        compuesta = Figure(figsize=(6, 7), dpi=100, layout="constrained")
+        compuesta.patch.set_facecolor('#1e1e1e')
+        for i, (clave, datos) in enumerate((("cl", self.cls), ("cd", self.cds),
+                                            ("cm", self.cms)), start=1):
+            _, _, origen, line = self._charts[clave]
+            ax = compuesta.add_subplot(3, 1, i)
+            style_axes(ax)
+            ax.plot(self.aoas, datos, 'o-', color=line.get_color(), linewidth=2, markersize=5)
+            ax.set_title(origen.get_title(), color='white', fontsize=10)
+            ax.set_ylabel(origen.get_ylabel(), color='white')
+        ax.set_xlabel("Ángulo de Ataque (AoA) [°]", color='white')
+        return compuesta
 
     def export_to_csv(self) -> None:
         if not self.aoas:
@@ -428,20 +450,9 @@ class PressurePlot(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        self.fig = Figure(figsize=(5, 4), dpi=80)
-        self.canvas = FigureCanvas(self.fig)
-        layout.addWidget(self.canvas)
-        
-        self.fig.patch.set_facecolor('#1e1e1e')
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor('#1e1e1e')
-        self.ax.xaxis.label.set_color('white')
-        self.ax.yaxis.label.set_color('white')
-        self.ax.tick_params(colors='white', labelsize=8)
-        for spine in self.ax.spines.values():
-            spine.set_color('#555555')
-        self.ax.grid(True, ls="--", alpha=0.3, color='#888888')
-        
+        self.fig, self.canvas, self.ax = new_chart()
+        layout.addWidget(self.canvas, 1)
+
         self.ax.set_title("Distribución de Presión (Cp)", color='white', fontsize=12)
         self.ax.set_xlabel("x/c", color='white')
         self.ax.set_ylabel("-Cp [-]", color='white')

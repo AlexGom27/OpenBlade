@@ -1,7 +1,11 @@
+import json
+import os
+import threading
+
 from qtpy.QtWidgets import (QWidget, QFormLayout, QLineEdit, QDoubleSpinBox, QLabel,
     QVBoxLayout, QGroupBox, QComboBox, QPushButton, QFileDialog, QHBoxLayout,
     QToolButton, QSizePolicy, QFrame, QLayout, QDialog, QDialogButtonBox, QCheckBox, QSpinBox)
-from qtpy.QtCore import Qt, QPropertyAnimation, QParallelAnimationGroup
+from qtpy.QtCore import Qt, QPropertyAnimation, QParallelAnimationGroup, Signal
 from typing import Optional, Dict, Any
 
 
@@ -35,6 +39,8 @@ class CollapsibleBox(QWidget):
 
 
 class InputPanel(QWidget):
+    _server_probed = Signal(object)
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         main_layout = QVBoxLayout(self)
@@ -437,6 +443,7 @@ class InputPanel(QWidget):
         fsi_layout.addRow("Tolerancia acople:", self.fsi_tol)
         fsi_box.setContentLayout(fsi_layout)
 
+        layout.addWidget(self._build_exec_box())
         layout.addWidget(geom_box)
         layout.addWidget(mesh_box)
         layout.addWidget(cf_box)
@@ -461,6 +468,104 @@ class InputPanel(QWidget):
         main_layout.addLayout(btn_layout)
 
 
+
+    # ------------------------------------------------------- dónde se ejecuta
+    def _build_exec_box(self) -> CollapsibleBox:
+        box = CollapsibleBox("▸ Ejecución")
+        form = QFormLayout()
+
+        self.exec_mode = QComboBox()
+        self.exec_mode.addItems(["Local", "Servidor (SSH)"])
+        self.exec_mode.currentIndexChanged.connect(self._toggle_exec_mode)
+        form.addRow("Correr en:", self.exec_mode)
+
+        self.server_host = QComboBox()
+        self.server_host.setEditable(True)
+        self.server_host.lineEdit().setPlaceholderText("usuario@host")
+        self.server_host.addItems(self._saved_servers())
+        self.server_nproc = QSpinBox()
+        self.server_nproc.setRange(1, 256)
+        self.server_nproc.setValue(4)
+        self.btn_test_server = QPushButton("Probar conexión")
+        self.btn_test_server.clicked.connect(self._probe_server)
+        self.server_status = QLabel("")
+        self.server_status.setWordWrap(True)
+        self._server_probed.connect(self._on_server_probed)
+
+        self.server_widget = QWidget()
+        sub_form = QFormLayout(self.server_widget)
+        sub_form.setContentsMargins(0, 0, 0, 0)
+        sub_form.addRow("Servidor:", self.server_host)
+        sub_form.addRow("Procesos:", self.server_nproc)
+        sub_form.addRow("", self.btn_test_server)
+        sub_form.addRow(self.server_status)
+        self.server_widget.setVisible(False)
+        form.addRow(self.server_widget)
+
+        box.setContentLayout(form)
+        return box
+
+    def _toggle_exec_mode(self) -> None:
+        self.server_widget.setVisible(self.exec_mode.currentIndex() == 1)
+
+    @staticmethod
+    def _servers_file() -> str:
+        from core import paths
+        return os.path.join(paths.data_root(), "servers.json")
+
+    def _saved_servers(self) -> list:
+        lista = []
+        try:
+            with open(self._servers_file()) as f:
+                lista = [h for h in json.load(f) if isinstance(h, str)]
+        except (OSError, ValueError):
+            pass
+        env = os.environ.get("OPENBLADE_REMOTE", "")
+        if env and env not in lista:
+            lista.insert(0, env)
+        return lista
+
+    def remember_server(self, host: str) -> None:
+        """Pone el servidor al principio de la lista guardada."""
+        lista = [host] + [h for h in self._saved_servers() if h != host]
+        try:
+            with open(self._servers_file(), "w") as f:
+                json.dump(lista, f)
+        except OSError:
+            pass
+        if self.server_host.findText(host) < 0:
+            self.server_host.addItem(host)
+
+    def _probe_server(self) -> None:
+        host = self.server_host.currentText().strip()
+        self.btn_test_server.setEnabled(False)
+        self.server_status.setText("Conectando…")
+
+        def trabajo():
+            from core.remote_runner import probar_servidor
+            try:
+                self._server_probed.emit(probar_servidor(host))
+            except Exception as e:  # noqa: BLE001
+                self._server_probed.emit({"error": str(e)})
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _on_server_probed(self, d: dict) -> None:
+        self.btn_test_server.setEnabled(True)
+        if "error" in d:
+            self.server_status.setText(f"❌ {d['error']}")
+            return
+        faltan = [n for n, ok in (("OpenFOAM", d["openfoam"]), ("rsync", d["rsync"]),
+                                  ("python3", d["python3"])) if not ok]
+        if faltan:
+            self.server_status.setText("❌ Falta en el servidor: " + ", ".join(faltan))
+            return
+        self.remember_server(d["host"])
+        self.server_status.setText(
+            f"✅ {d['nucleos']} hilos, carga {d['carga']:.1f}, "
+            f"≈{d['libres']} libres\n{d['openfoam']}")
+        if self.server_nproc.value() > d["libres"] > 0:
+            self.server_nproc.setValue(d["libres"])
 
     def _toggle_profile_input(self) -> None:
         is_custom = self.profile_type.currentIndex() == 1
@@ -599,6 +704,10 @@ class InputPanel(QWidget):
             "max_co": self.max_co_input.value(),
             "max_iters": self.max_iters_input.value(),
             "native_foam": self.native_foam_cb.isChecked(),
+            # --- Ejecución ---
+            "exec_mode": "server" if self.exec_mode.currentIndex() == 1 else "local",
+            "server_host": self.server_host.currentText().strip(),
+            "server_nproc": self.server_nproc.value(),
             # --- FSI ---
             "fsi_enabled": self.fsi_enabled.isChecked(),
             "fsi_E": self.fsi_E.value(),
@@ -616,6 +725,12 @@ class InputPanel(QWidget):
 
     def set_params(self, p: Dict[str, Any]) -> None:
         """Restaurar todos los parámetros de la interfaz desde un diccionario."""
+        if "exec_mode" in p:
+            self.exec_mode.setCurrentIndex(1 if p["exec_mode"] == "server" else 0)
+        if p.get("server_host"):
+            self.server_host.setCurrentText(str(p["server_host"]))
+        if "server_nproc" in p:
+            self.server_nproc.setValue(int(p["server_nproc"]))
         if "profile_type" in p:
             idx = self.profile_type.findText(p["profile_type"])
             if idx >= 0: self.profile_type.setCurrentIndex(idx)
