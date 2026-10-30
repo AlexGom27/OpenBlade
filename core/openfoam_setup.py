@@ -185,7 +185,9 @@ functions
         else:
             momentum_grad = ""
 
-        ddt = "Euler" if transient else "steadyState"
+        # Euler es de primer orden: con dt ~ 1e-5 su difusion numerica
+        # domina el Cd. backward es de segundo orden e implicito, estable.
+        ddt = "backward" if transient else "steadyState"
         fvSchemes = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object fvSchemes; }}
 ddtSchemes {{ default {ddt}; }}
 gradSchemes {{ default cellMDLimited Gauss linear 1; }}
@@ -237,7 +239,9 @@ relaxationFactors {{
 {alg} {{
     nNonOrthogonalCorrectors 3;
     nCorrectors     2;
-    nOuterCorrectors 3;
+    nOuterCorrectors 12;
+    pRefCell        0;
+    pRefValue       0;
     // OpenFOAM 12 exige valores simples aqui, no diccionarios. Con
     // {{ tolerance ...; relTol 0; }} aborta con:
     //   "Solution convergence criteria specified in PIMPLE.residualControl
@@ -255,6 +259,20 @@ relaxationFactors {{
 """
 
         fvSolution = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object fvSolution; }}
+// potentialFoam busca este subdict en el NIVEL SUPERIOR de fvSolution
+// (mesh.solution().dict().subDict("potentialFlow")), no dentro de solvers.
+// Sin el, potentialFoam aborta con "keyword potentialFlow is undefined"
+// y el caso transitorio arranca de un campo uniforme: Cl se dispara a
+// valores imposibles (2.7 a alpha=8) y nunca converge.
+potentialFlow
+{{
+    solver          GAMG;
+    tolerance       1e-6;
+    relTol          0;
+    smoother        GaussSeidel;
+    nNonOrthogonalCorrectors 2;
+}}
+
 solvers {{
     p {{
         solver          {p_solver};
@@ -299,6 +317,10 @@ nu              [0 2 -1 0 0 0 0] {nu:.6e};
             f.write(transport)
 
         sim_type = "laminar" if "Laminar" in turbulence_ui else "RAS"
+        # kOmegaSSTDES es un modelo LES (híbrido RANS-LES). Es lo que hace
+        # falta a angulo alto, donde el flujo separa y el RANS puro falla.
+        if "DES" in turbulence_ui:
+            sim_type = "LES"
         model = "kOmegaSST"
         if "SST-LM" in turbulence_ui:
             model = "kOmegaSSTLM"
@@ -307,6 +329,7 @@ nu              [0 2 -1 0 0 0 0] {nu:.6e};
         elif "Epsilon" in turbulence_ui: model = "kEpsilon"
         elif "Omega" in turbulence_ui and "SST" not in turbulence_ui: model = "kOmega"
         elif "Spalart" in turbulence_ui: model = "SpalartAllmaras"
+        elif "DES" in turbulence_ui: model = "kOmegaSSTDES"
 
         turbulence = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object turbulenceProperties; }}
 simulationType  {sim_type};

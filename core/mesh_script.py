@@ -287,8 +287,31 @@ def main():
             gmsh.model.mesh.field.setNumber(box, "ZMax", 1.0)
             gmsh.model.mesh.field.setNumber(box, "Thickness", 0.30 * chord)
 
+            # Estela inclinada (opt-in): a alpha=8 la estela desciende ~10
+            # grados y la caja horizontal deja de cubrirla. Un Box de gmsh no
+            # se puede rotar; con MathEval se refina la distancia perpendicular
+            # a la linea de estela, que es una banda estrecha y barata.
+            #
+            # IMPORTANTE: por defecto esta DESACTIVADO. La malla validada usa
+            # solo el Box horizontal; activar esto cambia la malla de
+            # referencia y hay que revalidar.
+            _incl = float(p.get("wake_incline", 0.0))
+            campos_ref = [thr, box]
+            if abs(_incl) > 0.01:
+                _m = math.tan(math.radians(-_incl))
+                expr = f"abs(y - ({_m})*x)/sqrt(1+({_m})*({_m}))"
+                me = gmsh.model.mesh.field.add("MathEval")
+                gmsh.model.mesh.field.setString(me, "F", expr)
+                thr_w = gmsh.model.mesh.field.add("Threshold")
+                gmsh.model.mesh.field.setNumber(thr_w, "InField", me)
+                gmsh.model.mesh.field.setNumber(thr_w, "SizeMin", mesh_size * 1.5)
+                gmsh.model.mesh.field.setNumber(thr_w, "SizeMax", farfield_size)
+                gmsh.model.mesh.field.setNumber(thr_w, "DistMin", 0.05 * chord)
+                gmsh.model.mesh.field.setNumber(thr_w, "DistMax", 0.30 * chord)
+                campos_ref.append(thr_w)
+
             fmin = gmsh.model.mesh.field.add("Min")
-            gmsh.model.mesh.field.setNumbers(fmin, "FieldsList", [thr, box])
+            gmsh.model.mesh.field.setNumbers(fmin, "FieldsList", campos_ref)
             gmsh.model.mesh.field.setAsBackgroundMesh(fmin)
 
             # Capa límite nativa (solo sobre el contorno del perfil).
