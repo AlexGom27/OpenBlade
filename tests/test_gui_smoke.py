@@ -108,6 +108,12 @@ def test_sweep_sends_one_package_per_angle_to_the_chosen_machines(window):
     assert len({j.group for j in trabajos}) == 1 and all(j.host == "" for j in trabajos)
 
 
+def test_local_keeps_its_limit_even_if_it_is_not_marked_for_spreading(window):
+    window._sync_machines()
+    local = window.dispatcher.machines["local"]
+    assert local.slots >= 1 and local.reparto is False
+
+
 def test_polar_is_built_from_finished_jobs_of_the_group(window):
     from core.jobs import TERMINADO, new_job
     from core.defaults import case_params

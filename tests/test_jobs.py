@@ -206,6 +206,17 @@ def test_dispatcher_spreads_jobs_and_respects_each_machine(corrida_falsa):
     assert por_maquina == {"a@h": 10, "b@h": 8}
 
 
+def test_unmarked_machine_only_runs_jobs_sent_to_it(corrida_falsa):
+    d = Dispatcher(poll_s=0)
+    d.set_machines([Machine("sin@marcar", 4, 1, reparto=False), Machine("marcada@h", 4, 1)])
+    libre, fijo = new_job(case_params(aoa=1.0)), new_job(case_params(aoa=2.0), "sin@marcar", 4)
+    d.submit(libre)
+    d.submit(fijo)
+    corrida_falsa["soltar"].set()
+    assert d.wait(5)
+    assert corrida_falsa["por_maquina"] == {"marcada@h": [1.0], "sin@marcar": [2.0]}
+
+
 def test_job_with_a_fixed_machine_waits_for_it(corrida_falsa):
     d = Dispatcher(poll_s=0)
     d.set_machines([Machine("a@h", 4, 1), Machine("b@h", 4, 1)])

@@ -427,6 +427,7 @@ class Machine:
     host: str
     nproc: int
     slots: int = 1
+    reparto: bool = True    # recibe paquetes sin maquina fija
 
 
 class Dispatcher:
@@ -471,7 +472,7 @@ class Dispatcher:
             m = self.machines.get(job.host)
             return job.host if m is None or self._ocupados(job.host) < m.slots else None
         for m in self.machines.values():
-            if self._ocupados(m.host) < m.slots:
+            if m.reparto and self._ocupados(m.host) < m.slots:
                 return m.host
         return None
 

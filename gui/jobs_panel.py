@@ -129,7 +129,7 @@ class JobsPanel(QWidget):
 
     def all_machines(self) -> List[Machine]:
         """Todas: un trabajo con maquina fija respeta sus limites aunque no este marcada."""
-        return [Machine(m["host"], m["nproc"], m["slots"]) for m in self._filas_maquinas()]
+        return [Machine(m["host"], m["nproc"], m["slots"], m["usar"]) for m in self._filas_maquinas()]
 
     def add_machine(self, host: str, nproc: int = 8, usar: bool = True) -> None:
         if any(m["host"] == host for m in self._filas_maquinas()):

@@ -403,10 +403,7 @@ class MainWindow(QMainWindow):
         return LOCAL, int(p.get("server_nproc", 4))
 
     def _sync_machines(self) -> None:
-        marcadas = {m.host for m in self.jobs_panel.machines()}
-        self.dispatcher.set_machines(
-            [m for m in self.jobs_panel.machines()] +
-            [m for m in self.jobs_panel.all_machines() if m.host not in marcadas and m.host != LOCAL])
+        self.dispatcher.set_machines(self.jobs_panel.all_machines())
 
     def _lanzar(self, job) -> None:
         self._has_unsaved_work = True
