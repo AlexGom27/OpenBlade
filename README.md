@@ -200,6 +200,12 @@ Los mismos parámetros dan el mismo archivo de malla, y cada máquina verifica l
 ## Sin ventana
 
 ```bash
+python3 -m core.cli doctor --hosts usuario@a,usuario@b
+```
+
+`doctor` comprueba sin lanzar nada que todo está listo: versiones, espacio en disco, Docker, acceso a cada servidor y OpenFOAM.
+
+```bash
 python3 -m core.cli correr --host usuario@host --procesos 8 aoa=8 reynolds=6e6
 ```
 
@@ -219,7 +225,9 @@ python3 -m core.cli banco --maquinas usuario@a:10:1,usuario@b:8:1 --salida carpe
 python3 -m core.cli polar --maquinas usuario@a:10:1 --angulos 0,4,8 --gci 0,8 --urans reynolds=6e6
 ```
 
-`polar` lanza un paquete por ángulo, añade un GCI de tres mallas en los ángulos de `--gci` y deja `polar.csv`, `polar.json` y `polar.png`. Con `--urans` repite en transitorio los ángulos que no convergen.
+`polar` lanza un paquete por ángulo, añade un GCI de tres mallas en los ángulos de `--gci` y deja `polar.csv`, `polar.json` y `polar.png`. Con `--urans` repite en transitorio los ángulos que no convergen, arrancando de su campo estacionario. Con `--continuar` retoma una campaña interrumpida: lo terminado no se repite y lo que sigue en su máquina se recoge.
+
+Esta computadora reparte la cola. Si se duerme o pierde la red, lo que ya corre sigue en su servidor y lo pendiente espera; los trabajos esperan a que vuelva la conexión.
 
 Todas estas órdenes usan las mismas funciones que la ventana. En la ventana están en el botón **Banco de Validación** y en **Análisis: Estudio de Malla**. Para abrir un proyecto guardado: `python3 main.py proyecto.obp`.
 

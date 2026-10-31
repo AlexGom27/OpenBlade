@@ -41,7 +41,8 @@ class JobsPanel(QWidget):
         lay.setContentsMargins(8, 8, 8, 8)
 
         lay.addWidget(QLabel("<b>Máquinas</b>: «Repartir entre máquinas» envía cada paquete "
-                             "a la primera marcada que esté libre."))
+                             "a la primera marcada que esté libre. Esta computadora reparte la cola: "
+                             "si se duerme, lo que ya corre sigue en su máquina y lo pendiente espera."))
         self.tabla_maquinas = QTableWidget(0, 4)
         self.tabla_maquinas.setHorizontalHeaderLabels(["Usar", "Máquina", "Procesos", "A la vez"])
         self.tabla_maquinas.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)

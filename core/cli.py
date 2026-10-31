@@ -4,6 +4,7 @@
     python3 -m core.cli control --hosts usuario@a,usuario@b --procesos 8
     python3 -m core.cli banco --maquinas usuario@a:10:1,usuario@b:8:1 --salida carpeta
     python3 -m core.cli polar --maquinas usuario@a:10:1 --angulos 0,4,8 --gci 0,8 reynolds=6e6
+    python3 -m core.cli doctor --hosts usuario@a,usuario@b
 
 Cada simulacion sale de aqui o de la ventana; no hay otra forma de escribir un caso.
 """
@@ -12,12 +13,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
+import subprocess
 import sys
 import time
 from typing import Any, Dict, List
 
 from core.defaults import case_params
 from core.jobs import Dispatcher, Events, Job, Machine, new_job
+
+ESPACIO_MINIMO_GB = 5.0
 
 
 class _Consola(Events):
@@ -131,9 +137,75 @@ def cmd_polar(args: argparse.Namespace) -> int:
     return 0
 
 
+def _versiones_distintas() -> List[str]:
+    """Paquetes cuya version no es la de requirements.txt, con la que se verifico el programa."""
+    from importlib import metadata
+
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    distintos = []
+    with open(os.path.join(raiz, "requirements.txt")) as f:
+        for linea in f:
+            nombre, _, pedida = linea.strip().partition("==")
+            if not pedida or nombre.startswith("#"):
+                continue
+            try:
+                instalada = metadata.version(nombre)
+            except metadata.PackageNotFoundError:
+                instalada = "no instalado"
+            if instalada != pedida:
+                distintos.append(f"{nombre} {instalada} (se verificó con {pedida})")
+    return distintos
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Comprueba que todo esta listo para calcular, sin lanzar nada."""
+    from core import paths
+    from core.jobs import FINALES, load_jobs
+    from core.local_runner import probar_docker
+    from core.remote_runner import RemoteError, _ssh, probar_servidor
+
+    problemas = 0
+
+    def linea(bien: bool, texto: str) -> None:
+        nonlocal problemas
+        problemas += not bien
+        print(f"  {'bien' if bien else 'MAL '}  {texto}")
+
+    print("Esta computadora")
+    distintos = _versiones_distintas()
+    linea(not distintos, "; ".join(distintos) or "Versiones de requirements.txt")
+    libre = shutil.disk_usage(paths.data_root()).free / 1e9
+    linea(libre >= ESPACIO_MINIMO_GB, f"{libre:.0f} GB libres en {paths.data_root()}")
+    linea(bool(shutil.which("rsync") and shutil.which("ssh")), "rsync y ssh, para los servidores")
+    # Sin Docker aun se puede calcular en un servidor: no es un problema.
+    print(f"  ----  Local: {probar_docker()['mensaje']}")
+    for host in [h for h in args.hosts.split(",") if h]:
+        print(host)
+        try:
+            s = probar_servidor(host)
+            df = _ssh(host, "df -k ~ | tail -1", timeout=25)
+            libre = int(df.stdout.split()[3]) / 1e6
+        except (RemoteError, OSError, subprocess.TimeoutExpired, IndexError, ValueError) as e:
+            linea(False, f"No responde: {str(e)[:160]}. Prueba «Configurar acceso…» o revisa la red.")
+            continue
+        linea(s["rsync"] and s["python3"], "rsync y python3")
+        linea(bool(s["openfoam"]), f"OpenFOAM: {s['openfoam'] or 'no se encontró'}")
+        linea(libre >= ESPACIO_MINIMO_GB, f"{libre:.0f} GB libres")
+        print(f"  ----  {s['nucleos']} núcleos, carga {s['carga']:.1f}")
+    a_medias = [j.label for j in load_jobs() if j.state not in FINALES]
+    if a_medias:
+        print(f"Trabajos a medias: {len(a_medias)}. Se retoman al abrir la ventana, o con polar --continuar.")
+    print("Todo listo." if not problemas else f"{problemas} problema(s).")
+    return 1 if problemas else 0
+
+
 def main(argv: List[str] = None) -> int:
     p = argparse.ArgumentParser(prog="core.cli", description=__doc__)
     sub = p.add_subparsers(dest="orden", required=True)
+
+    doctor = sub.add_parser("doctor", help="comprueba que todo esta listo, sin lanzar nada")
+    doctor.add_argument("--hosts", default="", help="servidores separados por comas")
+    doctor.set_defaults(fn=cmd_doctor)
 
     correr = sub.add_parser("correr", help="un paquete en una maquina")
     correr.add_argument("--host", required=True, help="usuario@host o local")
