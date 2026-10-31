@@ -5,12 +5,14 @@ remote_runner.py lo sube junto al caso y lo lanza con setsid, asi que sigue
 corriendo aunque se cierre la app o se corte la red. Solo usa la biblioteca
 estandar: el servidor no necesita tener instalado OpenBlade.
 
-Lee job.json del directorio actual y deja su estado en status.json.
+Lee job.json del directorio actual y deja su estado en status.json. Antes de
+calcular comprueba el paquete contra ficha.json y rechaza uno alterado.
 """
 
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -31,6 +33,38 @@ def guardar_estado(**cambios):
     with open(tmp, "w") as f:
         json.dump(ESTADO, f)
     os.replace(tmp, "status.json")
+
+
+def _sha256(ruta):
+    h = hashlib.sha256()
+    with open(ruta, "rb") as f:
+        for bloque in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloque)
+    return h.hexdigest()
+
+
+def verificar_paquete():
+    """Compara cada archivo con la ficha. Devuelve el sha256 de la ficha."""
+    if not os.path.exists("ficha.json"):
+        raise RuntimeError("Paquete rechazado: no trae ficha.json")
+    huella = _sha256("ficha.json")
+    with open("ficha.json") as f:
+        esperados = json.load(f)["archivos"]
+    malos = []
+    for ruta, sha in esperados.items():
+        if not os.path.exists(ruta):
+            malos.append(f"{ruta} (falta)")
+        elif _sha256(ruta) != sha:
+            malos.append(f"{ruta} (cambió)")
+    for carpeta in ("0", "constant", "system"):
+        for base, dirs, nombres in os.walk(carpeta):
+            if base == "constant":
+                dirs[:] = [d for d in dirs if d != "polyMesh"]
+            malos += [f"{os.path.join(base, n)} (sobra)" for n in nombres
+                      if os.path.join(base, n).replace(os.sep, "/") not in esperados]
+    if malos:
+        raise RuntimeError("Paquete alterado, no se calcula: " + ", ".join(sorted(malos)[:6]))
+    return huella
 
 
 def env_foam():
@@ -88,10 +122,14 @@ def main():
     guardar_estado(pid=os.getpid(), pgid=os.getpgid(0))
 
     try:
+        guardar_estado(step="verificando")
+        guardar_estado(ficha_sha256=verificar_paquete())
         env = env_foam()
         guardar_estado(step="gmshToFoam")
         correr(["gmshToFoam", "mesh.msh"], env, "log.gmshToFoam")
         ajustar_boundary()
+        guardar_estado(step="checkMesh")
+        correr(["checkMesh", "-noFunctionObjects"], env, "log.checkMesh", obligatorio=False)
 
         # Igual que en local: si falla, la simulacion aun puede continuar.
         guardar_estado(step="potentialFoam")

@@ -148,6 +148,7 @@ def main():
         volumes = []
         front_back_surfaces = []
         extrusion_map = []
+        mallador = "C estructurada (gmshairfoil2d)"
 
         # Estrategia de mallado:
         #   auto         -> intenta C-Grid estructurado y cae a Gmsh nativo
@@ -223,6 +224,7 @@ def main():
                 
         except Exception as e:
             print(f"⚠️ Aviso: gmshairfoil2d CType falló ({e}). Usando PLAN B (Mallado Nativo No Estructurado).")
+            mallador = f"no estructurada (gmsh), porque la C falló: {e}"
             # PLAN B: Malla no estructurada nativa de Gmsh
             gmsh.clear()
             gmsh.model.add("NACA_Fallback")
@@ -388,8 +390,17 @@ def main():
         walls_surfaces = []
         airfoil_surfaces = []
         
+        # La cara entre dos bloques sale en las dos extrusiones y es interior: como
+        # contorno, gmshToFoam la convertia en una zona con caras duplicadas.
+        veces = {}
+        for _, side_tags in extrusion_map:
+            for side_tag in side_tags:
+                veces[side_tag] = veces.get(side_tag, 0) + 1
+
         for s_tag, side_tags in extrusion_map:
             for side_tag in side_tags:
+                if veces[side_tag] > 1:
+                    continue
                 bbox = gmsh.model.getBoundingBox(2, side_tag)
                 xc = (bbox[0] + bbox[3]) / 2
                 yc = (bbox[1] + bbox[4]) / 2
@@ -422,6 +433,8 @@ def main():
         
         gmsh.write(output_msh)
         gmsh.write(output_msh.replace(".msh", ".vtk"))
+        with open(output_msh + ".info.json", "w") as f:
+            json.dump({"mallador": mallador}, f, ensure_ascii=False)
         print(f"✅ Malla estructurada generada: {output_msh}")
         
     finally:

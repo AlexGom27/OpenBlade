@@ -79,6 +79,27 @@ def test_startup_spike_does_not_condemn_a_converged_run():
     assert v.state == CONVERGIDO and v.max_abs_cl == 40.0
 
 
+def test_blow_up_after_startup_that_calms_down_is_not_converged():
+    """Hallado por OpenClaw: solo se miraba la ventana final."""
+    n = 6000
+    cl = [900.0 if 3000 <= i < 3050 else 0.9 for i in range(n)]
+    v = evaluate(historia(cl, [0.01] * n))
+    assert v.state == NO_CONVERGIDO and "dispararon" in v.reason
+
+
+def test_transient_ramp_is_not_converged():
+    tiempo = [i * 0.01 for i in range(4000)]
+    v = evaluate(historia([0.5 + 0.02 * t for t in tiempo], [0.02] * 4000, tiempo=tiempo),
+                 transient=True)
+    assert v.state == NO_CONVERGIDO and "Cl" in v.reason
+
+
+def test_pitching_moment_counts():
+    n = 3000
+    v = evaluate(historia([0.9] * n, [0.01] * n, [0.01 + 0.01 * math.sin(i) for i in range(n)]))
+    assert v.state == NO_CONVERGIDO and "Cm" in v.reason
+
+
 def test_return_code_and_crash():
     n = 1000
     h = historia([0.5] * n, [0.01] * n)

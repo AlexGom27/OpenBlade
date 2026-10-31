@@ -106,6 +106,10 @@ class MainWindow(QMainWindow):
         save_action.triggered.connect(self.save_project)
         file_menu.addAction(save_action)
         
+        ficha_action = QAction("Ver ficha del caso", self)
+        ficha_action.triggered.connect(self.show_ficha)
+        file_menu.addAction(ficha_action)
+
         file_menu.addSeparator()
         
         exit_action = QAction("Salir", self)
@@ -670,11 +674,16 @@ class MainWindow(QMainWindow):
         self._reset_run_state()
         self.results_panel.setEnabled(True)
         transitorio = getattr(self, "_sim_transient", False)
+        trabajo_remoto = getattr(self.sim_worker, "job", None)
+        host = trabajo_remoto.host if trabajo_remoto else "local"
+        job_dir = trabajo_remoto.job_dir if trabajo_remoto else ""
+        error = getattr(self.sim_worker, "server_error", "")
 
         # Leer la malla puede tardar: fuera del hilo de la interfaz.
         def trabajo():
             from core.verdict import analyze_case
-            self._analysis_ready.emit((analyze_case(self.case_dir, transitorio, code), code))
+            self._analysis_ready.emit(
+                (analyze_case(self.case_dir, transitorio, code, host, job_dir, error), code))
 
         threading.Thread(target=trabajo, daemon=True).start()
 
@@ -709,6 +718,12 @@ class MainWindow(QMainWindow):
             marca = {"ok": "✅", "aviso": "⚠️", "mal": "❌"}.get(aviso["level"], "ℹ️")
             self.log(f"{marca} {aviso['text']}")
             lineas.append(f"{marca} {aviso['text']}")
+        malla = analisis.get("mesh_notice")
+        if malla:
+            marca = {"ok": "✅", "aviso": "⚠️", "mal": "❌"}.get(malla["level"], "ℹ️")
+            self.log(f"{marca} {malla['text']}")
+            if malla["level"] != "ok":
+                lineas.append(f"{marca} {malla['text']}")
         self._set_banner(v.state, "\n".join(lineas))
         if code == 0:
             self.log("💡 Puedes pulsar 'Ver Resultados' para visualizar el flujo.")
@@ -932,7 +947,8 @@ class MainWindow(QMainWindow):
             if not filename.endswith(".pdf"):
                 filename += ".pdf"
             try:
-                generate_pdf_report(filename, p, analisis, images)
+                from core.package import read_ficha
+                generate_pdf_report(filename, p, analisis, images, read_ficha(self.case_dir))
                 self.log(f"✅ Informe PDF generado exitosamente en {filename}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Fallo al generar PDF: {e}")
@@ -947,6 +963,25 @@ class MainWindow(QMainWindow):
                     os.remove(img)
                 except:
                     pass
+
+    def show_ficha(self) -> None:
+        """La ficha del caso: huellas, versiones, parametros, ejecucion y resultado."""
+        from qtpy.QtWidgets import QDialog
+        from core.package import read_ficha
+        ficha = read_ficha(self.case_dir)
+        if ficha is None:
+            QMessageBox.information(self, "Ficha del caso",
+                                    "Este caso aún no tiene ficha: se crea al enviarlo a calcular.")
+            return
+        dialogo = QDialog(self)
+        dialogo.setWindowTitle("Ficha del caso")
+        dialogo.resize(760, 640)
+        lay = QVBoxLayout(dialogo)
+        texto = QTextEdit()
+        texto.setReadOnly(True)
+        texto.setPlainText(json.dumps(ficha, indent=2, ensure_ascii=False, sort_keys=True))
+        lay.addWidget(texto)
+        dialogo.exec()
 
     def save_project(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(self, "Guardar Proyecto", "", "OpenBlade (*.obp)")

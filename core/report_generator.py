@@ -4,7 +4,27 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-def generate_pdf_report(filename, params, analysis, images):
+def _tabla_ficha(ficha):
+    """Lo que identifica el calculo: de donde salio y con que."""
+    ejecucion = ficha.get("ejecucion") or {}
+    programa = ficha.get("programa") or {}
+    versiones = ficha.get("versiones") or {}
+    malla = ficha.get("checkmesh") or {}
+    filas = [["Dato", "Valor"],
+             ["Programa (commit)", (programa.get("commit") or "desconocido")[:12]
+              + (" con cambios sin guardar" if programa.get("modificados") else "")],
+             ["sha256 de la malla", ((ficha.get("archivos") or {}).get("mesh.msh") or "")[:24]],
+             ["gmsh / gmshairfoil2d", f"{versiones.get('gmsh')} / {versiones.get('gmshairfoil2d')}"],
+             ["OpenFOAM", ejecucion.get("openfoam_build") or "desconocido"],
+             ["Máquina / procesos", f"{ejecucion.get('maquina')} / {ejecucion.get('procesos')}"]]
+    if malla:
+        filas += [["Celdas", str(malla.get("celdas"))],
+                  ["No ortogonalidad máx", f"{malla.get('no_ortogonalidad_max')}°"],
+                  ["Sesgo máx", str(malla.get("sesgo_max"))]]
+    return filas
+
+
+def generate_pdf_report(filename, params, analysis, images, ficha=None):
     """Informe de una corrida. `analysis` es lo que devuelve core.verdict.analyze_case."""
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
@@ -33,6 +53,18 @@ def generate_pdf_report(filename, params, analysis, images):
         elements.append(Spacer(1, 6))
         elements.append(Paragraph(aviso["text"], normal_style))
     elements.append(Spacer(1, 12))
+
+    if ficha:
+        elements.append(Paragraph("Ficha del caso", subtitle_style))
+        t_ficha = Table(_tabla_ficha(ficha))
+        t_ficha.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.grey),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black)
+        ]))
+        elements.append(t_ficha)
+        elements.append(Spacer(1, 12))
     
     # Parameters
     elements.append(Paragraph("Parámetros de la Simulación", subtitle_style))

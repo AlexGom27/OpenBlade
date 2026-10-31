@@ -1,12 +1,14 @@
-numpy
-matplotlib
-gmsh
-pyvista
-pyvistaqt
-qtpy
-PySide6
-gmshairfoil2d
-scipy
-pandas
-reportlab
-imageio-ffmpeg
+# Versiones con las que se verifico el programa. La malla se genera en esta
+# maquina: otra version de gmsh puede dar otra malla con los mismos parametros.
+numpy==2.4.0
+matplotlib==3.10.8
+gmsh==4.15.2
+pyvista==0.48.4
+pyvistaqt==0.12.0
+qtpy==2.4.3
+PySide6==6.11.1
+gmshairfoil2d==0.2.33
+scipy==1.18.0
+pandas==3.0.3
+reportlab==5.0.0
+imageio-ffmpeg==0.6.0

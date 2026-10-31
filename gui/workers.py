@@ -378,6 +378,7 @@ def _follow_remote_job(worker, job, parser_events, should_stop, poll_s=4.0):
             for ev in parser.feed(job.leer_log()):
                 parser_events(ev)
             est = job.estado()
+            job.comprobar_ficha(est)
             fallos = 0
         except (RemoteError, subprocess.TimeoutExpired, OSError) as e:
             fallos += 1
@@ -413,6 +414,7 @@ class RemoteSimWorker(QThread):
         self.case_dir = case_dir
         self.attach_dir = attach_dir
         self.job = None
+        self.server_error = ""
         self._detached = False
 
     def start_sim(self):
@@ -442,7 +444,7 @@ class RemoteSimWorker(QThread):
                 transient = configure_case(self.case_dir, self.p)
                 nproc = int(self.p.get("server_nproc", 4))
                 self.log_msg.emit(f"📤 Subiendo a {host} ({nproc} procesos)...")
-                self.job.subir_y_lanzar(self.case_dir, self.msh_file, nproc, transient)
+                self.job.subir_y_lanzar(self.case_dir, self.msh_file, nproc, transient, self.p)
                 with open(estado_local, "w") as f:
                     json.dump({"host": host, "job_dir": self.job.job_dir,
                                "aoa": self.p.get("aoa", 0.0)}, f)
@@ -459,6 +461,7 @@ class RemoteSimWorker(QThread):
 
             rc = int(est.get("rc") or 0)
             if est.get("error"):
+                self.server_error = est["error"]
                 self.log_msg.emit(f"❌ Servidor: {est['error']}")
             self.log_msg.emit("📥 Descargando resultados...")
             self.job.descargar(self.case_dir)
@@ -467,6 +470,7 @@ class RemoteSimWorker(QThread):
             self.log_msg.emit(f"✅ Resultados en {self.case_dir}")
             self.finished.emit(rc)
         except (RemoteError, subprocess.SubprocessError, OSError) as e:
+            self.server_error = str(e)
             self.log_msg.emit(f"❌ Servidor: {e}")
             self.finished.emit(1)
 
@@ -511,7 +515,7 @@ class RemoteSweepWorker(SweepWorker):
         etiqueta = f"{params.get('naca') or 'custom'}_a{angle}"
         self._job = RemoteJob(params["server_host"], etiqueta=etiqueta)
         self._job.subir_y_lanzar(self.case_dir, msh_file,
-                                 int(params.get("server_nproc", 4)), transient)
+                                 int(params.get("server_nproc", 4)), transient, params)
         est = _follow_remote_job(self, self._job, lambda ev: None,
                                  lambda: self._stop_requested)
         if est is None:

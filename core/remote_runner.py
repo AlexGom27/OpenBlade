@@ -140,6 +140,7 @@ class RemoteJob:
         if not re.fullmatch(r"[A-Za-z0-9_./-]+", self.job_dir) or ".." in self.job_dir:
             raise RemoteError(f"Directorio de trabajo no valido: {self.job_dir}")
         self.offset = 0
+        self.ficha_sha256 = None
 
     def _run(self, comando: str, timeout: int = 60) -> str:
         r = _ssh(self.host, f"cd ~/{self.job_dir} && {comando}", timeout=timeout)
@@ -155,8 +156,11 @@ class RemoteJob:
         if r.returncode != 0:
             raise RemoteError("rsync: " + r.stderr.strip()[-300:])
 
-    def subir_y_lanzar(self, case_dir: str, msh_file: str, nproc: int,
-                       transient: bool) -> None:
+    def subir(self, case_dir: str, msh_file: str, nproc: int, transient: bool,
+              params: Dict[str, Any]) -> None:
+        """Sube el paquete con su ficha, sin lanzarlo."""
+        from core.package import FICHA, build_ficha, sha256_file
+
         r = _ssh(self.host, f"mkdir -p ~/{self.job_dir}")
         if r.returncode != 0:
             raise RemoteError(f"No se pudo crear el trabajo: {r.stderr.strip()[-200:]}")
@@ -168,6 +172,8 @@ class RemoteJob:
         shutil.copy2(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "remote_job.py"),
                      os.path.join(case_dir, "remote_job.py"))
+        build_ficha(case_dir, params, msh_file)
+        self.ficha_sha256 = sha256_file(os.path.join(case_dir, FICHA))
         try:
             self._rsync(case_dir.rstrip("/") + "/", f"{self.host}:{self.job_dir}/",
                         ["processor*", "*.log", "log.*", "*.foam"])
@@ -176,17 +182,41 @@ class RemoteJob:
                 ruta = os.path.join(case_dir, nombre)
                 if os.path.exists(ruta):
                     os.remove(ruta)
+
+    def lanzar(self) -> None:
         # Los parentesis importan: un "cd && x &" dejaria un subshell con la
         # salida conectada al canal y ssh no volveria hasta que acabe el trabajo.
         self._run("(setsid nohup python3 remote_job.py > job.log 2>&1 < /dev/null &)",
                   timeout=30)
 
+    def subir_y_lanzar(self, case_dir: str, msh_file: str, nproc: int, transient: bool,
+                       params: Dict[str, Any]) -> None:
+        self.subir(case_dir, msh_file, nproc, transient, params)
+        self.lanzar()
+
+    def comprobar_ficha(self, estado: Dict[str, Any]) -> None:
+        """El servidor verifico la misma ficha que se envio."""
+        huella = estado.get("ficha_sha256")
+        if self.ficha_sha256 and huella and huella != self.ficha_sha256:
+            raise RemoteError("La ficha del servidor no es la que se envió")
+
     def estado(self) -> Dict[str, Any]:
-        salida = self._run("cat status.json 2>/dev/null; true", timeout=30)
+        """Estado del trabajo. Sin status.json aun no ha arrancado o no arrancara.
+
+        Si python3 falla antes de escribir nada, job.log lo cuenta y el trabajo se
+        da por fallido: antes quedaba como "running" para siempre.
+        """
+        salida = self._run('cat status.json 2>/dev/null || { echo; echo "--"; '
+                           'tail -c 400 job.log 2>/dev/null; }', timeout=30)
         try:
             return json.loads(salida)
         except ValueError:
-            return {"state": "running", "step": "inicio"}
+            pass
+        _, _, log = salida.partition("--\n")
+        if log.strip():
+            return {"state": "failed", "rc": 1, "step": "inicio",
+                    "error": f"El trabajo no arrancó: {log.strip()[-300:]}"}
+        return {"state": "running", "step": "inicio"}
 
     def leer_log(self, maximo: int = 2_000_000) -> str:
         """Texto nuevo de run.log desde la ultima lectura."""

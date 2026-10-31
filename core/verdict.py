@@ -24,8 +24,10 @@ VENTANA = 500           # iteraciones finales que se evaluan
 MIN_FILAS = 100         # con menos no se puede juzgar nada
 TOL_RANGO = 0.01        # (max-min)/|media| dentro de la ventana
 TOL_DERIVA = 0.005      # cambio de la media frente a la ventana anterior
-TOL_DERIVA_TRANS = 0.02
+TOL_DERIVA_TRANS = 0.01
 TOL_CL_ABS = 0.002      # con Cl casi nulo la tolerancia relativa no sirve
+TOL_CM_ABS = 0.002
+ARRANQUE = 0.2          # fraccion inicial donde un pico de fuerzas es normal
 # Ningun perfil aislado sin soplado se acerca a estos valores.
 CL_IMPOSIBLE = 5.0
 CD_IMPOSIBLE = 5.0
@@ -167,6 +169,14 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
         return Verdict(DIVERGIDO, f"Cd es negativo en {negativos} de {len(cd)} "
                                   "filas de la ventana final", **base)
 
+    # Una corrida que se dispara a mitad de camino y luego se serena no es de fiar,
+    # aunque termine estable. En el arranque los picos son normales.
+    desde = int(ARRANQUE * n)
+    for i in range(desde, n):
+        if abs(h.cl[i]) > CL_IMPOSIBLE or abs(h.cd[i]) > CD_IMPOSIBLE:
+            return Verdict(NO_CONVERGIDO, f"Las fuerzas se dispararon en t = {h.time[i]:g} "
+                                          f"(Cl = {h.cl[i]:.1f}) antes de estabilizarse", **base)
+
     rango_cd = 100.0 * 2 * a_cd / abs(m_cd) if m_cd else math.inf
     cd_previo = h.cd[previo:corte]
     if transient:
@@ -189,6 +199,12 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
     if deriva_cd > tol_deriva:
         return Verdict(NO_CONVERGIDO, f"La media de Cd aún cambia {deriva_cd:.2f} % "
                                       f"entre ventanas (máximo {tol_deriva:g} %)", **base)
+    cl_previo = h.cl[previo:corte]
+    media_cl_previa = (_media_temporal(t_previo[j0:j1], cl_previo[j0:j1]) if transient
+                       else sum(cl_previo) / len(cl_previo))
+    if abs(m_cl - media_cl_previa) > _tol_cl(m_cl):
+        return Verdict(NO_CONVERGIDO, f"La media de Cl aún cambia de {media_cl_previa:.4f} a "
+                                      f"{m_cl:.4f} entre ventanas", **base)
     if not transient:
         if rango_cd > 100.0 * TOL_RANGO:
             return Verdict(NO_CONVERGIDO, f"Cd varía {rango_cd:.2f} % en {ventana} "
@@ -196,6 +212,8 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
         if 2 * a_cl > _tol_cl(m_cl):
             return Verdict(NO_CONVERGIDO, f"Cl varía {2 * a_cl:.4f} en {ventana} "
                                           f"(máximo {_tol_cl(m_cl):.4f})", **base)
+        if 2 * a_cm > max(TOL_RANGO * abs(m_cm), TOL_CM_ABS):
+            return Verdict(NO_CONVERGIDO, f"Cm varía {2 * a_cm:.4f} en {ventana}", **base)
         return Verdict(CONVERGIDO, f"Cd varía {rango_cd:.2f} % en {ventana}", **base)
     return Verdict(CONVERGIDO, f"La media de Cd cambia {deriva_cd:.2f} % entre "
                                f"ventanas; {ventana} promedia el régimen", **base)
@@ -219,11 +237,15 @@ def evaluate_case(case_dir: str, transient: bool = False, rc: int = 0) -> Verdic
     return evaluate(h, transient, rc, _cola_log(case_dir) if rc else "")
 
 
-def analyze_case(case_dir: str, transient: bool = False, rc: int = 0) -> Dict[str, Any]:
-    """Veredicto e y+ del caso, guardados en resultado.json junto a el."""
+def analyze_case(case_dir: str, transient: bool = False, rc: int = 0,
+                 host: str = "", job_dir: str = "", error: str = "") -> Dict[str, Any]:
+    """Veredicto, y+ y malla del caso; se guardan en resultado.json y en su ficha."""
+    from core.package import complete_ficha, mesh_notice, parse_checkmesh
     from core.yplus import YPlusError, compute_yplus, regime_notice
 
     verdict = evaluate_case(case_dir, transient, rc)
+    if error and verdict.state == SIN_DATOS:
+        verdict.reason = error
     resultado: Dict[str, Any] = {"verdict": verdict.to_dict(), "yplus": None,
                                  "yplus_notice": None}
     try:
@@ -234,8 +256,14 @@ def analyze_case(case_dir: str, transient: bool = False, rc: int = 0) -> Dict[st
     except YPlusError as e:
         resultado["yplus_notice"] = {"level": "sin datos", "text": f"y+ no disponible: {e}"}
     try:
+        with open(os.path.join(case_dir, "log.checkMesh"), errors="replace") as f:
+            resultado["mesh_notice"] = mesh_notice(parse_checkmesh(f.read()))
+    except OSError:
+        resultado["mesh_notice"] = None
+    try:
         with open(os.path.join(case_dir, "resultado.json"), "w") as f:
             json.dump(resultado, f, indent=2, ensure_ascii=False, allow_nan=False)
     except (OSError, ValueError):
         pass
+    complete_ficha(case_dir, resultado, rc, host, job_dir)
     return resultado
