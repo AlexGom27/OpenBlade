@@ -52,6 +52,7 @@ class Verdict:
     cm_amp: Optional[float] = None
     cd_range_pct: Optional[float] = None
     cd_drift_pct: Optional[float] = None
+    cl_drift: Optional[float] = None    # cambio absoluto de la media de Cl entre tramos
     max_abs_cl: Optional[float] = None
     period: Optional[float] = None
     oscila: bool = False    # NO CONVERGIDO solo por la amplitud: la media ya es estable
@@ -202,7 +203,13 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
     else:
         cd_reciente, media_previa = tramo_final(h.cd)
     deriva_cd = 100.0 * abs(cd_reciente - media_previa) / abs(cd_reciente) if cd_reciente else math.inf
-    base.update(cd_range_pct=rango_cd, cd_drift_pct=deriva_cd)
+    # Una deriva lenta no se ve en el rango de una ventana y puede sumar varios por ciento.
+    if transient:
+        cl_previo = h.cl[previo:corte]
+        cl_reciente, media_cl_previa = m_cl, _media_temporal(t_previo[j0:j1], cl_previo[j0:j1])
+    else:
+        cl_reciente, media_cl_previa = tramo_final(h.cl)
+    base.update(cd_range_pct=rango_cd, cd_drift_pct=deriva_cd, cl_drift=abs(cl_reciente - media_cl_previa))
 
     if rc == RC_DETENIDA:
         return Verdict(NO_CONVERGIDO, "Se detuvo antes de terminar", **base)
@@ -215,12 +222,6 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
     if deriva_cd > tol_deriva:
         return Verdict(NO_CONVERGIDO, f"La media de Cd aún cambia {deriva_cd:.2f} % "
                                       f"entre tramos (máximo {tol_deriva:g} %)", **base)
-    # Una deriva lenta no se ve en el rango de una ventana y puede sumar varios por ciento.
-    if transient:
-        cl_previo = h.cl[previo:corte]
-        cl_reciente, media_cl_previa = m_cl, _media_temporal(t_previo[j0:j1], cl_previo[j0:j1])
-    else:
-        cl_reciente, media_cl_previa = tramo_final(h.cl)
     if abs(cl_reciente - media_cl_previa) > TOL_DERIVA_CL * max(abs(cl_reciente), CL_REF):
         return Verdict(NO_CONVERGIDO, f"La media de Cl aún cambia de {media_cl_previa:.4f} a "
                                       f"{cl_reciente:.4f} entre tramos", **base)

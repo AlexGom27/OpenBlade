@@ -21,9 +21,11 @@ from core.jobs import Dispatcher, Events, Job, Machine, new_job
 
 NIVELES_GCI = (1, 2, 3)
 NIVEL_BASE = 2
-# Un nivel cuya media es estable pero oscila sirve para el GCI si su amplitud es pequena
-# frente a lo que separa las mallas: el error iterativo no tapa al de discretizacion.
-OSCILACION_MAX = 0.25
+# Un nivel que oscila poco con media estable sirve para el GCI: lo que entra en el calculo
+# es su media, y esa debe moverse mucho menos que lo que separa las mallas.
+OSCILACION_MAX = 0.03   # amplitud frente a la media
+DERIVA_MAX = 0.1        # cambio de la media entre tramos frente al salto entre mallas
+CL_MINIMO = 0.1         # con Cl casi nulo la amplitud relativa no sirve
 PARAM_TRANSITORIO = {"regime": "Transitorio (pimpleFoam)"}
 
 
@@ -47,14 +49,15 @@ def grid_study_cases(params: Dict[str, Any], niveles: Sequence[int] = NIVELES_GC
 
 
 def _oscila_poco(filas: Sequence[Dict[str, Any]], i: int) -> bool:
-    """¿La amplitud del nivel i es pequena frente a sus saltos con los niveles vecinos?"""
+    """¿El nivel i oscila poco y su media se mueve mucho menos que el salto a sus vecinos?"""
+    f = filas[i]
     vecinos = [filas[k] for k in (i - 1, i + 1) if 0 <= k < len(filas)]
-    for nombre in ("cl", "cd"):
-        for v in vecinos:
-            if filas[i][nombre] is None or v[nombre] is None:
-                return False
-            if filas[i][f"{nombre}_amp"] > OSCILACION_MAX * abs(filas[i][nombre] - v[nombre]):
-                return False
+    for nombre, deriva, escala in (("cl", f["cl_deriva"], max(abs(f["cl"] or 0.0), CL_MINIMO)),
+                                   ("cd", f["cd_deriva"], abs(f["cd"] or 0.0))):
+        if f[nombre] is None or deriva is None or f[f"{nombre}_amp"] > OSCILACION_MAX * escala:
+            return False
+        if any(v[nombre] is None or deriva > DERIVA_MAX * abs(f[nombre] - v[nombre]) for v in vecinos):
+            return False
     return True
 
 
@@ -64,7 +67,9 @@ def grid_study_result(trabajos: Sequence[Job]) -> Dict[str, Any]:
     filas = [{"nivel": int(j.params.get("grid_level", 2)), "veredicto": verdict_of(j).get("state"),
               "cl": verdict_of(j).get("cl"), "cl_amp": verdict_of(j).get("cl_amp"),
               "cd": verdict_of(j).get("cd"), "cd_amp": verdict_of(j).get("cd_amp"), "cm": verdict_of(j).get("cm"),
-              "oscila": bool(verdict_of(j).get("oscila")),
+              "oscila": bool(verdict_of(j).get("oscila")), "cl_deriva": verdict_of(j).get("cl_drift"),
+              "cd_deriva": 0.01 * (verdict_of(j).get("cd_drift_pct") or 0.0) * abs(verdict_of(j).get("cd") or 0.0)
+              if verdict_of(j).get("cd_drift_pct") is not None else None,
               "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean"),
               "trabajo": j.id} for j in orden]
     sin_converger = [f["nivel"] for f in filas if f["veredicto"] != "CONVERGIDO"]

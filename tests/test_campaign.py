@@ -67,23 +67,32 @@ def test_results_are_saved(tmp_path):
     assert ruta.endswith("polar.png")
 
 
-def _nivel_que_oscila(cd_amp):
+def _nivel_que_oscila(cd_amp=0.0002, cd_deriva_pct=0.002, cl_deriva=1e-5):
     j = trabajo(nivel=1, estado="NO CONVERGIDO", cl=1.48, cd=0.0186)
-    j.analysis["verdict"].update(oscila=True, cd_amp=cd_amp)
+    j.analysis["verdict"].update(oscila=True, cd_amp=cd_amp, cd_drift_pct=cd_deriva_pct, cl_drift=cl_deriva)
     return j
 
 
+def _finos(cl2=1.50):
+    return [trabajo(nivel=2, cl=cl2, cd=0.0199), trabajo(nivel=3, cl=1.505, cd=0.0205)]
+
+
 def test_a_level_that_barely_oscillates_counts_for_the_grid_study():
-    trabajos = [_nivel_que_oscila(0.0002), trabajo(nivel=2, cl=1.50, cd=0.0199), trabajo(nivel=3, cl=1.505, cd=0.0205)]
-    r = grid_study_result(trabajos)
+    r = grid_study_result([_nivel_que_oscila()] + _finos())
     assert r["sin_converger"] == [1] and r["oscilan"] == [1]
     assert "motivo" not in r and r["cd"]["orden"] is not None
     assert "oscilan" in grid_study_text(r)
 
 
-def test_a_level_that_oscillates_as_much_as_the_jump_does_not():
-    trabajos = [_nivel_que_oscila(0.001), trabajo(nivel=2, cl=1.50, cd=0.0199), trabajo(nivel=3, cl=1.505, cd=0.0205)]
-    r = grid_study_result(trabajos)
+def test_the_amplitude_may_exceed_a_small_jump_if_the_mean_is_stable():
+    # Medido a 10 grados: Cl oscila 6e-4 y el salto a la malla siguiente es de 1.5e-3
+    r = grid_study_result([_nivel_que_oscila()] + _finos(cl2=1.4815))
+    assert r["oscilan"] == [1]
+
+
+@pytest.mark.parametrize("ajuste", [{"cd_amp": 0.002}, {"cd_deriva_pct": 2.0}, {"cl_deriva": 0.01}])
+def test_a_level_that_oscillates_a_lot_or_whose_mean_moves_does_not_count(ajuste):
+    r = grid_study_result([_nivel_que_oscila(**ajuste)] + _finos())
     assert r["oscilan"] == [] and "no convergieron" in r["motivo"]
 
 
