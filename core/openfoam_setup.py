@@ -103,7 +103,11 @@ writeInterval   {writeInterval};
 purgeWrite      {purgeWrite};
 {maxCoStr}
 writeFormat     ascii;
-writePrecision  6;
+// gmshToFoam escribe los puntos de la malla con esta precision. Con 6 cifras, un
+// punto en x=0.42 se redondea a 1e-6, comparable a una primera celda de 4e-6: las
+// celdas de pared quedan deformadas (no ortogonalidad de 85 grados en una malla de
+// 39) y una malla con y+ < 1 revienta en pocas iteraciones.
+writePrecision  15;
 writeCompression off;
 timeFormat      general;
 timePrecision   6;
