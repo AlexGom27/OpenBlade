@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -135,8 +136,9 @@ class RemoteJob:
                  etiqueta: str = "caso") -> None:
         self.host = validar_host(host)
         limpia = re.sub(r"[^A-Za-z0-9_.-]", "_", etiqueta)
+        # El sufijo evita que dos lanzamientos en el mismo segundo compartan carpeta.
         self.job_dir = job_dir or (
-            f"{JOBS_DIR}/{time.strftime('%Y%m%d_%H%M%S')}_{limpia}")
+            f"{JOBS_DIR}/{time.strftime('%Y%m%d_%H%M%S')}_{limpia}_{secrets.token_hex(2)}")
         if not re.fullmatch(r"[A-Za-z0-9_./-]+", self.job_dir) or ".." in self.job_dir:
             raise RemoteError(f"Directorio de trabajo no valido: {self.job_dir}")
         self.offset = 0
@@ -161,7 +163,9 @@ class RemoteJob:
         """Sube el paquete con su ficha, sin lanzarlo."""
         from core.package import FICHA, build_ficha, sha256_file
 
-        r = _ssh(self.host, f"mkdir -p ~/{self.job_dir}")
+        # mkdir sin -p: si la carpeta ya existe es de otro trabajo y no se toca.
+        padre = os.path.dirname(self.job_dir)
+        r = _ssh(self.host, f"mkdir -p ~/{padre} && mkdir ~/{self.job_dir}")
         if r.returncode != 0:
             raise RemoteError(f"No se pudo crear el trabajo: {r.stderr.strip()[-200:]}")
 
@@ -239,6 +243,10 @@ class RemoteJob:
         # Solo el grupo de este trabajo: nunca afecta a otras campanas.
         self._run(f"kill -{sig} -- -{pgid}", timeout=20)
 
+    def terminar_limpio(self) -> None:
+        """Pide al solver que escriba y termine: las fuerzas ya no cambian."""
+        self._run("sed -i 's/^stopAt .*/stopAt writeNow;/' system/controlDict", timeout=30)
+
     def detener(self) -> None:
         self._senal("CONT")
         self._senal("TERM")
@@ -253,6 +261,89 @@ class RemoteJob:
         """Trae los resultados al caso local, donde los lee 'Ver Resultados'."""
         self._rsync(f"{self.host}:{self.job_dir}/", case_dir.rstrip("/") + "/",
                     EXCLUIR_BAJADA)
+
+
+    def limpiar(self) -> None:
+        """Lo que solo hacia falta para calcular; la ficha y los resultados quedan."""
+        self._run("rm -rf processor* mesh.msh", timeout=120)
+
+
+def instantanea(host: str, caso: str) -> Dict[str, Any]:
+    """Estado de un caso y del servidor. Allá basta el shell: nada se instala.
+
+    Las fuerzas se traen en crudo y se leen aqui con el lector unico.
+    """
+    from core.forces import ForceDataError, ForceHistory, parse_force_lines, remote_tail_command
+    from core.verdict import VENTANA, evaluate
+
+    host = validar_host(host)
+    if not re.fullmatch(r"[~A-Za-z0-9_./-]+", caso) or ".." in caso:
+        raise RemoteError(f"Caso no valido: {caso}")
+    r = _ssh(host, f"""cd {caso} 2>/dev/null || {{ echo sin-caso; exit 0; }}
+cat status.json 2>/dev/null; echo; echo ---F
+{remote_tail_command()}
+echo ---L; tail -c 6000 run.log 2>/dev/null
+echo ---E; grep -m1 '^endTime' system/controlDict 2>/dev/null
+echo ---S; cat /proc/loadavg; nproc; grep -E 'MemTotal|MemAvailable' /proc/meminfo
+df -k . | tail -1; pgrep -c 'foamRun|simpleFoam|pimpleFoam'; true""", timeout=40)
+    if r.returncode != 0:
+        raise RemoteError(r.stderr.strip()[-200:] or f"rc={r.returncode}")
+    salida = r.stdout
+    if salida.startswith("sin-caso"):
+        raise RemoteError(f"{caso} no existe en {host}")
+    estado_txt, _, resto = salida.partition("---F\n")
+    fuerzas_txt, _, resto = resto.partition("---L\n")
+    log, _, resto = resto.partition("---E\n")
+    fin_txt, _, servidor = resto.partition("---S\n")
+
+    try:
+        status = json.loads(estado_txt)
+    except ValueError:
+        status = {}
+    d: Dict[str, Any] = {"caso": os.path.basename(caso.rstrip("/")), "status": status,
+                         "error": status.get("error")}
+
+    d["t"] = None
+    tiempos = re.findall(r"^Time = ([-+0-9.eE]+)", log, re.M)
+    if tiempos:
+        d["t"] = float(tiempos[-1])
+    d["residuales"] = {m.group(1): float(m.group(2)) for m in re.finditer(
+        r"Solving for (\w+), Initial residual = ([-+0-9.eE]+)", log)}
+    m = re.search(r"endTime\s+([0-9.eE+\-]+);", fin_txt)
+    d["endTime"] = float(m.group(1)) if m else None
+    d["pct"] = 100.0 * d["t"] / d["endTime"] if d["t"] is not None and d["endTime"] else None
+
+    d["coeffs"] = None
+    d["veredicto"] = None
+    try:
+        columnas = parse_force_lines(fuerzas_txt.splitlines(), ("Time", "Cl", "Cd", "Cm"), caso)
+        if columnas["Time"]:
+            h = ForceHistory(columnas, [])
+            paso = max(1, len(h) // 400)
+            filas = list(zip(h.time, h.cd, h.cl))
+            d["coeffs"] = {"t": h.time[-1], "Cd": h.cd[-1], "Cl": h.cl[-1], "n": len(h),
+                           "serie": filas[-1::-paso][::-1]}
+            if len(h) >= 2 * VENTANA:
+                d["veredicto"] = evaluate(h).state
+    except ForceDataError:
+        pass
+
+    v = servidor.split("\n")
+    srv: Dict[str, Any] = {}
+    try:
+        carga = [float(x) for x in v[0].split()[:3]]
+        nucleos = int(v[1])
+        srv = {"carga": carga, "cores": nucleos, "cpu_pct": min(100.0, 100.0 * carga[0] / nucleos)}
+        mem = {l.split(":")[0]: int(l.split()[1]) for l in v[2:4]}
+        total, libre = mem["MemTotal"] / 2**20, mem["MemAvailable"] / 2**20
+        srv.update(ram_total_gb=total, ram_usada_gb=total - libre,
+                   ram_pct=100.0 * (total - libre) / total)
+        srv["disco_libre_gb"] = int(v[4].split()[3]) / 2**20
+        d["procesos"] = int(v[5])
+    except (IndexError, ValueError, KeyError):
+        d.setdefault("procesos", 0)
+    d["servidor"] = srv
+    return d
 
 
 class LogParser:

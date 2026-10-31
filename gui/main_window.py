@@ -14,17 +14,43 @@ import gmsh
 from .input_panel import InputPanel
 from .results_panel import ResultsPanel
 from .plots import ResidualPlot, AeroPlot, PressurePlot
-from .workers import MeshWorker, SweepWorker
+from .workers import MeshWorker
+from .jobs_panel import JobsPanel
 
 from core import paths
 from core.geometry import NacaGeometry
+from core.jobs import (ACTIVOS, CORRIENDO, DETENIDO, Dispatcher, Events, FINALES, FALLIDO, LOCAL,
+                       PENDIENTE, ensure_mesh, load_jobs, new_job)
 from core.meshing import NacaMesher
 import time
+
+
+class _EventosVentana(Events):
+    """Pasa lo que cuentan los trabajos al hilo de la interfaz."""
+
+    def __init__(self, ventana: "MainWindow") -> None:
+        self.ventana = ventana
+
+    def state(self, job) -> None:
+        self.ventana._job_changed.emit(job.id)
+
+    def log(self, job, texto) -> None:
+        self.ventana._job_log.emit(job.id, texto)
+
+    def residual(self, job, campo, valor, t) -> None:
+        self.ventana._job_residual.emit(job.id, campo, valor, t)
+
+    def force(self, job, nombre, valor) -> None:
+        self.ventana._job_force.emit(job.id, nombre, valor)
+
 
 class MainWindow(QMainWindow):
     # Señal para devolver al hilo de la GUI los datos leídos en segundo plano.
     _conv_ready = Signal(object)
-    _analysis_ready = Signal(object)
+    _job_changed = Signal(str)
+    _job_log = Signal(str, str)
+    _job_residual = Signal(str, str, float, float)
+    _job_force = Signal(str, str, str)
 
     log_signal = Signal(str)
 
@@ -66,10 +92,12 @@ class MainWindow(QMainWindow):
             
         self._has_unsaved_work = False
         self.mesh_worker = None
-        self.sweep_worker = None
-        self.sim_worker = None
         self._current_aoa = 0.0
         self._sim_running = False
+        self.dispatcher = Dispatcher(_EventosVentana(self))
+        self.current_job = None
+        # Historia en vivo de cada trabajo, para verlo aunque se seleccione despues.
+        self._vivo: Dict[str, Dict[str, Any]] = {}
         
         self.mesh_lock = QMutex()
         
@@ -79,14 +107,11 @@ class MainWindow(QMainWindow):
         self._last_cm = 0.0
 
         
-        # Inicializar Solver
-        from core.solver import SolverRunner
-        self.solver_runner = SolverRunner(case_dir=self.case_dir)
-        
         self.init_ui()
         # No se limpia al iniciar: borraría la malla y los resultados del usuario.
         # La limpieza de temporales ocurre al cerrar.
         self.log_signal.connect(self.log)
+        self._restore_jobs()
         
         # Temporizador para redibujado suave de gráficas (Evita saturación en Mac)
         self.plot_timer = QTimer(self)
@@ -145,7 +170,10 @@ class MainWindow(QMainWindow):
         self.verdict_banner.setWordWrap(True)
         self.verdict_banner.setVisible(False)
         right_layout.addWidget(self.verdict_banner)
-        self._analysis_ready.connect(self._show_analysis)
+        self._job_changed.connect(self._on_job_changed)
+        self._job_log.connect(self._on_job_log)
+        self._job_residual.connect(self._on_job_residual)
+        self._job_force.connect(self._on_job_force)
         
         self.tabs = QTabWidget()
         self.tabs.setElideMode(Qt.ElideNone)
@@ -159,6 +187,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.res_plot, "Residuales")
         self.tabs.addTab(self.aero_plot, "Cl / Cd")
         self.tabs.addTab(self.cp_plot, "Presión (Cp)")
+        self.jobs_panel = JobsPanel()
+        self.jobs_panel.job_selected.connect(self._select_job)
+        self.jobs_panel.stop_requested.connect(self._stop_job)
+        self.jobs_panel.remove_requested.connect(self._remove_job)
+        self.jobs_panel.machines_changed.connect(self._sync_machines)
+        self.tabs.addTab(self.jobs_panel, "Trabajos")
 
         # Panel de monitorización remota: estado de la simulación y carga del
         # servidor. Requiere una clave SSH sin contraseña al equipo remoto;
@@ -331,66 +365,180 @@ class MainWindow(QMainWindow):
                 self.log(f"Aviso visualización: {e}")
 
     def on_run_sim(self) -> None:
-        if self._sim_running:
-            self.log("⚠️ Ya hay una simulación en curso. Deténla antes de lanzar otra.")
-            return
-
+        """Envia un paquete. Cada clic es un trabajo nuevo con su propia carpeta."""
         p = self._safe_get_params()
         if not p: return
-        
-        # Verificar si es modo barrido
+
+        destino = self._destino(p)
+        if destino is None:
+            return
         if "Barrido" in p.get("analysis_mode", ""):
-            self._run_sweep(p)
+            self._run_sweep(p, destino)
             return
-        
-        en_servidor = p.get("exec_mode") == "server"
-        if en_servidor and not self._check_server(p):
-            return
-        attach_dir = self._ask_reattach(p) if en_servidor else None
-        if attach_dir is False:
-            return
+        self._lanzar(new_job(p, *destino))
 
-        msh_file = paths.mesh_path(p['naca'] or "custom")
-        if not attach_dir and not os.path.exists(msh_file):
-            self.log("❌ Error: Debes generar la malla antes de iniciar el análisis.")
-            return
+    def _destino(self, p: Dict[str, Any]):
+        """(maquina, procesos) del paquete; None si no se puede enviar."""
+        modo = p.get("exec_mode")
+        if modo == "server":
+            if not self._check_server(p):
+                return None
+            self.jobs_panel.add_machine(p["server_host"], int(p.get("server_nproc", 4)))
+            return p["server_host"], int(p.get("server_nproc", 4))
+        if modo == "repartir":
+            if not self.jobs_panel.machines():
+                self.log("❌ Marca al menos una máquina en la pestaña Trabajos.")
+                self.tabs.setCurrentWidget(self.jobs_panel)
+                return None
+            return "", 0
+        return LOCAL, int(p.get("server_nproc", 4))
 
+    def _sync_machines(self) -> None:
+        marcadas = {m.host for m in self.jobs_panel.machines()}
+        self.dispatcher.set_machines(
+            [m for m in self.jobs_panel.machines()] +
+            [m for m in self.jobs_panel.all_machines() if m.host not in marcadas and m.host != LOCAL])
+
+    def _lanzar(self, job) -> None:
         self._has_unsaved_work = True
-        self.log(f"Iniciando simulación CFD (Modo Rendimiento)...")
-        if hasattr(self, 'res_plot'):
-            self.res_plot.reset()
+        self.jobs_panel.add_job(job)
+        self._sync_machines()
+        self.dispatcher.jobs[job.id] = job
+        self._select_job(job.id)
+        self.dispatcher.submit(job)
 
-        from .workers import RemoteSimWorker, SimWorker
-        self._current_aoa = float(p.get("aoa", 0.0))
-        self._sim_transient = "pimpleFoam" in p.get("regime", "")
-        self.verdict_banner.setVisible(False)
-        self._sim_running = True
-        self.input_panel.btn_run.setEnabled(False)
-        self.input_panel.btn_stop_sim.setVisible(True)
-        self.input_panel.btn_stop_sim.setEnabled(True)
-        self.input_panel.btn_pause_sim.setVisible(True)
-        self.input_panel.btn_pause_sim.setEnabled(True)
-        self.input_panel.btn_pause_sim.setText("⏸️ Pausar")
-        self._paused = False
+    def _restore_jobs(self) -> None:
+        """Al abrir: lista lo anterior y vuelve a seguir lo que sigue corriendo."""
+        ultimo = None
+        for job in load_jobs()[-200:]:
+            if job.state == PENDIENTE or (job.state in ACTIVOS and not job.remote_dir):
+                # Se cerro la ventana antes de que saliera de esta maquina.
+                job.state, job.error = DETENIDO, job.error or "La ventana se cerró antes de enviarlo"
+                job.save()
+            self.dispatcher.jobs[job.id] = job
+            self.jobs_panel.add_job(job)
+            ultimo = job
+            if job.state in ACTIVOS:
+                self.log(f"🔌 {job.label} seguía corriendo en {job.host}: se vuelve a seguir.")
+                self.dispatcher.attach(job)
+        self._sync_machines()
+        if ultimo is not None:
+            self._select_job(ultimo.id)
+
+    def _select_job(self, job_id: str) -> None:
+        """Lo que muestra la ventana pasa a ser este trabajo."""
+        job = self.dispatcher.jobs.get(job_id)
+        if job is None:
+            return
+        self.current_job = job
+        self.case_dir = job.case_dir
+        os.makedirs(self.case_dir, exist_ok=True)
+        self.results_panel.case_dir = self.case_dir
+        self.jobs_panel.select_row(job_id)
+        self._current_aoa = float(job.params.get("aoa", 0.0))
+        self._sim_transient = job.transient
+        self._sim_end_time = (float(job.params.get("end_time", 0.5)) if job.transient
+                              else float(job.params.get("max_iters", 500)))
+        self._sim_t0 = job.started or time.time()
         self._sim_steps = 0
         self._last_t = -1.0
-        self._sim_t0 = time.time()
-        self._sim_end_time = (float(p.get("end_time", 0.5)) if self._sim_transient
-                              else float(p.get("max_iters", 500)))
-        self.input_panel.progress_label.setVisible(True)
-        self.input_panel.progress_label.setText("Iniciando...")
-        if en_servidor:
-            self.sim_worker = RemoteSimWorker(p, msh_file, self.case_dir, attach_dir)
-            self.sim_worker.job_started.connect(self._on_remote_job_started)
+        self._paused = False
+        self.res_plot.reset()
+        self.res_plot.case_dir = self.case_dir
+        self.res_plot._end_time = None
+        vivo = self._vivo.get(job_id, {})
+        for campo, valor, t in vivo.get("residuales", ()):
+            self.res_plot.update_plot(campo, valor, t)
+        if job.state in FINALES and job.analysis:
+            self._show_analysis((job.analysis, job.rc or 0))
+        elif job.state in FINALES:
+            self._set_banner("SIN DATOS", f"❓ {job.state}: {job.error or 'sin resultados'}")
         else:
-            self.sim_worker = SimWorker(self.solver_runner, p, msh_file)
-        self.sim_worker.log_msg.connect(self.log)
-        self.sim_worker.residual_data.connect(self.on_residual_data)
-        self.sim_worker.force_data.connect(self.on_force_data)
-        self.sim_worker.finished.connect(self.on_sim_done)
-        self.sim_worker.error.connect(self.log)
-        self.sim_worker.start_sim()
-    
+            self.verdict_banner.setVisible(False)
+            self._last_cl = self._last_cd = self._last_cm = 0.0
+            self.aero_plot.update_plots([], [], [], [], [])
+            if job.group:
+                self._update_polar(job.group)
+        self._refresh_run_controls()
+
+    def _refresh_run_controls(self) -> None:
+        job = self.current_job
+        activo = job is not None and (job.state in ACTIVOS or job.state == PENDIENTE)
+        corriendo = job is not None and job.state == CORRIENDO
+        panel = self.input_panel
+        panel.btn_stop_sim.setVisible(activo)
+        panel.btn_stop_sim.setEnabled(activo)
+        panel.btn_pause_sim.setVisible(corriendo)
+        panel.btn_pause_sim.setText("▶️ Reanudar" if getattr(self, "_paused", False) else "⏸️ Pausar")
+        grupo = job.group if job is not None else ""
+        panel.btn_stop_sweep.setVisible(any(
+            j.group == grupo and j.state not in FINALES for j in self.dispatcher.jobs.values())
+            if grupo else False)
+        panel.progress_label.setVisible(activo)
+        if activo and job.state != CORRIENDO:
+            panel.progress_label.setText(f"{job.label}: {job.state}")
+
+    def _on_job_changed(self, job_id: str) -> None:
+        job = self.dispatcher.jobs.get(job_id)
+        if job is None:
+            return
+        self.jobs_panel.update_job(job)
+        if job.group and job.state in FINALES:
+            # El barrido se presenta como polar, no como el ultimo punto.
+            self._update_polar(job.group)
+        if job is self.current_job:
+            self._sim_t0 = job.started or self._sim_t0
+            if job.state in FINALES and not job.group:
+                if job.analysis:
+                    self._show_analysis((job.analysis, job.rc or 0))
+                else:
+                    self._set_banner("SIN DATOS", f"❓ {job.state}: {job.error or 'sin resultados'}")
+            self._refresh_run_controls()
+            if job.state == CORRIENDO and job.step:
+                self.log(f"🖥️ {job.label}: {job.step}")
+
+    def _on_job_log(self, job_id: str, texto: str) -> None:
+        job = self.dispatcher.jobs.get(job_id)
+        if job is not None:
+            self.log(f"[{job.label}] {texto}")
+
+    def _on_job_residual(self, job_id: str, campo: str, valor: float, t: float) -> None:
+        serie = self._vivo.setdefault(job_id, {}).setdefault("residuales", [])
+        serie.append((campo, valor, t))
+        if len(serie) > 40000:
+            del serie[:len(serie) - 40000]
+        if self.current_job is not None and job_id == self.current_job.id:
+            self.on_residual_data(campo, valor, t)
+
+    def _on_job_force(self, job_id: str, nombre: str, valor: str) -> None:
+        if self.current_job is not None and job_id == self.current_job.id:
+            self.on_force_data(nombre, valor)
+
+    def _stop_job(self, job_id: str) -> None:
+        def trabajo():
+            try:
+                self.dispatcher.stop(job_id)
+            except Exception as e:  # noqa: BLE001
+                self.log_signal.emit(f"⚠️ No se pudo detener: {e}")
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _remove_job(self, job_id: str) -> None:
+        job = self.dispatcher.jobs.get(job_id)
+        if job is None:
+            return
+        if job.state not in FINALES:
+            self.log("⚠️ Ese trabajo sigue activo: deténlo antes de borrarlo.")
+            return
+        boton = QMessageBox.question(self, "Borrar trabajo",
+                                     f"¿Borrar la carpeta local de {job.label}?\n{job.folder}")
+        if boton != QMessageBox.Yes:
+            return
+        self.jobs_panel.remove_job(job_id)
+        self.dispatcher.remove_local(job_id)
+        if job is self.current_job:
+            self.current_job = None
+
     def _check_server(self, p: Dict[str, Any]) -> bool:
         from core.remote_runner import RemoteError, validar_host
         try:
@@ -401,60 +549,54 @@ class MainWindow(QMainWindow):
         self.input_panel.remember_server(p["server_host"])
         return True
 
-    def _ask_reattach(self, p: Dict[str, Any]):
-        """Directorio del trabajo a retomar, None para uno nuevo, False si se cancela."""
-        import json
-        ruta = paths.temp_path("remote_job.json")
-        try:
-            with open(ruta) as f:
-                previo = json.load(f)
-        except (OSError, ValueError):
-            return None
-        if previo.get("host") != p.get("server_host"):
-            return None
-        boton = QMessageBox.question(
-            self, "Trabajo en el servidor",
-            f"Hay un trabajo sin descargar en {previo['host']}:\n"
-            f"{previo['job_dir']}\n\n¿Reconectar con él? "
-            "Con «No» se lanza uno nuevo y el anterior sigue en el servidor.",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Yes)
-        if boton == QMessageBox.Cancel:
-            return False
-        if boton == QMessageBox.Yes:
-            return previo["job_dir"]
-        os.remove(ruta)
-        return None
+    def _run_sweep(self, p: Dict[str, Any], destino) -> None:
+        """Un paquete por angulo: se reparten y la polar se completa al terminar cada uno."""
+        import secrets
+        angulos, a = [], float(p.get("aoa_min", -4.0))
+        while a <= float(p.get("aoa_max", 24.0)) + 1e-6:
+            angulos.append(round(a, 2))
+            a += float(p.get("aoa_step", 2.0))
+        grupo = f"polar_{secrets.token_hex(3)}"
+        self.log(f"📊 Barrido: {len(angulos)} paquetes, de {angulos[0]}° a {angulos[-1]}°")
+        self.aero_plot.update_plots([], [], [], [], [])
+        for angulo in angulos:
+            q = dict(p, aoa=angulo, regime="Estacionario (simpleFoam)")
+            self._lanzar(new_job(q, *destino, group=grupo))
 
-    def _on_remote_job_started(self, host: str, job_dir: str) -> None:
-        self.log(f"🖥️ Trabajo en {host}:{job_dir}")
-        if self.remote_panel is not None:
-            self.remote_panel.watch(host, "~/" + job_dir)
-
-    def _run_sweep(self, p: Dict[str, Any]) -> None:
-        """Ejecuta un barrido paramétrico de ángulos de ataque (polar)."""
-        en_servidor = p.get("exec_mode") == "server"
-        if en_servidor and not self._check_server(p):
+    def _update_polar(self, grupo: str) -> None:
+        """La polar con lo que ya termino, cada punto con su veredicto."""
+        from collections import Counter
+        from core.verdict import CONVERGIDO, DIVERGIDO, NO_CONVERGIDO, SIN_DATOS
+        trabajos = sorted((j for j in self.dispatcher.jobs.values() if j.group == grupo),
+                          key=lambda j: float(j.params.get("aoa", 0.0)))
+        hechos = [j for j in trabajos if j.state in FINALES]
+        aoa, cl, cd, cm, estados = [], [], [], [], []
+        for j in hechos:
+            v = (j.analysis or {}).get("verdict") or {}
+            estado = v.get("state", SIN_DATOS)
+            valido = estado in (CONVERGIDO, NO_CONVERGIDO) and v.get("cl") is not None
+            aoa.append(float(j.params.get("aoa", 0.0)))
+            estados.append(estado)
+            cl.append(v["cl"] if valido else None)
+            cd.append(v["cd"] if valido else None)
+            cm.append(v["cm"] if valido else None)
+        self.aero_plot.update_plots(aoa, cl, cd, cm, estados)
+        cuenta = Counter(estados)
+        resumen = ", ".join(f"{cuenta[e]} {e}" for e in
+                            (CONVERGIDO, NO_CONVERGIDO, DIVERGIDO, SIN_DATOS) if cuenta[e])
+        faltan = len(trabajos) - len(hechos)
+        if faltan:
+            self._set_banner("EN CURSO", f"📊 Barrido: {resumen or 'sin resultados aún'}; "
+                                         f"faltan {faltan} de {len(trabajos)}.")
             return
-        self._has_unsaved_work = True
-        self._sim_running = True
-        self.input_panel.btn_run.setEnabled(False)
-        self.input_panel.btn_stop_sim.setVisible(False)
-        self.log("📊 Iniciando barrido de ángulos...")
-        self.input_panel.btn_stop_sweep.setVisible(True)
-        self.input_panel.btn_stop_sweep.setEnabled(True)
-        if hasattr(self, 'res_plot'):
-            self.res_plot.reset()
-        
-        from .workers import RemoteSweepWorker, SweepWorker
-        clase = RemoteSweepWorker if en_servidor else SweepWorker
-        self.sweep_worker = clase(p, self.case_dir)
-        self.sweep_worker.log_msg.connect(self.log)
-        self.sweep_worker.error.connect(self._on_sweep_error)
-        self.sweep_worker.progress.connect(self._on_sweep_progress)
-        self.sweep_worker.finished.connect(self._on_sweep_done)
-        self.sweep_worker.mesh_generated.connect(self._on_sweep_mesh)
-        self.sweep_worker.start()
-    
+        malos = len(estados) - cuenta[CONVERGIDO]
+        self._set_banner(CONVERGIDO if not malos else NO_CONVERGIDO,
+                         f"📊 Barrido: {resumen}."
+                         + (" Los puntos huecos no convergieron y los divergidos no se dibujan."
+                            if malos else ""))
+        self.log(f"📊 Barrido terminado: {resumen}")
+        self.tabs.setCurrentWidget(self.aero_plot)
+
     def _on_sweep_mesh(self, vtk_file: str) -> None:
         """Actualiza la vista 3D durante un barrido."""
         if os.path.exists(vtk_file):
@@ -506,7 +648,10 @@ class MainWindow(QMainWindow):
                  f"acople={p['fsi_coupling']}")
 
         try:
-            runner = FsiRunner(self.case_dir, p, log=self.log)
+            # Carpeta propia: FsiRunner reescribe el caso que recibe.
+            trabajo = new_job(p, LOCAL, label="fsi")
+            os.makedirs(trabajo.case_dir, exist_ok=True)
+            runner = FsiRunner(trabajo.case_dir, p, log=self.log)
             result = runner.run()
         except Exception as e:  # noqa: BLE001
             self.log(f"❌ Error FSI: {e}")
@@ -528,48 +673,19 @@ class MainWindow(QMainWindow):
         self._reset_run_state()
 
     def on_pause_sim(self) -> None:
-        """Pausa o reanuda el contenedor del solver sin perder el estado.
-
-        Se usa `docker pause` / `docker unpause`, que envían SIGSTOP/SIGCONT
-        al proceso dentro del contenedor. A diferencia de detener, conserva el
-        campo de flujo y los ficheros de tiempo ya escritos: reanudar continúa
-        desde donde iba.
-        """
-        import subprocess as sp
-        from .workers import RemoteSimWorker
-
-        if isinstance(self.sim_worker, RemoteSimWorker):
-            pausar = not getattr(self, "_paused", False)
-            try:
-                self.sim_worker.set_paused(pausar)
-            except Exception as e:  # noqa: BLE001
-                self.log(f"⚠️ No se pudo cambiar la pausa en el servidor: {e}")
-                return
-            self._paused = pausar
-            self.input_panel.btn_pause_sim.setText("▶️ Reanudar" if pausar else "⏸️ Pausar")
-            self.log("⏸️ Pausada en el servidor." if pausar else "▶️ Reanudada en el servidor.")
+        """Pausa o reanuda el trabajo a la vista sin perder su estado."""
+        job = self.current_job
+        if job is None:
             return
-
-        if getattr(self, "_paused", False):
-            action, label = "unpause", "⏸️ Pausar"
-            self.log("▶️ Reanudando simulación...")
-        else:
-            action, label = "pause", "▶️ Reanudar"
-            self.log("⏸️ Pausando simulación...")
-
+        pausar = not getattr(self, "_paused", False)
         try:
-            ids = sp.run(["docker", "ps", "-q", "--filter",
-                          "ancestor=opencfd/openfoam-default"],
-                         capture_output=True, text=True, timeout=15).stdout.split()
-            for cid in ids:
-                sp.run(["docker", action, cid], capture_output=True,
-                       text=True, timeout=15)
-            self._paused = not getattr(self, "_paused", False)
-            self.input_panel.btn_pause_sim.setText(label)
-            self.log(f"   {'Pausada' if self._paused else 'En marcha'} "
-                     f"({len(ids)} contenedor(es)).")
+            self.dispatcher.set_paused(job.id, pausar)
         except Exception as e:  # noqa: BLE001
-            self.log(f"⚠️ No se pudo {'pausar' if action == 'pause' else 'reanudar'}: {e}")
+            self.log(f"⚠️ No se pudo cambiar la pausa: {e}")
+            return
+        self._paused = pausar
+        self.input_panel.btn_pause_sim.setText("▶️ Reanudar" if pausar else "⏸️ Pausar")
+        self.log("⏸️ Pausada." if pausar else "▶️ Reanudada.")
 
     def _update_progress(self, t_current: float, n_steps: int = 0) -> None:
         """Rellena el panel de progreso con tiempo, porcentaje y ritmo.
@@ -616,32 +732,21 @@ class MainWindow(QMainWindow):
         )
 
     def on_stop_sim(self) -> None:
-        """Detiene una simulación de punto único en curso."""
-        if self.sim_worker is None:
+        """Detiene el trabajo a la vista."""
+        if self.current_job is None:
             return
-        self.log("⏳ Deteniendo simulación...")
-        try:
-            self.sim_worker.stop()
-        except Exception as e:  # noqa: BLE001
-            self.log(f"⚠️ No se pudo detener: {e}")
-        from .workers import RemoteSimWorker
-        if not isinstance(self.sim_worker, RemoteSimWorker):
-            self.solver_runner.stop()
+        self.log(f"⏳ Deteniendo {self.current_job.label}...")
         self.input_panel.btn_stop_sim.setEnabled(False)
+        self._stop_job(self.current_job.id)
 
     def on_stop_sweep(self) -> None:
-        if hasattr(self, 'sweep_worker') and self.sweep_worker:
-            self.sweep_worker.request_stop()
-            self.log("⏳ Solicitando detención del barrido...")
-            self.input_panel.btn_stop_sweep.setEnabled(False)
-    
-    def _on_sweep_progress(self, current: int, total: int) -> None:
-        self.log(f"  Progreso: {current}/{total}")
-    
-    def _on_sweep_error(self, message: str) -> None:
-        """Un barrido fallido también debe liberar la UI."""
-        self.log(f"❌ Error en barrido: {message}")
-        self._reset_run_state()
+        """Detiene todos los paquetes del barrido a la vista."""
+        grupo = self.current_job.group if self.current_job else ""
+        self.log("⏳ Deteniendo el barrido...")
+        self.input_panel.btn_stop_sweep.setEnabled(False)
+        for job in list(self.dispatcher.jobs.values()):
+            if grupo and job.group == grupo and job.state not in FINALES:
+                self._stop_job(job.id)
 
     def _reset_run_state(self) -> None:
         self._sim_running = False
@@ -651,41 +756,6 @@ class MainWindow(QMainWindow):
         self.input_panel.btn_stop_sim.setVisible(False)
         self.input_panel.btn_stop_sim.setEnabled(True)
         self.input_panel.btn_pause_sim.setVisible(False)
-
-    def _on_sweep_done(self, aoa_list, cl_list, cd_list, cm_list, estados) -> None:
-        from collections import Counter
-        from core.verdict import CONVERGIDO, DIVERGIDO, NO_CONVERGIDO, SIN_DATOS
-        cuenta = Counter(estados)
-        resumen = ", ".join(f"{cuenta[e]} {e}" for e in
-                            (CONVERGIDO, NO_CONVERGIDO, DIVERGIDO, SIN_DATOS) if cuenta[e])
-        self.log(f"📊 Barrido terminado: {resumen or 'sin puntos'}")
-        self._reset_run_state()
-        malos = len(estados) - cuenta[CONVERGIDO]
-        self._set_banner(CONVERGIDO if estados and not malos else NO_CONVERGIDO,
-                         f"Barrido: {resumen or 'sin puntos'}"
-                         + (". Los puntos huecos no convergieron y los divergidos no "
-                            "se dibujan." if malos else "."))
-        if hasattr(self, 'aero_plot') and aoa_list:
-            self.aero_plot.update_plots(aoa_list, cl_list, cd_list, cm_list, estados)
-            self.tabs.setCurrentWidget(self.aero_plot)
-            self.log("📈 Gráfica polar actualizada en pestaña Cl/Cd.")
-
-    def on_sim_done(self, code: int) -> None:
-        self._reset_run_state()
-        self.results_panel.setEnabled(True)
-        transitorio = getattr(self, "_sim_transient", False)
-        trabajo_remoto = getattr(self.sim_worker, "job", None)
-        host = trabajo_remoto.host if trabajo_remoto else "local"
-        job_dir = trabajo_remoto.job_dir if trabajo_remoto else ""
-        error = getattr(self.sim_worker, "server_error", "")
-
-        # Leer la malla puede tardar: fuera del hilo de la interfaz.
-        def trabajo():
-            from core.verdict import analyze_case
-            self._analysis_ready.emit(
-                (analyze_case(self.case_dir, transitorio, code, host, job_dir, error), code))
-
-        threading.Thread(target=trabajo, daemon=True).start()
 
     def _set_banner(self, estado: str, texto: str) -> None:
         from core.verdict import CONVERGIDO, DIVERGIDO, NO_CONVERGIDO
@@ -893,7 +963,7 @@ class MainWindow(QMainWindow):
         """Calcula y dibuja la distribución de Cp sobre el perfil."""
         try:
             from core.postprocessing import PostProcessor
-            p = self.input_panel.get_params()
+            p = self.current_job.params if self.current_job else self.input_panel.get_params()
             pp = PostProcessor(self.case_dir)
             data = pp.get_cp_on_surface(u_inf=float(p.get("u_inlet", 15.0)))
             if not data:
@@ -905,15 +975,13 @@ class MainWindow(QMainWindow):
             self.log(f"⚠️ No se pudo calcular Cp: {e}")
 
     def on_results(self) -> None:
-        p = self._safe_get_params()
-        is_transient = False
-        if p and "Transitorio" in p.get("regime", ""):
-            is_transient = True
+        is_transient = self.current_job.transient if self.current_job else False
         if self.results_panel.load_results(is_transient=is_transient):
             self._refresh_cp_plot()
 
     def generate_report(self) -> None:
-        p = self._safe_get_params()
+        job = self.current_job
+        p = job.params if job is not None else self._safe_get_params()
         if not p: return
         
         from core.report_generator import generate_pdf_report
@@ -939,8 +1007,9 @@ class MainWindow(QMainWindow):
             self.log(f"Aviso al guardar imágenes para informe: {e}")
             
         from core.verdict import analyze_case
-        analisis = analyze_case(self.case_dir, "pimpleFoam" in p.get("regime", ""),
-                                getattr(self, "_last_code", 0))
+        analisis = (job.analysis if job is not None and job.analysis else
+                    analyze_case(self.case_dir, "pimpleFoam" in p.get("regime", ""),
+                                 getattr(self, "_last_code", 0)))
         
         filename, _ = QFileDialog.getSaveFileName(self, "Guardar Informe", "informe_cfd.pdf", "PDF Files (*.pdf)")
         if filename:
@@ -1027,12 +1096,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"No se pudo abrir el proyecto:\n{e}")
 
     def cleanup(self) -> None:
-        """Limpieza de archivos temporales y resultados residuales.
+        """Limpieza de archivos temporales.
 
-        Importante: NO borra `perfil_*.msh|vtk|stl`. El usuario puede tener una
-        malla generada que tarda minutos; al abrir la app se destruía sin aviso.
+        NO borra mallas ni resultados. Antes vaciaba postProcessing y los tiempos
+        del caso al cerrar: cerrar la ventana perdia la corrida.
         """
-        import shutil
         temp_files = [
             "temp_params_mesh.json", "temp_params_solve.json", "temp_params_sweep.json",
             "temp_geom.vtk", "debug.msh", "debug.vtk", "vtk_errors.log", "debug_gmsh.log",
@@ -1049,16 +1117,6 @@ class MainWindow(QMainWindow):
                 try: os.remove(f)
                 except: pass
 
-        # Limpiar resultados de OpenFOAM previos
-        if os.path.exists(self.case_dir):
-            for item in os.listdir(self.case_dir):
-                item_path = os.path.join(self.case_dir, item)
-                # Borrar carpetas de tiempo (números) y postProcessing
-                if (item.replace(".", "").isdigit() and item != "0") or item == "postProcessing":
-                    try: 
-                        if os.path.isdir(item_path): shutil.rmtree(item_path)
-                        else: os.remove(item_path)
-                    except: pass
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Asegura que no queden procesos o archivos bloqueados al cerrar."""
@@ -1076,29 +1134,14 @@ class MainWindow(QMainWindow):
                 return
 
         self.log("🛑 Cerrando aplicación...")
-        # Detener todo lo que pueda quedar vivo: QProcess del solver, hilos y Docker.
-        if self.sim_worker is not None:
+        # Los trabajos siguen en su maquina; al abrir de nuevo se retoman.
+        self.dispatcher.detach_all()
+        if self.mesh_worker is not None:
             try:
-                # Un trabajo de servidor sigue corriendo: cerrar la app no lo mata.
-                if hasattr(self.sim_worker, "detach"):
-                    self.sim_worker.detach()
-                    self.sim_worker.wait(8000)
-                else:
-                    self.sim_worker.stop()
+                # Cortar primero el subproceso: wait() solo no lo mata.
+                self.mesh_worker.cancel()
+                self.mesh_worker.wait(5000)
             except Exception:
                 pass
-        if self.solver_runner:
-            self.solver_runner.stop()
-        for worker in (self.mesh_worker, self.sweep_worker):
-            if worker is not None:
-                try:
-                    # Cortar primero el subproceso: wait() solo no lo mata.
-                    if hasattr(worker, "cancel"):
-                        worker.cancel()
-                    else:
-                        worker.request_stop()
-                    worker.wait(5000)
-                except Exception:
-                    pass
         self.cleanup()
         event.accept()

@@ -14,13 +14,16 @@ OpenBlade 2D es un entorno de simulación CFD (Computational Fluid Dynamics) par
 
 ### Características principales
 - Generación automática de perfiles NACA (4 dígitos) o importación de perfiles personalizados
-- Mallado estructurado con hexaedros, tetraedros o malla mixta
+- Malla C estructurada de hexaedros, con y+ estimado antes de calcular y medido después
 - Solvers estacionarios (simpleFoam) y transitorios (pimpleFoam)
 - Inicialización de flujo potencial (potentialFoam)
 - Modelos de turbulencia: k-ω SST, k-ε, Spalart-Allmaras, k-ω SST-LM (transición)
 - Visualización 3D interactiva de resultados (campos de presión/velocidad)
 - Barrido paramétrico de ángulo de ataque con curvas Cl vs α, Cd vs α
 - Monitor de convergencia en tiempo real (residuos)
+- Veredicto en cada corrida: CONVERGIDO, NO CONVERGIDO o DIVERGIDO, con media y amplitud de Cl, Cd y Cm
+- Ficha por caso con las huellas sha256 de la malla y de los diccionarios, versiones y checkMesh
+- Cola de trabajos: cada paquete tiene su carpeta y se reparte entre Local y varios servidores
 
 ---
 
@@ -29,7 +32,7 @@ OpenBlade 2D es un entorno de simulación CFD (Computational Fluid Dynamics) par
 | Software | Versión mínima | Propósito |
 |---|---|---|
 | Python | 3.10+ | Motor de la aplicación |
-| Docker Desktop | 4.0+ | Ejecutar OpenFOAM sin compilar |
+| Docker Desktop | 4.0+ | Ejecutar OpenFOAM en Local sin compilar (no hace falta si solo se usan servidores) |
 | Git | 2.0+ | Descargar el código fuente |
 
 ---
@@ -50,9 +53,11 @@ brew install python@3.12
 2. Abrir el archivo `.dmg` e instalar arrastrando a Aplicaciones
 3. Abrir Docker Desktop y esperar a que la ballena 🐳 esté quieta en la barra superior
 
-### 3. Descargar la imagen de OpenFOAM
+### 3. Construir la imagen de OpenFOAM
+
+Es OpenFOAM 12, la misma versión que usan los servidores. Se construye una sola vez, después del paso 4.
 ```bash
-docker pull opencfd/openfoam-default
+docker build --platform linux/amd64 -t openblade/openfoam12:20250206 -f docker/Dockerfile.openfoam12 docker
 ```
 
 ### 4. Descargar OpenBlade 2D
@@ -100,9 +105,11 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-### 3. Descargar la imagen de OpenFOAM
+### 3. Construir la imagen de OpenFOAM
+
+Es OpenFOAM 12, la misma versión que usan los servidores. Se construye una sola vez, después del paso 4.
 ```bash
-docker pull opencfd/openfoam-default
+docker build --platform linux/amd64 -t openblade/openfoam12:20250206 -f docker/Dockerfile.openfoam12 docker
 ```
 
 ### 4. Descargar OpenBlade 2D
@@ -140,9 +147,11 @@ python3 main.py
 3. Si pide activar WSL 2, seguir las instrucciones en pantalla
 4. Abrir Docker Desktop y esperar a que esté listo (icono verde)
 
-### 3. Descargar la imagen de OpenFOAM
+### 3. Construir la imagen de OpenFOAM
+
+Es OpenFOAM 12, la misma versión que usan los servidores. Se construye una sola vez, después del paso 4.
 ```powershell
-docker pull opencfd/openfoam-default
+docker build --platform linux/amd64 -t openblade/openfoam12:20250206 -f docker/Dockerfile.openfoam12 docker
 ```
 
 ### 4. Descargar OpenBlade 2D
@@ -175,21 +184,40 @@ En la sección **Ejecución** del panel elige *Servidor (SSH)*, escribe `usuario
 
 La primera vez en cada computadora, pulsa **Configurar acceso…** y escribe la contraseña del servidor: se instala una clave SSH y la contraseña no se guarda (Mac y Linux; en Windows, desde WSL).
 
-Requisitos: `rsync` en esta máquina, y `rsync`, `python3` y OpenFOAM en el servidor. Los trabajos quedan en `~/openblade_jobs/`. Cerrar la app no los detiene: al volver a iniciar en modo servidor se ofrece reconectar.
+Requisitos: `rsync` en esta máquina, y `rsync`, `python3` y OpenFOAM en el servidor. Los trabajos quedan en `~/openblade_jobs/`. Cerrar la app no los detiene: al abrirla de nuevo los retoma.
+
+## Trabajos y reparto
+
+Cada **Iniciar Análisis** envía un paquete con su propia carpeta en `~/.openblade/jobs/`; se puede lanzar otro sin esperar al anterior. La pestaña **Trabajos** muestra todos, con su máquina, estado y veredicto; con doble clic se ve uno en la ventana.
+
+Con **Correr en: Repartir entre máquinas**, cada paquete va a la primera máquina marcada que esté libre, sin pasar de los procesos y trabajos simultáneos que indique su fila. Un barrido de ángulos envía un paquete por ángulo y la polar se completa a medida que terminan.
+
+Los mismos parámetros dan el mismo archivo de malla, y cada máquina verifica la ficha antes de calcular: un paquete alterado se rechaza. El mismo paquete con los mismos procesos da fuerzas idénticas en Local y en los servidores.
+
+## Sin ventana
+
+```bash
+python3 -m core.cli correr --host usuario@host --procesos 8 aoa=8 reynolds=6e6
+```
+
+```bash
+python3 -m core.cli control --hosts usuario@a,usuario@b --procesos 8
+```
+
+`control` corre el caso de control en cada máquina y evalúa sus 8 compuertas (ver `docs/ESTRATEGIA_PROGRAMA.md`). Las dos órdenes usan las mismas funciones que la ventana.
 
 ## 🚀 Uso Rápido
 
 ### Flujo de trabajo recomendado:
 
 ```
-1. Abrir Docker Desktop (esperar a que esté listo)
+1. Si vas a correr en Local, abrir Docker Desktop y esperar a que esté listo
 2. Ejecutar: python3 main.py
-3. Configurar perfil NACA y condiciones de frontera
-4. Pulsar "1. Construir Geometría"
-5. Pulsar "2. Generar Malla"
-6. Pulsar "🌊 Inicializar Flujo Potencial" (recomendado)
-7. Pulsar "3. Iniciar Análisis"
-8. Pulsar "4. Ver Resultados"
+3. Configurar perfil, condiciones de frontera y dónde correr
+4. Pulsar "Generar Malla" para verla (opcional: el análisis la genera si no existe)
+5. Pulsar "Iniciar Análisis"
+6. Leer el veredicto en la franja superior antes de usar los números
+7. Pulsar "Ver Resultados"
 ```
 
 ### Parámetros recomendados para primera simulación:
@@ -201,7 +229,7 @@ Requisitos: `rsync` en esta máquina, y `rsync`, `python3` y OpenFOAM en el serv
 | Velocidad de entrada | 15 m/s |
 | Régimen | Estacionario (simpleFoam) |
 | Modelo de turbulencia | k-Omega SST |
-| Tipo de elemento | Hexaedros |
+| Iteraciones máximas | 20000 (es un tope: termina antes si las fuerzas ya no cambian) |
 
 ---
 
@@ -211,7 +239,9 @@ Requisitos: `rsync` en esta máquina, y `rsync`, `python3` y OpenFOAM en el serv
 |---|---|
 | `docker: command not found` | Abre Docker Desktop y espera a que esté listo |
 | `ERROR: Comando 'docker' no encontrado` | Docker Desktop no está abierto o no está instalado |
-| Residuos divergen explosivamente | Usa "Inicializar Flujo Potencial" antes del análisis |
+| El veredicto dice DIVERGIDO | Revisa Tu y νt/ν de entrada y la malla; esos coeficientes no son un resultado |
+| El veredicto dice NO CONVERGIDO | Aumenta las iteraciones, o usa el régimen transitorio si Cl oscila |
+| `Paquete alterado, no se calcula` | Un archivo cambió después de crear la ficha: lanza el análisis de nuevo |
 | La GUI se congela | Espera a que termine el proceso actual; no dar doble clic |
 | `ModuleNotFoundError` | Ejecuta `pip install -r requirements.txt` de nuevo |
 | Pantalla negra en visualización 3D | Actualiza tus drivers gráficos (especialmente en Linux) |

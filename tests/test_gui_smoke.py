@@ -31,11 +31,14 @@ def window(app):
 
     w = MainWindow()
     yield w
+    # Sin esto, cerrar abre el dialogo de guardar y la prueba se queda esperando.
+    w._has_unsaved_work = False
     w.close()
 
 
 def test_window_builds_headless(window):
     assert window.results_panel is not None
+    assert window.tabs.tabText(window.tabs.indexOf(window.jobs_panel)) == "Trabajos"
     # En headless el plotter 3D debe estar desactivado, no reventar.
     assert window.results_panel.plotter is None
 
@@ -69,6 +72,66 @@ def test_force_data_uses_captured_aoa(window):
     window.refresh_plots()
     assert window.aero_plot.aoas == [6.0]
     assert window.aero_plot.cls == [0.7]
+
+
+def test_window_works_through_jobs(window):
+    """Un paquete por clic, cada uno con su carpeta; el boton sigue disponible."""
+    from core.jobs import load_jobs
+    from unittest.mock import patch
+    panel = window.input_panel
+    panel.set_params({"exec_mode": "server", "server_host": "u@h", "server_nproc": 2})
+    with patch.object(window.dispatcher, "submit") as enviar:
+        panel.btn_run.click()
+        panel.btn_run.click()
+    panel.set_params({"exec_mode": "local"})
+    assert enviar.call_count == 2
+    a, b = (c.args[0] for c in enviar.call_args_list)
+    assert a.id != b.id and a.case_dir != b.case_dir and a.host == "u@h" and a.nproc == 2
+    assert panel.btn_run.isEnabled()
+    assert window.current_job is b and window.case_dir == b.case_dir
+    assert window.results_panel.case_dir == b.case_dir
+    assert {a.id, b.id} <= {j.id for j in load_jobs()}
+    assert window.jobs_panel.tabla.rowCount() >= 2
+
+
+def test_sweep_sends_one_package_per_angle_to_the_chosen_machines(window):
+    from unittest.mock import patch
+    panel = window.input_panel
+    window.jobs_panel.add_machine("a@h", 4)
+    panel.set_params({"exec_mode": "repartir", "analysis_mode": "Barrido de Ángulos",
+                      "aoa_min": 0.0, "aoa_max": 4.0, "aoa_step": 2.0})
+    with patch.object(window.dispatcher, "submit") as enviar:
+        panel.btn_run.click()
+    panel.set_params({"exec_mode": "local", "analysis_mode": "Punto Único"})
+    trabajos = [c.args[0] for c in enviar.call_args_list]
+    assert [j.params["aoa"] for j in trabajos] == [0.0, 2.0, 4.0]
+    assert len({j.group for j in trabajos}) == 1 and all(j.host == "" for j in trabajos)
+
+
+def test_polar_is_built_from_finished_jobs_of_the_group(window):
+    from core.jobs import TERMINADO, new_job
+    from core.defaults import case_params
+    for aoa, estado, cl in ((0.0, "CONVERGIDO", 0.0), (4.0, "NO CONVERGIDO", 0.45), (8.0, "DIVERGIDO", 22.0)):
+        job = new_job(case_params(aoa=aoa), "u@h", 2, group="g1")
+        job.state = TERMINADO
+        job.analysis = {"verdict": {"state": estado, "cl": cl, "cd": 0.01, "cm": 0.0}}
+        window.dispatcher.jobs[job.id] = job
+    window._update_polar("g1")
+    assert window.aero_plot.aoas == [0.0, 4.0, 8.0]
+    assert window.aero_plot.cls == [0.0, 0.45, None]
+    assert "1 DIVERGIDO" in window.verdict_banner.text()
+
+
+def test_closing_keeps_the_results_of_the_case(window, tmp_path):
+    """Cerrar la ventana vaciaba postProcessing y los tiempos del caso."""
+    caso = tmp_path / "caso"
+    (caso / "postProcessing").mkdir(parents=True)
+    (caso / "6000").mkdir()
+    anterior = window.case_dir
+    window.case_dir = str(caso)
+    window.cleanup()
+    window.case_dir = anterior
+    assert (caso / "postProcessing").exists() and (caso / "6000").exists()
 
 
 def test_cleanup_preserves_user_mesh(window, tmp_path, monkeypatch):

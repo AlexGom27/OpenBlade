@@ -6,7 +6,7 @@ class OpenFoamSetup:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
         self.case_dir = case_dir
         
-    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4, turb_intensity: float = 0.00052, viscosity_ratio: float = 0.009) -> None:
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4, turb_intensity: float = 0.00052, viscosity_ratio: float = 0.009, aoa_flow: float = 0.0, bc_type: str = "entrada_salida", turb_scheme: str = "upwind", grad_scheme: str = "cellMDLimited Gauss linear 1", lap_correction: str = "limited corrected 0.5", relax_p: float = 0.2, relax_eq: float = 0.5) -> None:
         # Create directories
         for d in ["0", "constant", "system"]:
             os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
@@ -54,11 +54,23 @@ class OpenFoamSetup:
         
         # Calcular viscosidad cinemática a partir de Reynolds: nu = U * L / Re
         nu = (float(u_inlet) * float(chord)) / float(reynolds)
+
+        # Angulo por el flujo: la malla no cambia y la entrada y las direcciones de
+        # sustentacion y arrastre giran. Con 0 el angulo ya esta en la malla.
+        alfa = math.radians(float(aoa_flow))
+        self.dir_drag = (math.cos(alfa), math.sin(alfa))
+        self.dir_lift = (-math.sin(alfa), math.cos(alfa))
+        self.turb_scheme = turb_scheme
+        self.grad_scheme = grad_scheme
+        self.lap_correction = lap_correction
+        self.relax_p = relax_p
+        self.relax_eq = relax_eq
             
         self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co, max_iters, momentum_scheme, depth)
         # Se guarda la primera celda: _write_0 la usa para elegir el modelo de
         # pared (LowRe con y+~1, nutk con y+ alto).
         self.bl_dist_min = bl_dist_min
+        self.bc_type = bc_type
         self.reynolds = float(reynolds)
         self.turb_intensity = float(turb_intensity)
         self.viscosity_ratio = float(viscosity_ratio)
@@ -147,10 +159,11 @@ functions
         rho             rhoInf;
         log             true;
         rhoInf          1.225;
-        liftDir         (0 1 0);
-        dragDir         (1 0 0);
+        liftDir         ({self.dir_lift[0]:.12g} {self.dir_lift[1]:.12g} 0);
+        dragDir         ({self.dir_drag[0]:.12g} {self.dir_drag[1]:.12g} 0);
         CofR            ({0.25 * chord} 0 0);
-        pitchAxis       (0 0 1);
+        // Hacia -z: Cm positivo es morro arriba, la convencion de los datos de referencia.
+        pitchAxis       (0 0 -1);
         magUInf         {float(u_inlet)};
         lRef            {chord};
         // Aref = cuerda x unidad de envergadura.
@@ -177,18 +190,18 @@ functions
         if not is_laminar:
             if is_transition:
                 # Modelos de transición necesitan esquemas para gamma y ReThetat
-                div_turb = """\n    div(phi,k)      bounded Gauss upwind;
-    div(phi,omega)  bounded Gauss upwind;
-    div(phi,gammaInt) bounded Gauss upwind;
-    div(phi,ReThetat) bounded Gauss upwind;"""
+                div_turb = f"""\n    div(phi,k)      bounded Gauss {self.turb_scheme};
+    div(phi,omega)  bounded Gauss {self.turb_scheme};
+    div(phi,gammaInt) bounded Gauss {self.turb_scheme};
+    div(phi,ReThetat) bounded Gauss {self.turb_scheme};"""
             elif "Epsilon" in turbulence_ui:
-                div_turb = """\n    div(phi,k)      bounded Gauss upwind;
-    div(phi,epsilon) bounded Gauss upwind;"""
+                div_turb = f"""\n    div(phi,k)      bounded Gauss {self.turb_scheme};
+    div(phi,epsilon) bounded Gauss {self.turb_scheme};"""
             elif "Omega" in turbulence_ui:
-                div_turb = """\n    div(phi,k)      bounded Gauss upwind;
-    div(phi,omega)  bounded Gauss upwind;"""
+                div_turb = f"""\n    div(phi,k)      bounded Gauss {self.turb_scheme};
+    div(phi,omega)  bounded Gauss {self.turb_scheme};"""
             elif "Spalart" in turbulence_ui:
-                div_turb = """\n    div(phi,nuTilda) bounded Gauss upwind;"""
+                div_turb = f"""\n    div(phi,nuTilda) bounded Gauss {self.turb_scheme};"""
 
         # linearUpwind necesita el esquema de gradiente como argumento;
         # con upwind (1er orden) no aplica.
@@ -223,7 +236,7 @@ functions
         ddt = "backward" if transient else "steadyState"
         fvSchemes = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object fvSchemes; }}
 ddtSchemes {{ default {ddt}; }}
-gradSchemes {{ default cellMDLimited Gauss linear 1; }}
+gradSchemes {{ default {self.grad_scheme}; }}
 divSchemes {{
     default         none;
     div(phi,U)      bounded Gauss {momentum_scheme}{momentum_grad};{div_turb}
@@ -231,11 +244,11 @@ divSchemes {{
     div(div(phi,U)) Gauss linear;
 }}
 laplacianSchemes {{
-    default Gauss linear limited corrected 0.5;
+    default Gauss linear {self.lap_correction};
     laplacian(1,Phi) Gauss linear corrected;
 }}
 interpolationSchemes {{ default linear; }}
-snGradSchemes {{ default limited corrected 0.5; }}
+snGradSchemes {{ default {self.lap_correction}; }}
 wallDist {{ method meshWave; }}
 """
         with open(os.path.join(self.case_dir, "system", "fvSchemes"), "w") as f:
@@ -265,8 +278,8 @@ wallDist {{ method meshWave; }}
     }}
 }}
 relaxationFactors {{
-    fields {{ p 0.2; }}
-    equations {{ U 0.5; k 0.5; omega 0.5; epsilon 0.5; nuTilda 0.5; gammaInt 0.5; ReThetat 0.5; }}
+    fields {{ p {self.relax_p}; }}
+    equations {{ "(U|k|omega|epsilon|nuTilda|gammaInt|ReThetat)" {self.relax_eq}; }}
 }}
 """ if not transient else f"""
 {alg} {{
@@ -380,14 +393,35 @@ RAS {{
 
     def _write_0(self, u_inlet: float, p_outlet: float, chord: float, turbulence_ui: str, nu: float = 1.5e-5) -> None:
         is_laminar = "Laminar" in turbulence_ui
+        u_vec = f"({float(u_inlet) * self.dir_drag[0]:.12g} {float(u_inlet) * self.dir_drag[1]:.12g} 0)"
+        # Contorno exterior: entrada y salida fijas, o libre en todo el contorno, que
+        # deja entrar y salir el flujo por donde corresponda segun el angulo.
+        libre = getattr(self, "bc_type", "entrada_salida") == "libre"
+        if libre:
+            u_ent = f"type freestreamVelocity; freestreamValue uniform {u_vec}; value uniform {u_vec};"
+            u_sal = u_ent
+            p_ent = f"type freestreamPressure; freestreamValue uniform {p_outlet}; value uniform {p_outlet};"
+            p_sal = p_ent
+        else:
+            u_ent = f"type fixedValue; value uniform {u_vec};"
+            u_sal = "type zeroGradient;"
+            p_ent = "type zeroGradient;"
+            p_sal = f"type fixedValue; value uniform {p_outlet};"
+
+        def exterior(valor: float):
+            """Entrada y salida de una variable de turbulencia."""
+            if libre:
+                c = f"type inletOutlet; inletValue uniform {valor:.6e}; value uniform {valor:.6e};"
+                return c, c
+            return f"type fixedValue; value uniform {valor:.6e};", "type zeroGradient;"
         
         # Boundary/Initial Conditions for U and p (common)
         U_content = f"""FoamFile {{ version 2.0; format ascii; class volVectorField; object U; }}
 dimensions      [0 1 -1 0 0 0 0];
-internalField   uniform ({u_inlet} 0 0);
+internalField   uniform {u_vec};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform ({u_inlet} 0 0); }}
-    outlet {{ type zeroGradient; }}
+    inlet {{ {u_ent} }}
+    outlet {{ {u_sal} }}
     farfield {{ type slip; }}
     airfoil {{ type noSlip; }}
     frontAndBack {{ type empty; }}
@@ -400,8 +434,8 @@ boundaryField {{
 dimensions      [0 2 -2 0 0 0 0];
 internalField   uniform 0;
 boundaryField {{
-    inlet {{ type zeroGradient; }}
-    outlet {{ type fixedValue; value uniform {p_outlet}; }}
+    inlet {{ {p_ent} }}
+    outlet {{ {p_sal} }}
     farfield {{ type zeroGradient; }}
     airfoil {{ type zeroGradient; }}
     frontAndBack {{ type empty; }}
@@ -440,8 +474,8 @@ boundaryField {{
 dimensions      [0 2 -2 0 0 0 0];
 internalField   uniform {k_val:.6e};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform {k_val:.6e}; }}
-    outlet {{ type zeroGradient; }}
+    inlet {{ {exterior(k_val)[0]} }}
+    outlet {{ {exterior(k_val)[1]} }}
     farfield {{ type zeroGradient; }}
     airfoil {{ type kqRWallFunction; value uniform {k_val:.6e}; }}
     frontAndBack {{ type empty; }}
@@ -455,8 +489,8 @@ boundaryField {{
 dimensions      [0 2 -3 0 0 0 0];
 internalField   uniform {epsilon_val:.6e};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform {epsilon_val:.6e}; }}
-    outlet {{ type zeroGradient; }}
+    inlet {{ {exterior(epsilon_val)[0]} }}
+    outlet {{ {exterior(epsilon_val)[1]} }}
     farfield {{ type zeroGradient; }}
     airfoil {{ type epsilonWallFunction; value uniform {epsilon_val:.6e}; }}
     frontAndBack {{ type empty; }}
@@ -470,8 +504,8 @@ boundaryField {{
 dimensions      [0 0 -1 0 0 0 0];
 internalField   uniform {omega_val:.6e};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform {omega_val:.6e}; }}
-    outlet {{ type zeroGradient; }}
+    inlet {{ {exterior(omega_val)[0]} }}
+    outlet {{ {exterior(omega_val)[1]} }}
     farfield {{ type zeroGradient; }}
     airfoil {{ type omegaWallFunction; value uniform {omega_val:.6e}; }}
     frontAndBack {{ type empty; }}
@@ -485,8 +519,8 @@ boundaryField {{
 dimensions      [0 2 -1 0 0 0 0];
 internalField   uniform {nuTilda_val:.6e};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform {nuTilda_val:.6e}; }}
-    outlet {{ type zeroGradient; }}
+    inlet {{ {exterior(nuTilda_val)[0]} }}
+    outlet {{ {exterior(nuTilda_val)[1]} }}
     farfield {{ type zeroGradient; }}
     airfoil {{ type fixedValue; value uniform 0; }} 
     frontAndBack {{ type empty; }}

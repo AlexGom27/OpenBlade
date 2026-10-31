@@ -21,7 +21,12 @@ def test_host_rejects_ssh_options():
 def test_job_dir_stays_under_home():
     with pytest.raises(RemoteError):
         RemoteJob("u@h", job_dir="../fuera")
-    assert RemoteJob("u@h", etiqueta="0012_a4.5/x").job_dir.endswith("0012_a4.5_x")
+    assert "0012_a4.5_x_" in RemoteJob("u@h", etiqueta="0012_a4.5/x").job_dir
+
+
+def test_two_jobs_launched_in_the_same_second_get_different_folders():
+    """Compartian carpeta: un lanzamiento se perdia y ambos terminaban con rc=0."""
+    assert len({RemoteJob("u@h", etiqueta="x").job_dir for _ in range(50)}) == 50
 
 
 def test_parser_handles_openfoam12_output_and_split_lines():

@@ -146,8 +146,11 @@ class InputPanel(QWidget):
         geom_layout.addRow("Archivo:", self.file_widget)
         geom_layout.addRow("Cuerda (c):", self.chord_input)
         geom_layout.addRow("Análisis:", self.analysis_mode)
-        self.aoa_row = geom_layout.addRow("Ángulo AoA:", self.aoa_input)
-        self.sweep_row = geom_layout.addRow("Min/Máx/Paso:", self.sweep_widget)
+        geom_layout.addRow("Ángulo AoA:", self.aoa_input)
+        geom_layout.addRow("Min/Máx/Paso:", self.sweep_widget)
+        self.geom_layout = geom_layout
+        geom_layout.setRowVisible(self.file_widget, False)
+        geom_layout.setRowVisible(self.sweep_widget, False)
         
         self.btn_stop_sweep = QPushButton("🛑 Detener Barrido")
         self.btn_stop_sweep.setVisible(False)
@@ -302,8 +305,8 @@ class InputPanel(QWidget):
         steady_layout.setContentsMargins(0, 0, 0, 0)
         self.max_iters_input = QSpinBox()
         self.max_iters_input.setRange(10, 1000000)
-        # Con 500 la corrida por defecto terminaba con Cd aún bajando.
-        self.max_iters_input.setValue(6000)
+        # Es un tope: la corrida termina antes si las fuerzas ya no cambian.
+        self.max_iters_input.setValue(20000)
         self.max_iters_input.setSingleStep(50)
         steady_layout.addRow("Iteraciones Máximas:", self.max_iters_input)
 
@@ -340,7 +343,8 @@ class InputPanel(QWidget):
         ])
         self.turbulence_model.setCurrentText("k-Omega SST (RAS)")
         
-        self.tol_input = QLineEdit("1e-4")
+        # Con 1e-4 SIMPLE paraba en 4470 iteraciones con Cl aún subiendo 2 % por mil.
+        self.tol_input = QLineEdit("1e-6")
 
         # Entrada de turbulencia: valores de NASA TMR para el SST.
         self.turb_intensity = QDoubleSpinBox()
@@ -494,7 +498,9 @@ class InputPanel(QWidget):
         form = QFormLayout()
 
         self.exec_mode = QComboBox()
-        self.exec_mode.addItems(["Local", "Servidor (SSH)"])
+        self.exec_mode.addItems(["Local", "Servidor (SSH)", "Repartir entre máquinas"])
+        self.exec_mode.setToolTip("Cada «Iniciar Análisis» envía un paquete con su propia carpeta. "
+                                  "Repartir usa las máquinas marcadas en la pestaña Trabajos.")
         self.exec_mode.currentIndexChanged.connect(self._toggle_exec_mode)
         form.addRow("Correr en:", self.exec_mode)
 
@@ -517,11 +523,12 @@ class InputPanel(QWidget):
         self.server_status.setWordWrap(True)
         self._server_probed.connect(self._on_server_probed)
 
+        form.addRow("Procesos:", self.server_nproc)
+
         self.server_widget = QWidget()
         sub_form = QFormLayout(self.server_widget)
         sub_form.setContentsMargins(0, 0, 0, 0)
         sub_form.addRow("Servidor:", self.server_host)
-        sub_form.addRow("Procesos:", self.server_nproc)
         botones = QHBoxLayout()
         botones.addWidget(self.btn_test_server)
         botones.addWidget(self.btn_server_access)
@@ -631,13 +638,13 @@ class InputPanel(QWidget):
 
     def _toggle_profile_input(self) -> None:
         is_custom = self.profile_type.currentIndex() == 1
-        self.naca_input.setVisible(not is_custom)
-        self.file_widget.setVisible(is_custom)
+        self.geom_layout.setRowVisible(self.naca_input, not is_custom)
+        self.geom_layout.setRowVisible(self.file_widget, is_custom)
         
     def _toggle_analysis_mode(self) -> None:
         is_sweep = self.analysis_mode.currentIndex() == 1
-        self.aoa_input.setVisible(not is_sweep)
-        self.sweep_widget.setVisible(is_sweep)
+        self.geom_layout.setRowVisible(self.aoa_input, not is_sweep)
+        self.geom_layout.setRowVisible(self.sweep_widget, is_sweep)
 
     def _toggle_transient(self) -> None:
         is_transient = self.regime_selector.currentIndex() == 1
@@ -754,7 +761,7 @@ class InputPanel(QWidget):
             "max_iters": self.max_iters_input.value(),
             "native_foam": self.native_foam_cb.isChecked(),
             # --- Ejecución ---
-            "exec_mode": "server" if self.exec_mode.currentIndex() == 1 else "local",
+            "exec_mode": ("local", "server", "repartir")[self.exec_mode.currentIndex()],
             "server_host": self.server_host.currentText().strip(),
             "server_nproc": self.server_nproc.value(),
             # --- FSI ---
@@ -775,7 +782,7 @@ class InputPanel(QWidget):
     def set_params(self, p: Dict[str, Any]) -> None:
         """Restaurar todos los parámetros de la interfaz desde un diccionario."""
         if "exec_mode" in p:
-            self.exec_mode.setCurrentIndex(1 if p["exec_mode"] == "server" else 0)
+            self.exec_mode.setCurrentIndex({"server": 1, "repartir": 2}.get(p["exec_mode"], 0))
         if p.get("server_host"):
             self.server_host.setCurrentText(str(p["server_host"]))
         if "server_nproc" in p:

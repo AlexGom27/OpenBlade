@@ -1,0 +1,20 @@
+# OpenFOAM 12 para correr en Local con la misma version que los servidores.
+#
+#   docker build --platform linux/amd64 -t openblade/openfoam12:20250206 \
+#          -f docker/Dockerfile.openfoam12 docker
+#
+# El paquete de OpenFOAM Foundation solo existe para amd64: en un Mac con Apple
+# Silicon corre emulado, mas lento que en un servidor.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 \
+ && curl -fsSL https://dl.openfoam.org/gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/openfoam.gpg \
+ && echo "deb http://dl.openfoam.org/ubuntu noble main" > /etc/apt/sources.list.d/openfoam.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends openfoam12=20250206 \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /caso

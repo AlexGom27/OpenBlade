@@ -5,6 +5,19 @@ import time
 from core.solver import SolverRunner
 from core.openfoam_setup import OpenFoamSetup
 
+def angle_by_flow(p):
+    """El angulo lo da el flujo, no la malla: una malla importada no se puede girar."""
+    return bool(p.get("mesh_file")) or p.get("mesher") == "cgrid" or p.get("alpha_mode") == "flujo"
+
+
+def first_cell_height(p):
+    """Altura de la primera celda, en cuerdas: de ella depende la condicion de pared."""
+    if p.get("mesher") == "cgrid":
+        from core.cgrid import first_cell_at_level
+        return first_cell_at_level(p)
+    return p.get("bl_dist_min", 2e-5)
+
+
 def configure_case(case_dir, p):
     """Escribe el caso de OpenFOAM. Lo comparten la corrida local y la de servidor."""
     setup = OpenFoamSetup(case_dir)
@@ -25,9 +38,16 @@ def configure_case(case_dir, p):
         momentum_scheme=p.get("momentum_scheme", "limitedLinearV"),
         # La malla se extruye `depth` cuerdas: Aref debe usar la misma profundidad.
         depth=float(p.get("depth", 0.1)) * float(p["chord"]),
-        bl_dist_min=p.get("bl_dist_min", 2e-5),
+        bl_dist_min=first_cell_height(p),
         turb_intensity=float(p.get("turb_intensity", 0.052)) / 100.0,
         viscosity_ratio=p.get("viscosity_ratio", 0.009),
+        aoa_flow=float(p.get("aoa", 0.0)) if angle_by_flow(p) else 0.0,
+        bc_type=p.get("bc_type", "entrada_salida"),
+        turb_scheme=p.get("turb_scheme", "upwind"),
+        grad_scheme=p.get("grad_scheme", "cellMDLimited Gauss linear 1"),
+        lap_correction=p.get("lap_correction", "limited corrected 0.5"),
+        relax_p=p.get("relax_p", 0.2),
+        relax_eq=p.get("relax_eq", 0.5),
     )
     return is_transient
 

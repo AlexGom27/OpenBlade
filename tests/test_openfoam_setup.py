@@ -31,7 +31,7 @@ def test_create_case_structure(tmp_path):
     with open(case_dir / "0" / "U", "r") as f:
         u_content = f.read()
     
-    assert "internalField   uniform (25.0 0 0);" in u_content
+    assert "internalField   uniform (25 0 0);" in u_content
     # SA shouldn't create k, epsilon by default, but it does in the generic OpenFoamSetup 
     # to be safe, we check that at least U and p created correctly.
     assert (case_dir / "0" / "nuTilda").exists()
@@ -179,3 +179,36 @@ def test_previous_run_leaves_nothing_behind(tmp_path):
                   "processor0", "6000"):
         assert not (caso / viejo).exists(), viejo
     assert (caso / "0" / "U").exists()
+
+
+def test_angle_by_flow_turns_inlet_and_force_directions(tmp_path):
+    from math import cos, radians, sin
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case(u_inlet=10.0, aoa_flow=10.0)
+    u = (caso / "0" / "U").read_text()
+    assert f"{10 * cos(radians(10)):.12g} {10 * sin(radians(10)):.12g} 0" in u
+    control = (caso / "system" / "controlDict").read_text()
+    assert f"dragDir         ({cos(radians(10)):.12g} {sin(radians(10)):.12g} 0);" in control
+    assert f"liftDir         ({-sin(radians(10)):.12g} {cos(radians(10)):.12g} 0);" in control
+
+
+def test_pitching_moment_is_positive_nose_up(tmp_path):
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case()
+    assert "pitchAxis       (0 0 -1);" in (caso / "system" / "controlDict").read_text()
+
+
+def test_free_outer_boundary_lets_the_flow_in_and_out_anywhere(tmp_path):
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case(bc_type="libre", aoa_flow=5.0)
+    assert (caso / "0" / "U").read_text().count("type freestreamVelocity;") == 2
+    assert (caso / "0" / "p").read_text().count("type freestreamPressure;") == 2
+    assert (caso / "0" / "k").read_text().count("type inletOutlet;") == 2
+    assert (caso / "0" / "omega").read_text().count("type inletOutlet;") == 2
+
+
+def test_mesh_points_keep_their_precision(tmp_path):
+    """gmshToFoam redondeaba los puntos a 6 cifras: mas que la altura de una celda de pared."""
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case()
+    assert "writePrecision  15;" in (caso / "system" / "controlDict").read_text()

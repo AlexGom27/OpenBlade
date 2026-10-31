@@ -94,6 +94,12 @@ def _indices(nombres: List[str], requeridas: Iterable[str], ruta: str) -> Dict[s
     return indices
 
 
+def remote_tail_command(lineas: int = 8000) -> str:
+    """Shell que trae la cabecera y la cola del archivo, para leerlas aqui."""
+    return ('f=$(ls postProcessing/forceCoeffs/*/*.dat 2>/dev/null | tail -1); '
+            f'[ -n "$f" ] && {{ grep -m1 "^# Time" "$f"; tail -n {lineas} "$f"; }}')
+
+
 def parse_force_lines(lineas: Iterable[str], requeridas: Iterable[str] = OBLIGATORIAS,
                       origen: str = "fuerzas") -> Dict[str, List[float]]:
     """Convierte las lineas de un archivo de fuerzas en columnas por nombre.

@@ -123,3 +123,10 @@ def test_decimals_precede_value():
         assert dec != -1 and val != -1, f"{field}: falta setDecimals o setValue"
         assert dec < val, (
             f"{field}: setValue antes de setDecimals trunca el valor")
+
+
+def test_window_defaults_are_the_ones_of_the_command_line(params):
+    """La ventana y la linea de comandos parten del mismo caso."""
+    from core.defaults import DEFAULT_PARAMS
+    distintos = {k: (params.get(k), v) for k, v in DEFAULT_PARAMS.items() if params.get(k) != v}
+    assert distintos == {}

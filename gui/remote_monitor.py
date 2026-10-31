@@ -7,9 +7,9 @@ Muestra en vivo, desde la propia ventana:
   * Cl y Cd
   * CPU, RAM y disco del servidor
 
-Los datos se piden por SSH al servidor, que ejecuta `validation/monitor.py
---json`. Se usa una clave SSH sin contraseña; si no está configurada, el panel
-lo indica en lugar de fallar.
+Los datos se piden por SSH (core.remote_runner.instantanea): en el servidor no
+hace falta nada instalado salvo OpenFOAM. Se usa una clave SSH sin contraseña; si
+no está configurada, el panel lo indica en lugar de fallar.
 
 Configuración
 -------------
@@ -23,9 +23,7 @@ Si no se define, el panel queda inactivo y lo dice.
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import threading
 
 from qtpy.QtCore import Qt, QTimer, Signal
@@ -151,17 +149,9 @@ class RemoteMonitorPanel(QWidget):
         self._busy = True
 
         def trabajo():
-            cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                   self.remote,
-                   f"cd ~/OpenBlade && ~/obenv/bin/python validation/monitor.py "
-                   f"--case {self.case} --json"]
+            from core.remote_runner import instantanea
             try:
-                r = subprocess.run(cmd, capture_output=True, text=True,
-                                   timeout=40, stdin=subprocess.DEVNULL)
-                if r.returncode != 0:
-                    self._datos_listos.emit({"error": (r.stderr or "")[-200:]})
-                    return
-                self._datos_listos.emit(json.loads(r.stdout.strip().splitlines()[-1]))
+                self._datos_listos.emit(instantanea(self.remote, self.case))
             except Exception as e:  # noqa: BLE001
                 self._datos_listos.emit({"error": str(e)})
 
@@ -179,8 +169,12 @@ class RemoteMonitorPanel(QWidget):
             self.lbl_estado.setText(f"⚠️ {d['error'][:200]}")
             return
 
-        estado = {"COMPLETADA": "✔ COMPLETADA", "EN_CURSO": "⏳ EN CURSO",
-                  "DIVERGIDO": "💥 DIVERGIDO"}.get(d.get("estado"), "⏸ PARADA")
+        estado = {"running": "⏳ EN CURSO", "done": "✔ TERMINÓ", "failed": "❌ FALLÓ",
+                  "stopped": "⏸ DETENIDA"}.get((d.get("status") or {}).get("state"), "⏸ SIN ESTADO")
+        if d.get("veredicto"):
+            estado += f"   ·   {d['veredicto']} hasta ahora"
+        if d.get("error") and "status" in d:
+            estado += f"\n{d['error']}"
 
         t = d.get("t")
         end = d.get("endTime")
@@ -192,10 +186,8 @@ class RemoteMonitorPanel(QWidget):
         txt = f"{estado}   {d.get('caso','')}   ({d.get('procesos',0)} procesos)\n"
         if t is not None and end:
             txt += f"t = {t:.5f} / {end:g} s   [{barra}] {pct:.1f}%\n"
-        txt += f"pasos: {d.get('pasos',0):,}   tiempos escritos: {d.get('tiempos_escritos',0)}"
-        if d.get("continuidad") is not None:
-            txt += f"   continuidad: {d['continuidad']:.1e}"
         c = d.get("coeffs")
+        txt += f"filas de fuerzas: {(c or {}).get('n', 0):,}"
         if c:
             txt += f"\nCl = {c['Cl']:+.5f}   Cd = {c['Cd']:.5f}"
         self.lbl_estado.setText(txt)
