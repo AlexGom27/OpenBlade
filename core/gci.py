@@ -22,7 +22,7 @@ class GridStudy:
     fina: float
     media: float
     gruesa: float
-    convergencia: str       # "monotona", "oscilatoria" o "sin cambio"
+    convergencia: str       # "monotona", "oscilatoria", "no asintotica" o "sin cambio"
     orden: Optional[float]
     extrapolado: Optional[float]
     gci_fina: float         # banda relativa sobre el valor de la malla fina
@@ -49,8 +49,14 @@ def grid_study(fina: float, media: float, gruesa: float, r: float = FACTOR_MALLA
         relativa = banda / referencia
         return GridStudy(fina, media, gruesa, "oscilatoria", None, None, relativa, banda, relativa, banda)
     orden = math.log(cociente) / math.log(r)
-    # Un orden fuera de lo que puede dar el esquema no se cree: se acota.
-    orden = min(max(orden, ORDEN_MIN), ORDEN_MAX)
+    if orden < ORDEN_MIN:
+        # La malla fina casi no mejora a la media: no se esta en el rango asintotico y
+        # extrapolar daria una banda demasiado estrecha. Se trata como la oscilatoria.
+        banda = 3.0 * max(abs(e21), abs(e32))
+        relativa = banda / referencia
+        return GridStudy(fina, media, gruesa, "no asintotica", None, None, relativa, banda, relativa, banda)
+    # Un orden mayor del que puede dar el esquema no se cree: se acota, y la banda crece.
+    orden = min(orden, ORDEN_MAX)
     extrapolado = fina + (fina - media) / (r ** orden - 1.0)
     banda = FACTOR_SEGURIDAD * abs(e21) / (r ** orden - 1.0)
     # La malla media dista del valor extrapolado lo que distan entre si las dos mas

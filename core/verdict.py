@@ -25,6 +25,7 @@ MIN_FILAS = 100         # con menos no se puede juzgar nada
 TOL_RANGO = 0.01        # (max-min)/|media| dentro de la ventana
 TOL_DERIVA = 0.005      # cambio de la media frente a la ventana anterior
 TOL_DERIVA_TRANS = 0.01
+TOL_DERIVA_CL = 0.002   # cambio de la media de Cl frente a la ventana anterior
 TOL_CL_ABS = 0.002      # con Cl casi nulo la tolerancia relativa no sirve
 TOL_CM_ABS = 0.002
 ARRANQUE = 0.2          # fraccion inicial donde un pico de fuerzas es normal
@@ -202,7 +203,8 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
     cl_previo = h.cl[previo:corte]
     media_cl_previa = (_media_temporal(t_previo[j0:j1], cl_previo[j0:j1]) if transient
                        else sum(cl_previo) / len(cl_previo))
-    if abs(m_cl - media_cl_previa) > _tol_cl(m_cl):
+    # Una deriva lenta no se ve en el rango de una ventana y puede sumar varios por ciento.
+    if abs(m_cl - media_cl_previa) > max(TOL_DERIVA_CL * abs(m_cl), TOL_CL_ABS / 2):
         return Verdict(NO_CONVERGIDO, f"La media de Cl aún cambia de {media_cl_previa:.4f} a "
                                       f"{m_cl:.4f} entre ventanas", **base)
     if not transient:

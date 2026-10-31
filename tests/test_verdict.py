@@ -46,6 +46,13 @@ def test_slow_drift_is_caught_even_if_the_range_looks_fine():
     assert v.state == NO_CONVERGIDO and "cambia" in v.reason
 
 
+def test_slow_lift_drift_is_not_converged():
+    """Cl sube 0.3 % por ventana: cabe en el rango, pero sumaria varios por ciento."""
+    n = 6000
+    v = evaluate(historia([1.0 + 6e-6 * i for i in range(n)], [0.012] * n))
+    assert v.state == NO_CONVERGIDO and "Cl" in v.reason
+
+
 def test_oscillating_steady_run_is_not_converged_and_reports_amplitude():
     n = 3000
     v = evaluate(historia([1.0 + 0.1 * math.sin(i / 7) for i in range(n)],

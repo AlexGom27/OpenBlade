@@ -242,14 +242,15 @@ class _Vigilancia:
     # maquina, asi que el mismo paquete da el mismo archivo de fuerzas en todas.
     CADA_CONVERGENCIA = 1000
     MARGEN = 2000
+    HISTORIA = 3000     # la media debe mantenerse en todo este tramo, no solo en dos ventanas
     TOL_RANGO_CD = 0.005
     TOL_DERIVA_CD = 0.001
     TOL_CL = 0.001
 
     def __init__(self) -> None:
         self.n = 0
-        self.cl = deque(maxlen=2 * self.VENTANA)
-        self.cd = deque(maxlen=2 * self.VENTANA)
+        self.cl = deque(maxlen=self.HISTORIA)
+        self.cd = deque(maxlen=self.HISTORIA)
 
     def agrega(self, nombre: str, valor: str) -> None:
         try:
@@ -280,20 +281,26 @@ class _Vigilancia:
         """Las fuerzas ya no cambian: seguir solo gastaria maquina."""
         if self.n % self.CADA_CONVERGENCIA:
             return False
-        if self.n < self.MINIMO or len(self.cl) < 2 * self.VENTANA or len(self.cd) < 2 * self.VENTANA:
+        if self.n < self.MINIMO or len(self.cl) < self.HISTORIA or len(self.cd) < self.HISTORIA:
             return False
         cl, cd = list(self.cl), list(self.cd)
-        ultimo_cd, previo_cd = cd[self.VENTANA:], cd[:self.VENTANA]
-        ultimo_cl, previo_cl = cl[self.VENTANA:], cl[:self.VENTANA]
+        ultimo_cd, ultimo_cl = cd[-self.VENTANA:], cl[-self.VENTANA:]
         media_cd = sum(ultimo_cd) / self.VENTANA
         media_cl = sum(ultimo_cl) / self.VENTANA
-        if media_cd <= 0:
+        if media_cd <= 0 or (max(ultimo_cd) - min(ultimo_cd)) / media_cd >= self.TOL_RANGO_CD:
             return False
         tol_cl = max(self.TOL_CL * abs(media_cl), 2e-4)
-        return ((max(ultimo_cd) - min(ultimo_cd)) / media_cd < self.TOL_RANGO_CD
-                and abs(media_cd - sum(previo_cd) / self.VENTANA) / media_cd < self.TOL_DERIVA_CD
-                and max(ultimo_cl) - min(ultimo_cl) < tol_cl
-                and abs(media_cl - sum(previo_cl) / self.VENTANA) < tol_cl)
+        if max(ultimo_cl) - min(ultimo_cl) >= tol_cl:
+            return False
+        # Cada ventana anterior del tramo debe tener la misma media.
+        for k in range(1, self.HISTORIA // self.VENTANA):
+            fin = self.HISTORIA - k * self.VENTANA
+            previo_cd = sum(cd[fin - self.VENTANA:fin]) / self.VENTANA
+            previo_cl = sum(cl[fin - self.VENTANA:fin]) / self.VENTANA
+            if (abs(media_cd - previo_cd) / media_cd >= self.TOL_DERIVA_CD
+                    or abs(media_cl - previo_cl) >= tol_cl):
+                return False
+        return True
 
 
 def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], None],

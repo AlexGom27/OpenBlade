@@ -26,8 +26,13 @@ def test_implausible_order_is_bounded():
     """Un salto mucho menor en el nivel fino no autoriza a creer en orden 5."""
     g = grid_study(1.0, 1.0001, 1.2)
     assert g.orden == 2.0
-    h = grid_study(1.0, 1.1, 1.11)
-    assert h.orden == 0.5
+
+
+def test_very_low_order_is_not_asymptotic_and_does_not_narrow_the_band():
+    """Hallado por OpenClaw: recortar el orden a 0.5 daba una banda varias veces menor."""
+    g = grid_study(1.0, 1.1, 1.11)
+    assert g.convergencia == "no asintotica" and g.orden is None and g.extrapolado is None
+    assert g.banda == pytest.approx(3 * 0.1)
 
 
 def test_oscillating_sequence_has_no_order_and_a_conservative_band():

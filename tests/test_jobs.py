@@ -116,15 +116,21 @@ def test_watch_detects_when_forces_stop_changing_at_fixed_iterations():
         v.agrega("Cl", "0.9")
         v.agrega("Cd", "0.01")
     assert not v.convergio()
-    for i in range(1000):
+    for i in range(2000):
         v.agrega("Cl", "0.9")
         v.agrega("Cd", "0.01")
     assert not v.convergio(), "solo se mira en multiplos fijos, para que el final sea el mismo en toda maquina"
     for i in range(400):
         v.agrega("Cl", "0.9")
         v.agrega("Cd", "0.01")
-    assert v.n == 2000 and v.convergio()
-    assert v.final_previsto() == 5000
+    assert v.n == 3000 and v.convergio()
+    assert v.final_previsto() == 6000
+    # Una deriva lenta, invisible entre dos ventanas, tampoco termina
+    lenta = J._Vigilancia()
+    for i in range(6000):
+        lenta.agrega("Cl", str(0.9 + 1e-6 * i))
+        lenta.agrega("Cd", str(0.01 * (1 + 6e-7 * i)))
+    assert lenta.n == 6000 and not lenta.convergio()
     # Cl sube 0.5 % por ventana: no ha terminado
     subiendo = J._Vigilancia()
     for i in range(3000):
@@ -133,7 +139,7 @@ def test_watch_detects_when_forces_stop_changing_at_fixed_iterations():
     assert not subiendo.convergio()
     # Oscilando no termina aunque la media no cambie
     oscila = J._Vigilancia()
-    for i in range(3000):
+    for i in range(6000):
         oscila.agrega("Cl", str(0.9 + 0.01 * (-1) ** i))
         oscila.agrega("Cd", "0.01")
     assert not oscila.convergio()
