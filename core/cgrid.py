@@ -314,6 +314,22 @@ def first_cell_at_level(params: Dict) -> float:
     return first_cell_of(params) * 2.0 ** (NIVEL_BASE - nivel)
 
 
+def transient_notice(params: Dict) -> str:
+    """Cuanto va a costar un transitorio: con y+ < 1 el paso lo fija la primera celda.
+
+    Medido en el nivel 1 a 18 grados, el paso real queda entre 0.5 y 4 veces Co * h / U.
+    """
+    h = first_cell_at_level(params) * float(params.get("chord", 1.0))
+    max_co = float(params.get("max_co", 30.0))
+    paso = max_co * h / float(params.get("u_inlet", 15.0))
+    pasos = float(params.get("end_time", 0.5)) / paso
+    texto = (f"⏱️ Transitorio: con Courant {max_co:g} el paso será del orden de {paso:.0e} s, "
+             f"unos {pasos:,.0f} pasos hasta t = {params.get('end_time', 0.5)} s.")
+    if pasos > 200_000:
+        texto += " Es muy largo: acorta el tiempo final o sube el Courant máximo (30 es estable en esta malla, 100 diverge)."
+    return texto
+
+
 def build_mesh(params: Dict, salida: str) -> Dict:
     """Genera la malla de estos parametros y la escribe como .msh."""
     import json

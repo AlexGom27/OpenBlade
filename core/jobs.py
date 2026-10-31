@@ -230,6 +230,9 @@ class Events:
         pass
 
 
+MARGEN_TRANSITORIO = 10.0
+
+
 class _Vigilancia:
     """Detecta en vivo una corrida que diverge, para no gastar el resto del calculo."""
     VENTANA = 500
@@ -265,14 +268,18 @@ class _Vigilancia:
         elif nombre == "Cd":
             self.cd.append(v)
 
-    def divergio(self) -> bool:
-        """Solo con valores imposibles: en un arranque lento Cd puede pasar por cero."""
+    def divergio(self, margen: float = 1.0) -> bool:
+        """Solo con valores imposibles: en un arranque lento Cd puede pasar por cero.
+
+        El arranque impulsivo de un transitorio da Cl alrededor de 7 durante miles de pasos
+        muy cortos: ahi se pide un margen sobre lo imposible.
+        """
         from core.verdict import CD_IMPOSIBLE, CL_IMPOSIBLE
         if self.n < self.MINIMO:
             return False
         cl, cd = self.cl[-self.VENTANA:], self.cd[-self.VENTANA:]
-        malos = sum(1 for x in cd if abs(x) > CD_IMPOSIBLE)
-        malos += sum(1 for x in cl if abs(x) > CL_IMPOSIBLE)
+        malos = sum(1 for x in cd if abs(x) > margen * CD_IMPOSIBLE)
+        malos += sum(1 for x in cl if abs(x) > margen * CL_IMPOSIBLE)
         return malos > 0.2 * self.VENTANA
 
     def final_previsto(self) -> int:
@@ -360,6 +367,9 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
             msh = ensure_mesh(job.params, lambda t: ev.log(job, t))
             cambia(PREPARANDO)
             transient = configure_case(job.case_dir, job.params)
+            if transient and job.params.get("mesher") == "cgrid":
+                from core.cgrid import transient_notice
+                ev.log(job, transient_notice(job.params))
             cambia(SUBIENDO)
             runner = make_runner(job)
             registrar(runner)
@@ -387,13 +397,13 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
                 return
             ev.force(job, e[1], e[2])
             vigia.agrega(e[1], e[2])
-            if e[1] != "Cl" or vigia.n % 100 or detenida.is_set() or job.transient:
+            if e[1] != "Cl" or vigia.n % 100 or detenida.is_set():
                 return
-            if stop_on_divergence and vigia.divergio():
+            if stop_on_divergence and vigia.divergio(MARGEN_TRANSITORIO if job.transient else 1.0):
                 detenida.set()
                 ev.log(job, "💥 Las fuerzas divergieron: se detiene el cálculo.")
                 runner.detener()
-            elif vigia.convergio():
+            elif not job.transient and vigia.convergio():
                 detenida.set()
                 final = vigia.final_previsto()
                 if final < int(job.params.get("max_iters", 0)):

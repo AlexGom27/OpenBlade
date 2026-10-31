@@ -348,9 +348,13 @@ class InputPanel(QWidget):
         self.end_time_input = QLineEdit("0.5")
         self.write_interval_input = QLineEdit("0.01")
         self.max_co_input = QDoubleSpinBox()
-        self.max_co_input.setRange(0.1, 10.0)
-        self.max_co_input.setValue(2.0)
+        self.max_co_input.setRange(0.1, 200.0)
+        # Con y+ < 1 el Courant maximo sale en las celdas finisimas de la pared: con 2, el
+        # paso seria de 1e-6 s. 30 es estable en la malla C; 100 diverge.
+        self.max_co_input.setValue(30.0)
         self.max_co_input.setDecimals(1)
+        self.max_co_input.setToolTip("Con malla de pared (y+ < 1) el paso de tiempo lo fija la primera celda. "
+                                     "Con la malla C, 30 es estable y 100 diverge.")
         
         trans_layout.addRow("Paso de Tiempo (Δt):", self.delta_t_input)
         trans_layout.addRow("Tiempo Final (s):", self.end_time_input)

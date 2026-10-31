@@ -172,3 +172,11 @@ def test_impossible_grid_parameters_are_refused():
         generate_cgrid(naca4("0012"), H, 2, 1.0)
     with pytest.raises(ValueError):
         generate_cgrid(naca4("0012"), 1.0, 2, 500.0)
+
+
+def test_transient_notice_warns_when_the_run_would_never_end():
+    from core.cgrid import transient_notice
+    from core.defaults import case_params
+    p = case_params(reynolds=6e6, regime="Transitorio (pimpleFoam)", end_time="0.5")
+    assert "Es muy largo" in transient_notice(dict(p, max_co=2.0))
+    assert "Es muy largo" not in transient_notice(p)

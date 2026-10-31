@@ -176,6 +176,15 @@ def test_watch_detects_divergence_only_after_enough_iterations():
         bien.agrega("Cl", "0.9")
         bien.agrega("Cd", "0.01")
     assert not bien.divergio()
+    # El arranque impulsivo de un transitorio no es divergencia, pero Cl = -146 si
+    impulso = J._Vigilancia()
+    for i in range(1200):
+        impulso.agrega("Cl", "7")
+        impulso.agrega("Cd", "0.15")
+    assert impulso.divergio() and not impulso.divergio(J.MARGEN_TRANSITORIO)
+    for i in range(500):
+        impulso.agrega("Cl", "-146")
+    assert impulso.divergio(J.MARGEN_TRANSITORIO)
     # Un arranque lento puede pasar por Cd < 0 sin estar divergiendo.
     lento = J._Vigilancia()
     for i in range(1400):
