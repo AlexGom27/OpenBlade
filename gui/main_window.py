@@ -350,6 +350,11 @@ class MainWindow(QMainWindow):
         self.input_panel.btn_mesh.setEnabled(True)
         self.log(f"❌ Error de mallado: {message}")
 
+    def _airfoil_extent(self) -> tuple:
+        """Donde esta el perfil en la vista previa de la malla, que no lleva sus patches."""
+        c = float((self._safe_get_params() or {}).get("chord", 1.0))
+        return (0.0, c, -0.1 * c, 0.1 * c)
+
     def on_mesh_done(self, msh_file: str, stl_file: str) -> None:
         self.input_panel.btn_mesh.setEnabled(True)
         if os.path.exists(msh_file):
@@ -362,7 +367,7 @@ class MainWindow(QMainWindow):
                 if os.path.exists(vtk_file):
                     import pyvista as pv
                     mesh = pv.read(vtk_file)
-                    self.results_panel.update_visual_preview(mesh, show_edges=True)
+                    self.results_panel.update_visual_preview(mesh, show_edges=True, perfil=self._airfoil_extent())
                 elif os.path.exists(stl_file):
                     import pyvista as pv
                     mesh = pv.read(stl_file)
@@ -682,7 +687,7 @@ class MainWindow(QMainWindow):
             import pyvista as pv
             try:
                 mesh = pv.read(vtk_file)
-                self.results_panel.update_visual_preview(mesh, show_edges=True)
+                self.results_panel.update_visual_preview(mesh, show_edges=True, perfil=self._airfoil_extent())
             except Exception:
                 pass
 

@@ -165,15 +165,16 @@ class RemoteMonitorPanel(QWidget):
         # respuesta de un caso anterior al cambio de selector
         if d.get("caso") and d["caso"] != os.path.basename(self.case.rstrip("/")):
             return
-        if "error" in d:
-            self.lbl_estado.setText(f"⚠️ {d['error'][:200]}")
+        # Sin "status" no hubo respuesta del servidor; con el, "error" es el del caso.
+        if "status" not in d:
+            self.lbl_estado.setText(f"⚠️ {(d.get('error') or 'Sin respuesta')[:200]}")
             return
 
         estado = {"running": "⏳ EN CURSO", "done": "✔ TERMINÓ", "failed": "❌ FALLÓ",
                   "stopped": "⏸ DETENIDA"}.get((d.get("status") or {}).get("state"), "⏸ SIN ESTADO")
         if d.get("veredicto"):
             estado += f"   ·   {d['veredicto']} hasta ahora"
-        if d.get("error") and "status" in d:
+        if d.get("error"):
             estado += f"\n{d['error']}"
 
         t = d.get("t")
@@ -183,7 +184,7 @@ class RemoteMonitorPanel(QWidget):
         llenos = int(n * min(pct, 100) / 100)
         barra = "█" * llenos + "░" * (n - llenos)
 
-        txt = f"{estado}   {d.get('caso','')}   ({d.get('procesos',0)} procesos)\n"
+        txt = f"{estado}   {d.get('caso','')}\n"
         if t is not None and end:
             txt += f"t = {t:.5f} / {end:g} s   [{barra}] {pct:.1f}%\n"
         c = d.get("coeffs")
@@ -206,7 +207,8 @@ class RemoteMonitorPanel(QWidget):
             self._dibujar()
 
         s = d.get("servidor") or {}
-        partes = []
+        # Cuenta todos los solvers de la maquina, no solo los de este caso
+        partes = [f"{d.get('procesos', 0)} procesos de OpenFOAM"]
         if s.get("cpu_pct") is not None:
             partes.append(f"CPU {s['cpu_pct']:.0f}%")
         if s.get("ram_pct") is not None:

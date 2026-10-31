@@ -137,6 +137,23 @@ class PostProcessor:
             return None
         return None
 
+    def airfoil_bounds(self) -> Optional[tuple]:
+        """(xmin, xmax, ymin, ymax) del perfil, o None si el caso no tiene ese patch."""
+        if not self._ensure_reader():
+            return None
+        try:
+            patch_name = self._airfoil_patch_name()
+            if patch_name is None:
+                return None
+            self.reader.enable_patch_array(patch_name)
+            airfoil = self._find_block(self.reader.read(), "airfoil")
+            if airfoil is None or airfoil.n_points == 0:
+                return None
+            return tuple(airfoil.bounds[:4])
+        except Exception as e:
+            print(f"Error leyendo el perfil: {e}")
+            return None
+
     def get_cp_on_surface(self, u_inf: float = 15.0, rho: float = 1.225) -> Optional[tuple]:
         """
         Extrae la presión sobre la superficie del perfil y calcula Cp.

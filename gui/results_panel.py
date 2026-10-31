@@ -9,6 +9,15 @@ from core.postprocessing import PostProcessor
 from typing import Optional, Any
 import os
 
+# En el orden del selector de campos
+CAMPOS = ("U", "p", "k", "nut", "omega", "epsilon", "nuTilda")
+TITULOS = {"U": "Velocidad (m/s)", "p": "Presion relativa (m2/s2)", "k": "k (m2/s2)", "nut": "nut (m2/s)",
+           "omega": "omega (1/s, escala log)", "epsilon": "epsilon (m2/s3)", "nuTilda": "nuTilda (m2/s)"}
+# En la pared omega es del orden de 1e9: en escala lineal todo el dominio saldria de un color.
+ESCALA_LOG = ("omega",)
+BARRA = {"color": "white", "fmt": "%.3g", "title_font_size": 16, "label_font_size": 14}
+
+
 class ResultsPanel(QWidget):
     log_signal = Signal(str)
 
@@ -203,6 +212,7 @@ class ResultsPanel(QWidget):
                 self.log(f"⚠️ No se pudieron detectar los campos: {e}")
                 self._available_fields = None
 
+            self._limit_selector()
             self.var_selector.setEnabled(True)
             self._is_first_plot = True
             self.update_results_plot()
@@ -212,42 +222,46 @@ class ResultsPanel(QWidget):
             self.log(f"❌ Error al cargar resultados: {e}")
             return False
 
-    def update_visual_preview(self, mesh: Any, show_edges: bool = False) -> None:
+    def _limit_selector(self) -> None:
+        """Con k-omega SST no hay epsilon ni nuTilda: esos campos no se ofrecen."""
+        disponibles = getattr(self, '_available_fields', None) or set(CAMPOS)
+        modelo = self.var_selector.model()
+        for i, campo in enumerate(CAMPOS):
+            modelo.item(i).setEnabled(campo in disponibles)
+        if CAMPOS[self.var_selector.currentIndex()] not in disponibles:
+            primero = next((i for i, c in enumerate(CAMPOS) if c in disponibles), 0)
+            self.var_selector.blockSignals(True)
+            self.var_selector.setCurrentIndex(primero)
+            self.var_selector.blockSignals(False)
+
+    def _frame(self, perfil: Optional[tuple]) -> None:
+        """El dominio llega a cientos de cuerdas: la vista inicial enmarca el perfil."""
+        self.plotter.view_xy()
+        if not perfil:
+            return
+        xmin, xmax, ymin, ymax = perfil
+        cuerda = xmax - xmin
+        ancho, alto = self.plotter.window_size
+        camara = self.plotter.camera
+        cx, cy = (xmin + xmax) / 2, (ymin + ymax) / 2
+        camara.focal_point = (cx, cy, camara.focal_point[2])
+        camara.position = (cx, cy, camara.position[2])
+        camara.parallel_scale = max(0.7 * cuerda * alto / max(ancho, 1), 0.3 * cuerda)
+        self.plotter.renderer.ResetCameraClippingRange()
+
+    def update_visual_preview(self, mesh: Any, show_edges: bool = False, perfil: Optional[tuple] = None) -> None:
         if self.plotter:
             self.plotter.clear()
             self.plotter.add_mesh(mesh, color='#a0a0a0', show_edges=show_edges, edge_color='#333333')
-            self.plotter.view_xy()
+            self._frame(perfil)
             self.add_watermark()
 
     def update_results_plot(self) -> None:
         if not self.post_processor or not self.plotter:
             return
             
-        field_map = {
-            0: 'U',
-            1: 'p',
-            2: 'k',
-            3: 'nut',
-            4: 'omega',
-            5: 'epsilon',
-            6: 'nuTilda'
-        }
-        
-        idx = self.var_selector.currentIndex()
-        field_name = field_map.get(idx, 'U')
+        field_name = CAMPOS[self.var_selector.currentIndex()]
 
-        # Si el campo pedido no existe en este caso (epsilon y nuTilda no
-        # existen con k-omega SST), se cae a 'p' en vez de pintar la malla
-        # gris. El respaldo gris en mitad de una animación produce parpadeos.
-        disponibles = getattr(self, '_available_fields', None)
-        if disponibles and field_name not in disponibles:
-            alternativas = [f for f in ('U', 'p', 'k', 'nut', 'omega')
-                            if f in disponibles]
-            if alternativas and field_name != alternativas[0]:
-                self.log(f"ℹ️ Campo '{field_name}' no existe en este caso; "
-                         f"se muestra '{alternativas[0]}'.")
-                field_name = alternativas[0]
-        
         time_repr = "latestTime"
         if self.player_widget.isVisible() and self.time_values:
             time_repr = str(self.time_values[self.current_time_idx])
@@ -296,7 +310,7 @@ class ResultsPanel(QWidget):
                                                   show_edges=False,
                                                   opacity=1.0,
                                                   show_scalar_bar=True, 
-                                                  scalar_bar_args={'title': 'Velocidad (m/s)'})
+                                                  scalar_bar_args={'title': TITULOS['U'], **BARRA})
                         except Exception as e_mag:
                             self.log(f"⚠️ Error calculando magnitud de velocidad: {e_mag}")
                             self.plotter.add_mesh(mesh, color='#a0a0a0', show_edges=True)
@@ -314,14 +328,15 @@ class ResultsPanel(QWidget):
                     if field_name in mesh.point_data:
                         self.plotter.add_mesh(mesh, scalars=field_name, cmap='jet', 
                                               show_edges=False,
+                                              log_scale=field_name in ESCALA_LOG,
                                               show_scalar_bar=True, 
-                                              scalar_bar_args={'title': field_name})
+                                              scalar_bar_args={'title': TITULOS[field_name], **BARRA})
                     else:
                         self.log(f"⚠️ Campo '{field_name}' no encontrado.")
                         self.plotter.add_mesh(mesh, color='#a0a0a0', show_edges=True)
                         
                 if getattr(self, '_is_first_plot', True):
-                    self.plotter.view_xy()
+                    self._frame(self.post_processor.airfoil_bounds())
                     self._is_first_plot = False
                 elif cam_pos:
                     self.plotter.camera_position = cam_pos
@@ -387,9 +402,7 @@ class ResultsPanel(QWidget):
             if not case_dir:
                 from core import paths
                 case_dir = paths.case_dir()
-            field_map = {0: 'U', 1: 'p', 2: 'k', 3: 'nut', 4: 'omega',
-                         5: 'epsilon', 6: 'nuTilda'}
-            name = field_map.get(self.var_selector.currentIndex(), 'U')
+            name = CAMPOS[self.var_selector.currentIndex()]
             if abs(t) < 1e-12:
                 return True
             for cand in (f"{t:g}", f"{t:.6f}", repr(t)):

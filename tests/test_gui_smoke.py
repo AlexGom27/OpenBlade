@@ -253,3 +253,37 @@ def test_polar_does_not_draw_diverged_points_and_marks_doubtful_ones(window):
     assert list(window.aero_plot._dudosos["cl"].get_xdata()) == [4.0]
     window.aero_plot.update_plots([], [], [], [], [])
     window.aero_plot.redraw()
+
+
+def test_server_tab_shows_the_state_when_the_case_has_no_error(window):
+    # instantanea() siempre trae la clave "error", casi siempre con None
+    panel = window.remote_panel
+    panel.case = "caso"
+    panel._aplicar({"caso": "caso", "status": {"state": "running"}, "error": None, "t": 5.0, "endTime": 10.0,
+                    "pct": 50.0, "procesos": 4, "coeffs": None, "residuales": {}, "servidor": {}})
+    assert "EN CURSO" in panel.lbl_estado.text()
+    panel._aplicar({"error": "sin red"})
+    assert "sin red" in panel.lbl_estado.text()
+
+
+def test_residual_plot_names_its_curves(window):
+    plot = window.res_plot
+    plot.reset()
+    plot.update_plot("p", 0.1, 1.0)
+    plot.update_plot("Ux", 0.2, 1.0)
+    plot.redraw()
+    assert sorted(t.get_text() for t in plot.ax.get_legend().get_texts()) == ["Ux", "p"]
+    plot.reset()
+
+
+def test_only_the_fields_of_the_case_can_be_chosen(window):
+    panel = window.results_panel
+    panel._available_fields = {"U", "p", "k", "nut", "omega"}
+    panel.var_selector.setCurrentIndex(5)     # epsilon
+    panel._limit_selector()
+    assert panel.var_selector.currentIndex() == 0
+    assert not panel.var_selector.model().item(5).isEnabled()
+    assert panel.var_selector.model().item(4).isEnabled()
+    panel._available_fields = None
+    panel._limit_selector()
+    assert panel.var_selector.model().item(5).isEnabled()

@@ -561,6 +561,8 @@ class InputPanel(QWidget):
         self.server_widget = QWidget()
         sub_form = QFormLayout(self.server_widget)
         sub_form.setContentsMargins(0, 0, 0, 0)
+        # En Mac los campos no crecen por defecto y el nombre del servidor queda cortado
+        sub_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         sub_form.addRow("Servidor:", self.server_host)
         botones = QHBoxLayout()
         botones.addWidget(self.btn_test_server)

@@ -9,10 +9,15 @@ from matplotlib.figure import Figure
 from typing import Optional, List, Dict
 import csv
 import os
+import warnings
 import numpy as np
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QFileDialog,
                             QLabel, QTabWidget)
+
+
+# Las pestanas ocultas aun no tienen tamano: al mostrarse se vuelven a dibujar bien.
+warnings.filterwarnings("ignore", message="constrained_layout not applied")
 
 
 def new_chart(figsize=(5, 4), dpi=90):
@@ -323,7 +328,8 @@ class ResidualPlot(QWidget):
             else:
                 self.res_lines[f].set_data(self.res_iters, data)
                 
-        if len(self.res_lines) > 0 and len(self.ax.get_legend_handles_labels()[1]) != len(self.res_lines):
+        leyenda = self.ax.get_legend()
+        if self.res_lines and (leyenda is None or len(leyenda.get_texts()) != len(self.res_lines)):
             self.ax.legend(facecolor='#1e1e1e', edgecolor='#333333', labelcolor='white', fontsize=8, loc='upper right')
             
         self.ax.relim()
