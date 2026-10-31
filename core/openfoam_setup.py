@@ -6,7 +6,7 @@ class OpenFoamSetup:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
         self.case_dir = case_dir
         
-    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4, turb_intensity: float = 0.00052, viscosity_ratio: float = 0.009, aoa_flow: float = 0.0, bc_type: str = "entrada_salida", turb_scheme: str = "upwind", grad_scheme: str = "cellMDLimited Gauss linear 1", lap_correction: str = "limited corrected 0.5", relax_p: float = 0.2, relax_eq: float = 0.5) -> None:
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4, turb_intensity: float = 0.00052, viscosity_ratio: float = 0.009, aoa_flow: float = 0.0, bc_type: str = "entrada_salida", turb_scheme: str = "upwind", grad_scheme: str = "cellMDLimited Gauss linear 1", lap_correction: str = "limited corrected 0.5", relax_p: float = 0.2, relax_eq: float = 0.5, consistent: bool = False) -> None:
         # Create directories
         for d in ["0", "constant", "system"]:
             os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
@@ -65,6 +65,7 @@ class OpenFoamSetup:
         self.lap_correction = lap_correction
         self.relax_p = relax_p
         self.relax_eq = relax_eq
+        self.consistent = consistent
             
         self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co, max_iters, momentum_scheme, depth)
         # Se guarda la primera celda: _write_0 la usa para elegir el modelo de
@@ -271,6 +272,7 @@ wallDist {{ method meshWave; }}
     nNonOrthogonalCorrectors 3;
     pRefCell 0;
     pRefValue 0;
+    consistent {"yes" if self.consistent else "no"};
     residualControl {{
         p               {tolerance};
         U               {tolerance};

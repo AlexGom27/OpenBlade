@@ -53,4 +53,4 @@ def case_params(**cambios: Any) -> Dict[str, Any]:
 OPCIONALES = {"depth", "mesh_strategy", "bl_fraction", "bl_total_height", "bl_growth_dist",
               "wake_incline", "mesh_size_max", "mesh_num_layers", "wake_points", "surface_points",
               "normal_points", "mesh_file", "bc_type", "turb_scheme",
-              "grad_scheme", "lap_correction", "alpha_mode", "relax_p", "relax_eq"}
+              "grad_scheme", "lap_correction", "alpha_mode", "relax_p", "relax_eq", "consistent"}

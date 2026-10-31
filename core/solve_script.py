@@ -48,6 +48,7 @@ def configure_case(case_dir, p):
         lap_correction=p.get("lap_correction", "limited corrected 0.5"),
         relax_p=p.get("relax_p", 0.2),
         relax_eq=p.get("relax_eq", 0.5),
+        consistent=bool(p.get("consistent", False)),
     )
     return is_transient
 
