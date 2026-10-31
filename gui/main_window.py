@@ -458,6 +458,7 @@ class MainWindow(QMainWindow):
         self.res_plot.reset()
         self.res_plot.case_dir = self.case_dir
         self.res_plot._end_time = None
+        self.res_plot.estacionario = not job.transient
         vivo = self._vivo.get(job_id, {})
         for campo, valor, t in vivo.get("residuales", ()):
             self.res_plot.update_plot(campo, valor, t)

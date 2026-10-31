@@ -233,9 +233,12 @@ class ResidualPlot(QWidget):
             return
 
         pct = 100.0 * t_now / fin
+        # En estacionario el "tiempo" de OpenFOAM es la iteracion.
+        avance = (f"iteración {t_now:.0f} de {fin:g}" if getattr(self, "estacionario", False)
+                  else f"t = {t_now:.4f} de {fin:g} s")
         if pct >= 99.95:
             self.progress_label.setText(
-                f"✔ COMPLETADA   t = {t_now:.4f} de {fin:g} s   (100%)\n"
+                f"✔ COMPLETADA   {avance}   (100%)\n"
                 f"Muestras: {n}")
             return
 
@@ -257,7 +260,7 @@ class ResidualPlot(QWidget):
                     ritmo = f"\nRitmo: {sp:.2f} s/paso   ·   ETA ~{eta}"
 
         self.progress_label.setText(
-            f"⏳ EN CURSO   t = {t_now:.4f} de {fin:g} s   ({pct:.1f}%)"
+            f"⏳ EN CURSO   {avance}   ({pct:.1f}%)"
             f"\nMuestras: {n}{ritmo}")
 
     def _last_saved_time(self):

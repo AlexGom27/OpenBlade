@@ -285,3 +285,19 @@ def test_only_the_fields_of_the_case_can_be_chosen(window):
     panel._available_fields = None
     panel._limit_selector()
     assert panel.var_selector.model().item(5).isEnabled()
+
+
+def test_residual_progress_speaks_of_iterations_when_steady(window):
+    plot = window.res_plot
+    plot.reset()
+    plot.res_iters = [100.0]
+    plot._end_time = 400.0
+    plot.estacionario = True
+    plot._last_saved_time = lambda: 100.0
+    plot._update_progress_label()
+    assert "iteración 100 de 400" in plot.progress_label.text()
+    plot.estacionario = False
+    plot._update_progress_label()
+    assert "de 400 s" in plot.progress_label.text()
+    del plot._last_saved_time
+    plot.reset()
