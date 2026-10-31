@@ -1076,17 +1076,17 @@ class MainWindow(QMainWindow):
         # Save plots
         try:
             if hasattr(self, 'res_plot'):
-                self.res_plot.fig.savefig("temp_res.png", dpi=150, bbox_inches='tight')
-                images["Gráfica de Residuos"] = "temp_res.png"
+                images["Gráfica de Residuos"] = paths.temp_path("temp_res.png")
+                self.res_plot.fig.savefig(images["Gráfica de Residuos"], dpi=150, bbox_inches='tight')
             if hasattr(self, 'aero_plot'):
-                self.aero_plot.fig.savefig("temp_aero.png", dpi=150, bbox_inches='tight')
-                images["Curvas Polares"] = "temp_aero.png"
+                images["Curvas Polares"] = paths.temp_path("temp_aero.png")
+                self.aero_plot.fig.savefig(images["Curvas Polares"], dpi=150, bbox_inches='tight')
             if hasattr(self, 'cp_plot'):
-                self.cp_plot.fig.savefig("temp_cp.png", dpi=150, bbox_inches='tight')
-                images["Distribución de Cp"] = "temp_cp.png"
+                images["Distribución de Cp"] = paths.temp_path("temp_cp.png")
+                self.cp_plot.fig.savefig(images["Distribución de Cp"], dpi=150, bbox_inches='tight')
             if self.results_panel.plotter:
-                self.results_panel.plotter.screenshot("temp_mesh.png")
-                images["Dominio y Malla / Resultados"] = "temp_mesh.png"
+                images["Dominio y Malla / Resultados"] = paths.temp_path("temp_mesh.png")
+                self.results_panel.plotter.screenshot(images["Dominio y Malla / Resultados"])
         except Exception as e:
             self.log(f"Aviso al guardar imágenes para informe: {e}")
             
@@ -1192,14 +1192,10 @@ class MainWindow(QMainWindow):
             "temp_geom.vtk", "debug.msh", "debug.vtk", "vtk_errors.log", "debug_gmsh.log",
             "temp_geom.stl"
         ]
+        # Solo en la carpeta temporal del programa: nunca donde se abrio la ventana.
         for f in temp_files:
+            f = paths.temp_path(f)
             if os.path.exists(f):
-                try: os.remove(f)
-                except: pass
-
-        # Solo se limpian mallas temporales del barrido (nombre reservado).
-        for f in os.listdir("."):
-            if f.startswith("perfil_") and (f.endswith("_sweep.msh") or f.endswith("_sweep.vtk")):
                 try: os.remove(f)
                 except: pass
 

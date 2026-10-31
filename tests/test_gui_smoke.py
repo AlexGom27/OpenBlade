@@ -186,19 +186,17 @@ def test_closing_keeps_the_results_of_the_case(window, tmp_path):
 
 
 def test_cleanup_preserves_user_mesh(window, tmp_path, monkeypatch):
-    """Abrir la app no debe borrar las mallas que generó el usuario."""
+    """Cerrar la app no toca la carpeta desde donde se abrio."""
     workdir = tmp_path / "wd"
     workdir.mkdir()
-    keep = workdir / "perfil_0012.msh"
-    keep.write_text("malla del usuario")
-    sweep = workdir / "perfil_0012_sweep.msh"
-    sweep.write_text("temporal")
+    nombres = ["perfil_0012.msh", "perfil_0012_sweep.msh", "debug.msh"]
+    for nombre in nombres:
+        (workdir / nombre).write_text("del usuario")
 
     monkeypatch.chdir(workdir)
     window.cleanup()
 
-    assert keep.exists(), "cleanup borró la malla del usuario"
-    assert not sweep.exists(), "cleanup dejó la malla temporal del barrido"
+    assert sorted(p.name for p in workdir.iterdir()) == sorted(nombres)
 
 
 def test_exec_mode_defaults_to_local_and_round_trips(window):

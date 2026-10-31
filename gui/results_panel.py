@@ -5,6 +5,7 @@ try:
     from pyvistaqt import QtInteractor
 except ImportError:
     QtInteractor = None
+from core import paths
 from core.postprocessing import PostProcessor
 from typing import Optional, Any
 import os
@@ -25,7 +26,7 @@ class ResultsPanel(QWidget):
         super().__init__(parent)
         
         # Redirigir errores de VTK a un archivo usando PyVista nativo (sin importar vtk directo que causa SIGKILL en Mac)
-        pv.set_error_output_file("vtk_errors.log")
+        pv.set_error_output_file(paths.temp_path("vtk_errors.log"))
         
         self.case_dir = case_dir
         self.post_processor = None
@@ -389,9 +390,15 @@ class ResultsPanel(QWidget):
 
     def take_screenshot(self) -> None:
         if not self.plotter: return
+        from qtpy.QtWidgets import QFileDialog
+        filename, _ = QFileDialog.getSaveFileName(self, "Guardar Imagen", "resultados.png", "Imagen PNG (*.png)")
+        if not filename:
+            return
+        if not filename.endswith(".png"):
+            filename += ".png"
         try:
-            self.plotter.screenshot("resultados.png", transparent_background=True, window_size=(1920, 1080))
-            self.log("✅ Captura guardada como 'resultados.png' (1920x1080).")
+            self.plotter.screenshot(filename, window_size=(1920, 1080))
+            self.log(f"✅ Captura guardada en {filename} (1920x1080).")
         except Exception as e:
             self.log(f"Error al guardar captura: {e}")
 
