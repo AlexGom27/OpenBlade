@@ -41,7 +41,8 @@ FINALES = (TERMINADO, FALLIDO, DETENIDO)
 
 LOCAL = "local"
 RC_DETENIDA = 143
-MAX_FALLOS = 2000       # intentos sin respuesta antes de dar por perdido el seguimiento: horas
+MAX_FALLOS = 2000       # intentos sin respuesta antes de dejar de seguirlo: horas
+ARRANQUE_MAX = 600.0    # segundos que puede tardar un trabajo lanzado en dar señales de vida
 # Lo que define la malla. Con los mismos valores se reutiliza el mismo archivo:
 # dos paquetes del mismo caso llevan exactamente la misma malla.
 CLAVES_MALLA = ("profile_type", "naca", "chord", "aoa", "mesh_size_min", "mesh_size_max",
@@ -211,7 +212,8 @@ def make_runner(job: Job):
     if job.host == LOCAL:
         from core.local_runner import LocalJob
         return LocalJob(job.case_dir, job.id, bool(job.params.get("native_foam")))
-    return RemoteJob(job.host, job_dir=job.remote_dir or f"openblade_jobs/{job.id}")
+    # La carpeta lleva el id del trabajo: si ya existe, es de un intento anterior suyo.
+    return RemoteJob(job.host, job_dir=job.remote_dir or f"openblade_jobs/{job.id}", carpeta_propia=True)
 
 
 class Events:
@@ -306,8 +308,9 @@ class _Vigilancia:
 
 
 # Lo que dice ssh o rsync cuando falla la conexion, no el trabajo
-CORTES = ("timed out", "connection refused", "connection closed", "connection reset", "no route to host",
-          "network is", "could not resolve", "unexpected end of file", "broken pipe", "mux_client",
+CORTES = ("timed out", "timeout", "not responding", "connection refused", "connection closed",
+          "unexpectedly closed", "connection reset", "no route to host", "network is", "could not resolve",
+          "unexpected end of file", "broken pipe", "mux_client", "protocol data stream", "socket io",
           "tailscale pide")
 
 
@@ -346,11 +349,13 @@ def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], N
            on_notice: Callable[[str], None] = lambda _: None) -> Optional[Dict[str, Any]]:
     """Sigue un trabajo hasta que termina y devuelve su estado final.
 
-    Un corte de red no lo detiene, sigue corriendo en su maquina: se reintenta
-    durante un buen rato y se avisa una vez. Devuelve None si se pidio dejar de seguirlo.
+    Un corte de red no lo detiene, sigue corriendo en su maquina: se reintenta durante
+    horas y se avisa una vez. Devuelve None si se pidio dejar de seguirlo, o si tras esas
+    horas se deja: el trabajo no esta perdido, se retoma al abrir de nuevo el programa.
     """
     parser = LogParser()
     paso, fallos, avisado = None, 0, ""
+    inicio = time.time()
     while not should_stop():
         try:
             # Primero el estado: en una red lenta el log puede tardar en llegar, y un trabajo
@@ -370,9 +375,14 @@ def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], N
                 avisado = str(e)
                 on_notice(f"⚠️ Sin respuesta de la máquina; el trabajo sigue allí. {e}")
             if fallos >= MAX_FALLOS:
-                raise RemoteError(f"Sin conexión con la máquina: {e}") from e
+                on_notice("⚠️ Sigue sin conexión: se deja de seguir. El trabajo sigue en su máquina "
+                          "y se retoma al abrir de nuevo el programa.")
+                return None
             time.sleep(poll_s)
             continue
+        # Lanzado, pero sin rastro de su proceso: no va a arrancar ya.
+        if est.get("step") == "inicio" and est.get("state") == "running" and time.time() - inicio > ARRANQUE_MAX:
+            raise RemoteError("El trabajo no arrancó en su máquina: no dejó ningún rastro")
         if est.get("step") != paso:
             paso = est.get("step")
             on_step(paso or "")
@@ -503,6 +513,7 @@ class Dispatcher:
         self._hilos: Dict[str, threading.Thread] = {}
         self._runners: Dict[str, Any] = {}
         self._soltar: set = set()
+        self._detener: set = set()
         self._candado = threading.RLock()
 
     def set_machines(self, machines: List[Machine]) -> None:
@@ -561,6 +572,10 @@ class Dispatcher:
         try:
             run_job(job, self.events, lambda: job.id in self._soltar, registrar,
                     self.poll_s, self.stop_on_divergence)
+            if job.id in self._detener:
+                job.state = DETENIDO
+                job.save()
+                self.events.state(job)
         finally:
             with self._candado:
                 self._hilos.pop(job.id, None)
@@ -577,6 +592,11 @@ class Dispatcher:
                 job.state = DETENIDO
                 job.save()
                 self.events.state(job)
+                return
+            # Aun no ha llegado a su maquina, quiza esperando la red: ya no se envia.
+            if not job.remote_dir:
+                self._detener.add(job_id)
+                self._soltar.add(job_id)
                 return
             runner = self._runners.get(job_id)
         if runner is not None:

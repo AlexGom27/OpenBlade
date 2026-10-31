@@ -161,8 +161,8 @@ def test_an_interrupted_polar_goes_on_without_repeating_anything(monkeypatch):
             pass
 
     monkeypatch.setattr(C, "Dispatcher", Falso)
-    C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0, 6.0, 8.0], [])
-    assert enviados == ["polar_a2", "polar_a4", "polar_a6", "polar_a8"]
+    C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0, 6.0, 8.0, 10.0], [])
+    assert enviados == ["polar_a2", "polar_a4", "polar_a6", "polar_a8", "polar_a10"]
     por_etiqueta = {j.label: j for j in load_jobs()}
     a2, a4, a6 = por_etiqueta["polar_a2"], por_etiqueta["polar_a4"], por_etiqueta["polar_a6"]
     a2.state = TERMINADO
@@ -171,12 +171,16 @@ def test_an_interrupted_polar_goes_on_without_repeating_anything(monkeypatch):
     a4.save()
     a6.state = FALLIDO
     a6.save()
+    a10 = por_etiqueta["polar_a10"]
+    a10.state, a10.remote_dir, a10.rc, a10.error = FALLIDO, "openblade_jobs/y", 0, "rsync: sin espacio"
+    a10.save()
     assert por_etiqueta["polar_a8"].state == PENDIENTE
     enviados.clear()
     total = len(load_jobs())
-    r = C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0, 6.0, 8.0], [], continuar=True)
-    assert retomados == ["polar_a4"]
+    r = C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0, 6.0, 8.0, 10.0], [], continuar=True)
+    # El calculo de a10 termino y solo fallo su descarga: se retoma, no se repite
+    assert retomados == ["polar_a4", "polar_a10"]
     assert enviados == ["polar_a6", "polar_a8"]
-    # Solo el que fallo tiene carpeta nueva
+    # Solo el que fallo de verdad tiene carpeta nueva
     assert len(load_jobs()) == total + 1
-    assert [f["aoa"] for f in r["filas"]] == [2.0, 4.0, 6.0, 8.0]
+    assert [f["aoa"] for f in r["filas"]] == [2.0, 4.0, 6.0, 8.0, 10.0]

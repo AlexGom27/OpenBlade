@@ -182,8 +182,9 @@ def interpret_status(estado_txt: str, vivo: str, log: str) -> Dict[str, Any]:
 
 class RemoteJob:
     def __init__(self, host: str, job_dir: Optional[str] = None,
-                 etiqueta: str = "caso") -> None:
+                 etiqueta: str = "caso", carpeta_propia: bool = False) -> None:
         self.host = validar_host(host)
+        self.carpeta_propia = carpeta_propia
         limpia = re.sub(r"[^A-Za-z0-9_.-]", "_", etiqueta)
         # El sufijo evita que dos lanzamientos en el mismo segundo compartan carpeta.
         self.job_dir = job_dir or (
@@ -218,12 +219,12 @@ class RemoteJob:
         from core.package import FICHA, build_ficha, sha256_file
 
         # mkdir sin -p: si la carpeta ya existe es de otro trabajo y no se toca. Salvo que
-        # sea de este intento anterior, que pudo crearla antes de cortarse la conexion.
+        # sea de un intento anterior de este, que pudo crearla antes de cortarse la conexion.
         padre = os.path.dirname(self.job_dir)
-        reintento = getattr(self, "_carpeta_pedida", False)
-        self._carpeta_pedida = True
+        propia = self.carpeta_propia
+        self.carpeta_propia = True
         r = _ssh(self.host, f"mkdir -p ~/{padre} && mkdir ~/{self.job_dir}")
-        if r.returncode != 0 and not (reintento and "File exists" in r.stderr):
+        if r.returncode != 0 and not (propia and "File exists" in r.stderr):
             raise RemoteError(f"No se pudo crear el trabajo: {r.stderr.strip()[-200:]}")
 
         malla = os.path.join(case_dir, "mesh.msh")

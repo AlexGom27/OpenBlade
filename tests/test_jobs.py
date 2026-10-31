@@ -375,6 +375,81 @@ def test_retrying_the_upload_does_not_trip_on_its_own_folder(monkeypatch, tmp_pa
     respuestas.append(Salida(1, "mkdir: cannot create: File exists"))
     with pytest.raises(R.RemoteError, match="File exists"):
         R.RemoteJob("u@h", job_dir="jobs/y").subir(str(tmp_path), "/no/existe", 2, False, {})
+    # Salvo la que lleva el id del trabajo, tras reiniciar la Mac a media subida
+    respuestas.append(Salida(1, "mkdir: cannot create: File exists"))
+    job = new_job(case_params(), "u@h", 2)
+    with pytest.raises(FileNotFoundError):
+        J.make_runner(job).subir(str(tmp_path), "/no/existe", 2, False, {})
+
+
+@pytest.mark.parametrize("mensaje", [
+    "rsync error: timeout in data send/receive (code 30) at io.c(197)",
+    "rsync: connection unexpectedly closed (0 bytes received so far) [receiver]",
+    "Timeout, server u@h not responding.",
+    "ssh: connect to host h port 22: Operation timed out",
+    "mux_client_request_session: read from master failed: Broken pipe",
+    "rsync error: error in rsync protocol data stream (code 12)",
+])
+def test_transport_messages_are_cuts(mensaje):
+    from core.remote_runner import RemoteError
+    assert J.es_corte(RemoteError(mensaje))
+
+
+@pytest.mark.parametrize("mensaje", [
+    "No se pudo crear el trabajo: Permission denied (publickey)",
+    "rsync: write failed: No space left on device (28)",
+    "No se pudo crear el trabajo: mkdir: cannot create: File exists",
+])
+def test_real_errors_are_not_cuts(mensaje):
+    from core.remote_runner import RemoteError
+    assert not J.es_corte(RemoteError(mensaje))
+
+
+def test_hours_without_connection_let_go_of_the_job_but_do_not_fail_it(monkeypatch):
+    from core.remote_runner import RemoteError
+
+    class Cortado(_RunnerFalso):
+        def estado(self):
+            raise RemoteError("ssh: connect to host h port 22: Operation timed out")
+
+    monkeypatch.setattr(J, "MAX_FALLOS", 3)
+    avisos = []
+    assert follow(Cortado([{}]), lambda e: None, lambda p: None, lambda: False, poll_s=0,
+                  on_notice=avisos.append) is None
+    assert "se retoma" in avisos[-1]
+
+
+def test_a_job_that_never_starts_is_not_followed_forever(monkeypatch):
+    from core.remote_runner import RemoteError
+    monkeypatch.setattr(J, "ARRANQUE_MAX", -1.0)
+    with pytest.raises(RemoteError, match="no arrancó"):
+        follow(_RunnerFalso([{"state": "running", "step": "inicio"}]), lambda e: None, lambda p: None,
+               lambda: False, poll_s=0)
+
+
+def test_stopping_a_job_that_waits_for_the_network_never_sends_it(monkeypatch):
+    from core.remote_runner import RemoteError
+    intentos = []
+
+    class SinRed:
+        job_dir = "openblade_jobs/x"
+
+        def subir(self, *a):
+            intentos.append(1)
+            raise RemoteError("ssh: connect to host h port 22: Operation timed out")
+
+    monkeypatch.setattr(J, "make_runner", lambda job: SinRed())
+    monkeypatch.setattr(J, "ensure_mesh", lambda *a: "/no/importa")
+    monkeypatch.setattr("core.solve_script.configure_case", lambda *a: False)
+    d = Dispatcher(poll_s=0.01)
+    d.set_machines([Machine("a@h", 2, 1)])
+    trabajo = new_job(case_params(), "a@h", 2)
+    d.submit(trabajo)
+    while not intentos:
+        time.sleep(0.01)
+    d.stop(trabajo.id)
+    assert d.wait(5)
+    assert trabajo.state == DETENIDO and not trabajo.remote_dir
 
 
 def test_a_finished_job_does_not_wait_for_a_log_that_cannot_arrive():

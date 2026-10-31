@@ -17,7 +17,8 @@ import numpy as np
 
 from core.defaults import DEFAULT_PARAMS, case_params
 from core.gci import study_from_levels
-from core.jobs import DETENIDO, Dispatcher, Events, FALLIDO, FINALES, Job, Machine, load_jobs, new_job
+from core.jobs import (DESCARGANDO, DETENIDO, Dispatcher, Events, FALLIDO, FINALES, Job, Machine, load_jobs,
+                       new_job)
 
 NIVELES_GCI = (1, 2, 3)
 NIVEL_BASE = 2
@@ -168,7 +169,13 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
 
     def trabajo(q: Dict[str, Any], etiqueta: str) -> Job:
         for j in reversed(previos):
-            if j.label == etiqueta and j.params == q and j.state not in (FALLIDO, DETENIDO):
+            if j.label != etiqueta or j.params != q:
+                continue
+            # El calculo termino bien y solo fallo traerlo: no hay que repetirlo.
+            if j.state == FALLIDO and j.remote_dir and j.rc == 0 and not j.analysis:
+                j.state, j.error, j.finished = DESCARGANDO, "", None
+                return j
+            if j.state not in (FALLIDO, DETENIDO):
                 return j
         return new_job(q, label=etiqueta)
 
