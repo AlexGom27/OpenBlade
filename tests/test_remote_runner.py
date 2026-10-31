@@ -143,3 +143,30 @@ def test_launching_twice_after_a_cut_starts_one_calculation_only(tmp_path):
     import time
     time.sleep(0.3)
     assert (tmp_path / "job.log").read_text().count("lanzado") == 1
+
+
+def test_a_slow_link_reads_the_log_in_smaller_pieces(monkeypatch):
+    """Con 2 MB fijos y una red lenta, la lectura se agotaba siempre en el mismo sitio."""
+    from core import remote_runner as rr
+    import subprocess
+    pedidos = []
+
+    class Salida:
+        returncode = 0
+        stderr = b""
+        stdout = b"x" * 10
+
+    def falso(cmd, **_k):
+        pedidos.append(int(cmd[-1].rsplit(" ", 1)[1]))
+        if len(pedidos) <= 2:
+            raise subprocess.TimeoutExpired(cmd, 60)
+        return Salida()
+
+    monkeypatch.setattr(rr.subprocess, "run", falso)
+    t = RemoteJob("u@h", job_dir="jobs/x")
+    for _ in range(2):
+        with pytest.raises(subprocess.TimeoutExpired):
+            t.leer_log()
+    assert t.leer_log() == "x" * 10 and t.offset == 10
+    t.leer_log()
+    assert pedidos == [2_000_000, 1_000_000, 500_000, 1_000_000]

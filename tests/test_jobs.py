@@ -375,3 +375,14 @@ def test_retrying_the_upload_does_not_trip_on_its_own_folder(monkeypatch, tmp_pa
     respuestas.append(Salida(1, "mkdir: cannot create: File exists"))
     with pytest.raises(R.RemoteError, match="File exists"):
         R.RemoteJob("u@h", job_dir="jobs/y").subir(str(tmp_path), "/no/existe", 2, False, {})
+
+
+def test_a_finished_job_does_not_wait_for_a_log_that_cannot_arrive():
+    import subprocess
+
+    class Lento(_RunnerFalso):
+        def leer_log(self):
+            raise subprocess.TimeoutExpired("ssh", 60)
+
+    est = follow(Lento([{"state": "done", "rc": 0}]), lambda e: None, lambda p: None, lambda: False, poll_s=0)
+    assert est["state"] == "done"

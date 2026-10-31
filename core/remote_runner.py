@@ -21,6 +21,8 @@ SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
             # Si la Mac se duerme o cambia de red, la conexion muere sin avisar: sin esto
             # una descarga se queda colgada para siempre.
             "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
+            # El log es texto: comprimido pasa por una red lenta, como la del telefono.
+            "-o", "Compression=yes",
             # Reutilizar la conexion: el avance se consulta cada pocos segundos.
             "-o", "ControlMaster=auto",
             "-o", "ControlPath=~/.ssh/openblade-%C",
@@ -32,6 +34,7 @@ ESPERA_RSYNC = 5.0
 INTENTOS_DESCARGA = 240
 ESPERA_MAX_RSYNC = 60.0
 TIEMPO_RSYNC = 120      # segundos sin transferir nada antes de dar la conexion por muerta
+BLOQUE_MINIMO = 32_000  # lo minimo que se pide de run.log en cada lectura
 EXCLUIR_BAJADA = ["processor*", "mesh.msh", "remote_job.py", "job.json",
                   "status.json", "job.log"]
 
@@ -278,21 +281,28 @@ class RemoteJob:
         return interpret_status(estado_txt, vivo.strip(), log.strip())
 
     def leer_log(self, maximo: int = 2_000_000) -> str:
-        """Texto nuevo de run.log desde la ultima lectura."""
+        """Texto nuevo de run.log desde la ultima lectura.
+
+        Si en una red lenta el trozo no llega a tiempo, se pide la mitad la vez siguiente:
+        con un trozo fijo la lectura se agotaria siempre en el mismo sitio y no avanzaria.
+        """
+        bloque = min(maximo, getattr(self, "_bloque", maximo))
         try:
             salida = subprocess.run(
                 ["ssh"] + SSH_OPTS + [
                     self.host,
                     f"tail -c +{self.offset + 1} ~/{self.job_dir}/run.log 2>/dev/null "
-                    f"| head -c {maximo}"],
+                    f"| head -c {bloque}"],
                 capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
         except subprocess.TimeoutExpired as e:
+            self._bloque = max(bloque // 2, BLOQUE_MINIMO)
             aviso = _aviso_tailscale(e.stdout) or _aviso_tailscale(e.stderr)
             if aviso:
                 raise RemoteError(aviso) from None
             raise
         if salida.returncode != 0:
             raise RemoteError(salida.stderr.decode(errors="replace").strip()[-200:])
+        self._bloque = min(bloque * 2, maximo)
         self.offset += len(salida.stdout)
         return salida.stdout.decode(errors="replace")
 

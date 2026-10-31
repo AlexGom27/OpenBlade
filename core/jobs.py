@@ -353,10 +353,13 @@ def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], N
     paso, fallos, avisado = None, 0, ""
     while not should_stop():
         try:
-            for ev in parser.feed(runner.leer_log()):
-                on_event(ev)
+            # Primero el estado: en una red lenta el log puede tardar en llegar, y un trabajo
+            # terminado no debe quedarse esperando a que se lea todo.
             est = runner.estado()
             runner.comprobar_ficha(est)
+            if est.get("state") == "running":
+                for ev in parser.feed(runner.leer_log()):
+                    on_event(ev)
             fallos = 0
             avisado = ""
         except FichaDistinta:
@@ -374,9 +377,13 @@ def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], N
             paso = est.get("step")
             on_step(paso or "")
         if est.get("state") != "running":
-            # Lo que el solver escribio justo antes de terminar
-            for ev in parser.feed(runner.leer_log() + "\n"):
-                on_event(ev)
+            # Lo que el solver escribio justo antes de terminar. Solo sirve para las graficas
+            # en vivo: el resultado sale de las fuerzas que se descargan.
+            try:
+                for ev in parser.feed(runner.leer_log() + "\n"):
+                    on_event(ev)
+            except (RemoteError, subprocess.TimeoutExpired, OSError):
+                pass
             return est
         time.sleep(poll_s)
     return None
