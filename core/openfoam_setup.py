@@ -96,10 +96,18 @@ functions
     {{
         type            yPlus;
         libs            ("libfieldFunctionObjects.so");
-        // Escribir cada 100 iteraciones: con writeInterval 1 se crea un
-        // directorio por paso de tiempo y la E/S domina el coste del solver.
-        writeControl    timeStep;
-        writeInterval   100;
+        executeControl  writeTime;
+        writeControl    writeTime;
+        patches         (airfoil);
+    }}
+
+    // Friccion real en la pared: de aqui sale el y+ del programa (core/yplus.py).
+    wallShearStress
+    {{
+        type            wallShearStress;
+        libs            ("libfieldFunctionObjects.so");
+        executeControl  writeTime;
+        writeControl    writeTime;
         patches         (airfoil);
     }}
 

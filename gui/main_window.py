@@ -6,6 +6,7 @@ from qtpy.QtGui import QCloseEvent, QTextCursor
 from typing import Optional, Dict, Any
 import json
 import os
+import threading
 import pyvista as pv
 import numpy as np
 import gmsh
@@ -23,6 +24,7 @@ import time
 class MainWindow(QMainWindow):
     # Señal para devolver al hilo de la GUI los datos leídos en segundo plano.
     _conv_ready = Signal(object)
+    _analysis_ready = Signal(object)
 
     log_signal = Signal(str)
 
@@ -133,6 +135,13 @@ class MainWindow(QMainWindow):
 
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
+
+        # Lo que el programa afirma del ultimo resultado, siempre a la vista.
+        self.verdict_banner = QLabel("")
+        self.verdict_banner.setWordWrap(True)
+        self.verdict_banner.setVisible(False)
+        right_layout.addWidget(self.verdict_banner)
+        self._analysis_ready.connect(self._show_analysis)
         
         self.tabs = QTabWidget()
         self.tabs.setElideMode(Qt.ElideNone)
@@ -349,6 +358,8 @@ class MainWindow(QMainWindow):
 
         from .workers import RemoteSimWorker, SimWorker
         self._current_aoa = float(p.get("aoa", 0.0))
+        self._sim_transient = "pimpleFoam" in p.get("regime", "")
+        self.verdict_banner.setVisible(False)
         self._sim_running = True
         self.input_panel.btn_run.setEnabled(False)
         self.input_panel.btn_stop_sim.setVisible(True)
@@ -574,14 +585,15 @@ class MainWindow(QMainWindow):
             return
         elapsed_min = (time.time() - t0) / 60.0
         end = getattr(self, "_sim_end_time", 0.5) or 0.5
-        pct = 100.0 * t_current / end if end > 0 else 0.0
+        pct = min(100.0, 100.0 * t_current / end)
+        transitorio = getattr(self, "_sim_transient", False)
 
-        if n_steps > 0 and elapsed_min > 0:
-            per_step = elapsed_min / n_steps
-            restante = (end - t_current) / max(t_current / n_steps, 1e-9)
-            eta = restante / 60.0
-            eta_txt = (f"{eta:.0f} h" if eta > 90 else f"{eta:.0f} min")
-            ritmo = f"{n_steps} pasos en {elapsed_min:.0f} min → {per_step:.1f} min/paso"
+        if n_steps > 0 and t_current > 0:
+            min_por_avance = elapsed_min / t_current
+            eta = max(0.0, end - t_current) * min_por_avance
+            eta_txt = f"{eta / 60:.1f} h" if eta > 90 else f"{eta:.0f} min"
+            ritmo = (f"{n_steps} pasos en {elapsed_min:.0f} min" if transitorio else
+                     f"{60 * t_current / max(elapsed_min * 60, 1e-6):.0f} iter/min")
         else:
             eta_txt, ritmo = "—", "—"
 
@@ -591,7 +603,7 @@ class MainWindow(QMainWindow):
 
         lbl.setText(
             f"{estado}   {inicio} → {ahora}  ({elapsed_min:.0f} min)\n"
-            f"Progreso:  t = {t_current:.4g} de {end:g} s   ({pct:.1f}%)\n"
+            f"Progreso:  {avance}   ({pct:.1f}%)\n"
             f"Falta:     {100 - pct:.1f}%   ·   ETA ~{eta_txt}\n"
             f"Ritmo:     {ritmo}"
         )
@@ -633,24 +645,71 @@ class MainWindow(QMainWindow):
         self.input_panel.btn_stop_sim.setEnabled(True)
         self.input_panel.btn_pause_sim.setVisible(False)
 
-    def _on_sweep_done(self, aoa_list, cl_list, cd_list, cm_list) -> None:
-        self.log(f"✅ Barrido completado: {len(aoa_list)} puntos")
+    def _on_sweep_done(self, aoa_list, cl_list, cd_list, cm_list, estados) -> None:
+        from collections import Counter
+        from core.verdict import CONVERGIDO, DIVERGIDO, NO_CONVERGIDO, SIN_DATOS
+        cuenta = Counter(estados)
+        resumen = ", ".join(f"{cuenta[e]} {e}" for e in
+                            (CONVERGIDO, NO_CONVERGIDO, DIVERGIDO, SIN_DATOS) if cuenta[e])
+        self.log(f"📊 Barrido terminado: {resumen or 'sin puntos'}")
         self._reset_run_state()
         if hasattr(self, 'aero_plot') and aoa_list:
-            self.aero_plot.update_plots(aoa_list, cl_list, cd_list, cm_list)
+            self.aero_plot.update_plots(aoa_list, cl_list, cd_list, cm_list, estados)
             self.tabs.setCurrentWidget(self.aero_plot)
+        malos = len(estados) - cuenta[CONVERGIDO]
+        self._set_banner(CONVERGIDO if estados and not malos else NO_CONVERGIDO,
+                         f"Barrido: {resumen or 'sin puntos'}"
+                         + (". Los puntos huecos no convergieron y los divergidos no "
+                            "se dibujan." if malos else "."))
             self.log("📈 Gráfica polar actualizada en pestaña Cl/Cd.")
 
     def on_sim_done(self, code: int) -> None:
-        self.log(f"🏁 Simulación finalizada (Código {code})")
         self._reset_run_state()
         self.results_panel.setEnabled(True)
-        if code != 0:
-            self.log("❌ El solver terminó con error. Revisa el log antes de interpretar resultados.")
-            return
-        # Sugerir cargar resultados
-        self.log("💡 Puedes pulsar 'Ver Resultados' para visualizar el flujo.")
-        self._refresh_cp_plot()
+        transitorio = getattr(self, "_sim_transient", False)
+
+        # Leer la malla puede tardar: fuera del hilo de la interfaz.
+        def trabajo():
+            from core.verdict import analyze_case
+            self._analysis_ready.emit((analyze_case(self.case_dir, transitorio, code), code))
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _set_banner(self, estado: str, texto: str) -> None:
+        from core.verdict import CONVERGIDO, DIVERGIDO, NO_CONVERGIDO
+        fondo = {CONVERGIDO: "#1b5e20", NO_CONVERGIDO: "#b26a00",
+                 DIVERGIDO: "#b71c1c"}.get(estado, "#37474f")
+        self.verdict_banner.setStyleSheet(
+            f"background: {fondo}; color: white; padding: 8px; border-radius: 4px; "
+            "font-size: 12px;")
+        self.verdict_banner.setText(texto)
+        self.verdict_banner.setVisible(True)
+
+    def _show_analysis(self, datos) -> None:
+        """Presenta el veredicto; ningun coeficiente sale sin el."""
+        from core.verdict import CONVERGIDO, DIVERGIDO, NO_CONVERGIDO, Verdict
+        analisis, code = datos
+        self._last_code = code
+        v = Verdict(**analisis["verdict"])
+        icono = {CONVERGIDO: "✅", NO_CONVERGIDO: "⚠️", DIVERGIDO: "💥"}.get(v.state, "❓")
+        self.log(f"{icono} {v.state}: {v.reason}")
+        self.log(f"   {v.coefficients_text()}")
+        lineas = [f"{icono} {v.state}: {v.reason}", v.coefficients_text()]
+        if v.state in (CONVERGIDO, NO_CONVERGIDO) and v.cl is not None:
+            self._last_cl, self._last_cd, self._last_cm = v.cl, v.cd, v.cm
+            self.aero_plot.update_plots([self._current_aoa], [v.cl], [v.cd], [v.cm], [v.state])
+        else:
+            self._last_cl = self._last_cd = self._last_cm = 0.0
+            self.aero_plot.update_plots([], [], [], [], [])
+        aviso = analisis.get("yplus_notice")
+        if aviso:
+            marca = {"ok": "✅", "aviso": "⚠️", "mal": "❌"}.get(aviso["level"], "ℹ️")
+            self.log(f"{marca} {aviso['text']}")
+            lineas.append(f"{marca} {aviso['text']}")
+        self._set_banner(v.state, "\n".join(lineas))
+        if code == 0:
+            self.log("💡 Puedes pulsar 'Ver Resultados' para visualizar el flujo.")
+            self._refresh_cp_plot()
 
 
 
@@ -677,7 +736,6 @@ class MainWindow(QMainWindow):
                 return
 
             self._conv_busy = True
-            import threading
 
             def trabajo():
                 try:
@@ -862,20 +920,16 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.log(f"Aviso al guardar imágenes para informe: {e}")
             
-        from core.forces import ForceDataError, final_coefficients
-        try:
-            cl, cd, cm = final_coefficients(self.case_dir)
-            results = {"Cl": cl, "Cd": cd, "Cm": cm}
-        except ForceDataError as e:
-            self.log(f"⚠️ El informe sale sin coeficientes: {e}")
-            results = {"Cl": "sin datos", "Cd": "sin datos", "Cm": "sin datos"}
+        from core.verdict import analyze_case
+        analisis = analyze_case(self.case_dir, "pimpleFoam" in p.get("regime", ""),
+                                getattr(self, "_last_code", 0))
         
         filename, _ = QFileDialog.getSaveFileName(self, "Guardar Informe", "informe_cfd.pdf", "PDF Files (*.pdf)")
         if filename:
             if not filename.endswith(".pdf"):
                 filename += ".pdf"
             try:
-                generate_pdf_report(filename, p, results, images)
+                generate_pdf_report(filename, p, analisis, images)
                 self.log(f"✅ Informe PDF generado exitosamente en {filename}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Fallo al generar PDF: {e}")

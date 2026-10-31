@@ -205,9 +205,10 @@ class SweepWorker(QThread):
       3. Ejecuta la simulación en estado estacionario
       4. Extrae Cl y Cd del postprocessing
     
-    Emite finished(aoa_list, cl_list, cd_list, cm_list) al terminar.
+    Emite finished(aoa_list, cl_list, cd_list, cm_list, estados) al terminar.
+    Un punto sin coeficientes validos lleva None en Cl, Cd y Cm.
     """
-    finished = Signal(list, list, list, list)
+    finished = Signal(list, list, list, list, list)
     error = Signal(str)
     log_msg = Signal(str)
     progress = Signal(int, int)  # (current, total)
@@ -274,6 +275,7 @@ class SweepWorker(QThread):
         cl_results = []
         cd_results = []
         cm_results = []
+        estados = []
         
         naca = self.p.get("naca", "0012")
         
@@ -320,15 +322,19 @@ class SweepWorker(QThread):
                 
                 # Paso 2: Configurar y ejecutar simulación
                 self.log_msg.emit(f"  🚀 Simulando...")
-                cl, cd, cm = self._solve_angle(sweep_params, json_path, msh_file, angle)
+                v = self._solve_angle(sweep_params, json_path, msh_file, angle)
                 if self._stop_requested:
                     break
 
+                from core.verdict import CONVERGIDO, NO_CONVERGIDO
+                valido = v.state in (CONVERGIDO, NO_CONVERGIDO)
                 aoa_results.append(angle)
-                cl_results.append(cl)
-                cd_results.append(cd)
-                cm_results.append(cm)
-                self.log_msg.emit(f"  ✅ AoA={angle}°: Cl={cl:.4f}, Cd={cd:.4f}")
+                estados.append(v.state)
+                cl_results.append(v.cl if valido else None)
+                cd_results.append(v.cd if valido else None)
+                cm_results.append(v.cm if valido else None)
+                self.log_msg.emit(f"  {v.state} AoA={angle}°: {v.reason}")
+                self.log_msg.emit(f"     {v.coefficients_text()}")
 
             except subprocess.TimeoutExpired:
                 self.log_msg.emit(f"  ⏱️ Timeout en AoA={angle}°, saltando...")
@@ -344,18 +350,17 @@ class SweepWorker(QThread):
                 try: os.remove(f)
                 except: pass
         
-        self.log_msg.emit(f"📊 Barrido completado: {len(aoa_results)}/{total} puntos exitosos")
-        self.finished.emit(aoa_results, cl_results, cd_results, cm_results)
+        self.finished.emit(aoa_results, cl_results, cd_results, cm_results, estados)
     
     def _solve_angle(self, params, json_path, msh_file, angle):
-        """Resuelve un angulo y devuelve (cl, cd, cm); local por defecto."""
-        from core.forces import final_coefficients
+        """Resuelve un angulo y devuelve su veredicto; local por defecto."""
+        from core.verdict import evaluate_case
 
-        self._run_cmd(
+        result = self._run_cmd(
             [sys.executable, "-m", "core.solve_script", json_path, msh_file],
             timeout=1200
         )
-        return final_coefficients(self.case_dir)
+        return evaluate_case(self.case_dir, False, result.returncode)
 
 
 def _follow_remote_job(worker, job, parser_events, should_stop, poll_s=4.0):
@@ -498,9 +503,9 @@ class RemoteSweepWorker(SweepWorker):
                 self.log_msg.emit(f"⚠️ No se pudo detener el trabajo: {e}")
 
     def _solve_angle(self, params, json_path, msh_file, angle):
-        from core.forces import final_coefficients
         from core.remote_runner import RemoteError, RemoteJob
         from core.solve_script import configure_case
+        from core.verdict import evaluate_case
 
         transient = configure_case(self.case_dir, params)
         etiqueta = f"{params.get('naca') or 'custom'}_a{angle}"
@@ -509,7 +514,9 @@ class RemoteSweepWorker(SweepWorker):
                                  int(params.get("server_nproc", 4)), transient)
         est = _follow_remote_job(self, self._job, lambda ev: None,
                                  lambda: self._stop_requested)
-        if est is None or est.get("rc"):
-            raise RemoteError((est or {}).get("error", "trabajo detenido"))
+        if est is None:
+            raise RemoteError("trabajo detenido")
+        if est.get("error"):
+            self.log_msg.emit(f"  ❌ Servidor: {est['error']}")
         self._job.descargar(self.case_dir)
-        return final_coefficients(self.case_dir)
+        return evaluate_case(self.case_dir, False, int(est.get("rc") or 0))

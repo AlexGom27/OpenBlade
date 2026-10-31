@@ -4,7 +4,8 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-def generate_pdf_report(filename, params, results, images):
+def generate_pdf_report(filename, params, analysis, images):
+    """Informe de una corrida. `analysis` es lo que devuelve core.verdict.analyze_case."""
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     title_style = styles['Heading1']
@@ -15,6 +16,22 @@ def generate_pdf_report(filename, params, results, images):
     
     # Title
     elements.append(Paragraph("OpenBlade 2D - Informe de Simulación CFD", title_style))
+    elements.append(Spacer(1, 12))
+
+    # El veredicto va primero: ningun coeficiente se lee sin el.
+    verdict = analysis["verdict"]
+    estado = verdict["state"]
+    color = {"CONVERGIDO": "#1b5e20", "DIVERGIDO": "#b71c1c"}.get(estado, "#b26a00")
+    elements.append(Paragraph("Veredicto", subtitle_style))
+    elements.append(Paragraph(f'<font color="{color}"><b>{estado}</b></font>: '
+                              f'{verdict["reason"]}', normal_style))
+    if estado != "CONVERGIDO":
+        elements.append(Paragraph(f'<font color="{color}">Estos coeficientes no son un '
+                                  'resultado válido de la simulación.</font>', normal_style))
+    aviso = analysis.get("yplus_notice")
+    if aviso:
+        elements.append(Spacer(1, 6))
+        elements.append(Paragraph(aviso["text"], normal_style))
     elements.append(Spacer(1, 12))
     
     # Parameters
@@ -39,10 +56,21 @@ def generate_pdf_report(filename, params, results, images):
     
     # Results Table
     elements.append(Paragraph("Resultados Finales", subtitle_style))
-    res_data = [["Coeficiente", "Valor"]]
-    for k, v in results.items():
-        res_data.append([str(k), f"{v:.4f}" if isinstance(v, float) else str(v)])
-        
+    res_data = [["Coeficiente", "Media", "± Amplitud"]]
+    if verdict["cl"] is not None and estado != "DIVERGIDO":
+        for nombre, media, amplitud, decimales in (
+                ("Cl", verdict["cl"], verdict["cl_amp"], 4),
+                ("Cd", verdict["cd"], verdict["cd_amp"], 5),
+                ("Cm", verdict["cm"], verdict["cm_amp"], 4)):
+            res_data.append([nombre, f"{media:.{decimales}f}", f"{amplitud:.{decimales}f}"])
+    else:
+        res_data.append(["Sin coeficientes válidos", "", ""])
+    if verdict["window"]:
+        ventana = "del último 25 % del tiempo" if verdict["transient"] else (
+            f"de las últimas {verdict['window']} de {verdict['n_rows']} iteraciones")
+        elements.append(Paragraph(f"Media {ventana}.", normal_style))
+        elements.append(Spacer(1, 6))
+
     t_res = Table(res_data)
     t_res.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.darkblue),

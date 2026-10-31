@@ -345,6 +345,7 @@ class AeroPlot(QWidget):
         layout.addWidget(self.subtabs, 1)
 
         self._charts = {}
+        self._dudosos = {}
         for clave, titulo, ylabel, color in (
                 ("cl", "Coeficiente de Sustentación (Cl) vs AoA", "Cl [-]", '#4CAF50'),
                 ("cd", "Coeficiente de Arrastre (Cd) vs AoA", "Cd [-]", '#F44336'),
@@ -354,7 +355,11 @@ class AeroPlot(QWidget):
             ax.set_xlabel("Ángulo de Ataque (AoA) [°]", color='white')
             ax.set_ylabel(ylabel, color='white')
             line, = ax.plot([], [], 'o-', color=color, linewidth=2, markersize=5)
+            # Encima, en hueco, los puntos que no convergieron.
+            dudosos, = ax.plot([], [], 'o', markerfacecolor='#1e1e1e', markeredgecolor=color,
+                               markeredgewidth=1.5, markersize=8, linestyle='none')
             self._charts[clave] = (fig, canvas, ax, line)
+            self._dudosos[clave] = dudosos
             self.subtabs.addTab(canvas, ylabel.split()[0])
         self.subtabs.currentChanged.connect(lambda _i: self._draw_visible())
 
@@ -362,6 +367,7 @@ class AeroPlot(QWidget):
         self.cls = []
         self.cds = []
         self.cms = []
+        self.estados = []
         self._pending_redraw = False
         
         # Botón de exportación
@@ -386,11 +392,15 @@ class AeroPlot(QWidget):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
         
-    def update_plots(self, aoas: List[float], cls: List[float], cds: List[float], cms: Optional[List[float]] = None) -> None:
+    def update_plots(self, aoas: List[float], cls: List[float], cds: List[float],
+                     cms: Optional[List[float]] = None,
+                     estados: Optional[List[str]] = None) -> None:
+        """Sin estados los valores son en vivo; un Cl en None no se dibuja."""
         self.aoas = list(aoas)
         self.cls = list(cls)
         self.cds = list(cds)
         self.cms = list(cms) if cms is not None else [0.0] * len(aoas)
+        self.estados = list(estados) if estados is not None else [""] * len(aoas)
         # El dibujado real lo hace refresh_plots() cada 100 ms; así una simulación
         # que emite Cl/Cd en cada iteración no bloquea el hilo de la GUI.
         self._pending_redraw = True
@@ -400,7 +410,12 @@ class AeroPlot(QWidget):
             return
         for clave, datos in (("cl", self.cls), ("cd", self.cds), ("cm", self.cms)):
             _, _, ax, line = self._charts[clave]
-            line.set_data(self.aoas, datos)
+            validos = [(a, d, e) for a, d, e in zip(self.aoas, datos, self.estados)
+                       if d is not None]
+            line.set_data([a for a, _, _ in validos], [d for _, d, _ in validos])
+            self._dudosos[clave].set_data(
+                [a for a, _, e in validos if e == "NO CONVERGIDO"],
+                [d for _, d, e in validos if e == "NO CONVERGIDO"])
             ax.relim()
             ax.autoscale_view()
         self._draw_visible()
@@ -422,7 +437,14 @@ class AeroPlot(QWidget):
             _, _, origen, line = self._charts[clave]
             ax = compuesta.add_subplot(3, 1, i)
             style_axes(ax)
-            ax.plot(self.aoas, datos, 'o-', color=line.get_color(), linewidth=2, markersize=5)
+            validos = [(a, d, e) for a, d, e in zip(self.aoas, datos, self.estados)
+                       if d is not None]
+            ax.plot([a for a, _, _ in validos], [d for _, d, _ in validos], 'o-',
+                    color=line.get_color(), linewidth=2, markersize=5)
+            ax.plot([a for a, _, e in validos if e == "NO CONVERGIDO"],
+                    [d for _, d, e in validos if e == "NO CONVERGIDO"], 'o',
+                    markerfacecolor='#1e1e1e', markeredgecolor=line.get_color(),
+                    markeredgewidth=1.5, markersize=8, linestyle='none')
             ax.set_title(origen.get_title(), color='white', fontsize=10)
             ax.set_ylabel(origen.get_ylabel(), color='white')
         ax.set_xlabel("Ángulo de Ataque (AoA) [°]", color='white')
@@ -437,10 +459,14 @@ class AeroPlot(QWidget):
             try:
                 with open(filename, mode='w', newline='') as f:
                     writer = csv.writer(f)
-                    writer.writerow(["AoA [deg]", "Cl [-]", "Cd [-]", "Cm [-]", "L/D"])
+                    writer.writerow(["AoA [deg]", "Cl [-]", "Cd [-]", "Cm [-]", "L/D", "Veredicto"])
                     for i in range(len(self.aoas)):
+                        if self.cds[i] is None:
+                            writer.writerow([self.aoas[i], "", "", "", "", self.estados[i]])
+                            continue
                         ld = self.cls[i] / self.cds[i] if self.cds[i] != 0 else 0
-                        writer.writerow([self.aoas[i], self.cls[i], self.cds[i], self.cms[i], ld])
+                        writer.writerow([self.aoas[i], self.cls[i], self.cds[i], self.cms[i], ld,
+                                         self.estados[i]])
             except Exception as e:
                 print(f"Error al exportar: {e}")
 
