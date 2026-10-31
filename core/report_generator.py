@@ -4,6 +4,10 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
+def _cifra(valor, formato, unidad=""):
+    return format(valor, formato) + unidad if isinstance(valor, (int, float)) else "desconocido"
+
+
 def _tabla_ficha(ficha):
     """Lo que identifica el calculo: de donde salio y con que."""
     ejecucion = ficha.get("ejecucion") or {}
@@ -14,13 +18,14 @@ def _tabla_ficha(ficha):
              ["Programa (commit)", (programa.get("commit") or "desconocido")[:12]
               + (" con cambios sin guardar" if programa.get("modificados") else "")],
              ["sha256 de la malla", ((ficha.get("archivos") or {}).get("mesh.msh") or "")[:24]],
-             ["gmsh / gmshairfoil2d", f"{versiones.get('gmsh')} / {versiones.get('gmshairfoil2d')}"],
+             ["Malla", (ficha.get("malla") or {}).get("mallador")
+              or f"gmsh {versiones.get('gmsh')} / gmshairfoil2d {versiones.get('gmshairfoil2d')}"],
              ["OpenFOAM", ejecucion.get("openfoam_build") or "desconocido"],
              ["Máquina / procesos", f"{ejecucion.get('maquina')} / {ejecucion.get('procesos')}"]]
     if malla:
         filas += [["Celdas", str(malla.get("celdas"))],
-                  ["No ortogonalidad máx", f"{malla.get('no_ortogonalidad_max')}°"],
-                  ["Sesgo máx", str(malla.get("sesgo_max"))]]
+                  ["No ortogonalidad máx", _cifra(malla.get("no_ortogonalidad_max"), ".1f", "°")],
+                  ["Sesgo máx", _cifra(malla.get("sesgo_max"), ".2f")]]
     return filas
 
 
