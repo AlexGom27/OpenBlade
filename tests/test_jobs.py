@@ -110,7 +110,7 @@ def test_follow_returns_none_when_asked_to_let_go():
                   lambda: True, poll_s=0) is None
 
 
-def test_watch_detects_when_forces_stop_changing():
+def test_watch_detects_when_forces_stop_changing_at_fixed_iterations():
     v = J._Vigilancia()
     for i in range(600):
         v.agrega("Cl", "0.9")
@@ -119,7 +119,12 @@ def test_watch_detects_when_forces_stop_changing():
     for i in range(1000):
         v.agrega("Cl", "0.9")
         v.agrega("Cd", "0.01")
-    assert v.convergio()
+    assert not v.convergio(), "solo se mira en multiplos fijos, para que el final sea el mismo en toda maquina"
+    for i in range(400):
+        v.agrega("Cl", "0.9")
+        v.agrega("Cd", "0.01")
+    assert v.n == 2000 and v.convergio()
+    assert v.final_previsto() == 5000
     # Cl sube 0.5 % por ventana: no ha terminado
     subiendo = J._Vigilancia()
     for i in range(3000):

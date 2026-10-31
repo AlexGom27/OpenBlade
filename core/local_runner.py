@@ -152,13 +152,13 @@ class LocalJob:
             raise RemoteError("El trabajo aun no ha registrado su proceso")
         os.killpg(pgid, sig)
 
-    def terminar_limpio(self) -> None:
-        """Pide al solver que escriba y termine: las fuerzas ya no cambian."""
+    def terminar_en(self, iteracion: int) -> None:
+        """Adelanta el final del calculo a esa iteracion: las fuerzas ya no cambian."""
         ruta = os.path.join(self._ruta("system"), "controlDict")
         with open(ruta) as f:
             texto = f.read()
         with open(ruta, "w") as f:
-            f.write(re.sub(r"(?m)^stopAt .*$", "stopAt writeNow;", texto))
+            f.write(re.sub(r"(?m)^endTime .*$", f"endTime         {int(iteracion)};", texto))
 
     def detener(self) -> None:
         if not self.nativo:

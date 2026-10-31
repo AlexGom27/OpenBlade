@@ -237,6 +237,11 @@ class _Vigilancia:
     MINIMO = 1000
 
     # Para terminar antes de tiempo se exige mas que para dar por convergida la corrida.
+    # Se mira cada CADA_CONVERGENCIA iteraciones y se termina MARGEN despues, en un multiplo
+    # fijo: el final no depende de cuando llega la consulta ni de la velocidad de la
+    # maquina, asi que el mismo paquete da el mismo archivo de fuerzas en todas.
+    CADA_CONVERGENCIA = 1000
+    MARGEN = 2000
     TOL_RANGO_CD = 0.002
     TOL_DERIVA_CD = 0.001
     TOL_CL = 0.001
@@ -267,8 +272,14 @@ class _Vigilancia:
         malos += sum(1 for x in cl if abs(x) > CL_IMPOSIBLE)
         return malos > 0.2 * self.VENTANA
 
+    def final_previsto(self) -> int:
+        """Iteracion en la que termina el calculo si ahora se detecta la convergencia."""
+        return (self.n // self.CADA_CONVERGENCIA + 1) * self.CADA_CONVERGENCIA + self.MARGEN
+
     def convergio(self) -> bool:
         """Las fuerzas ya no cambian: seguir solo gastaria maquina."""
+        if self.n % self.CADA_CONVERGENCIA:
+            return False
         if self.n < self.MINIMO or len(self.cl) < 2 * self.VENTANA or len(self.cd) < 2 * self.VENTANA:
             return False
         cl, cd = list(self.cl), list(self.cd)
@@ -381,8 +392,10 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
                 runner.detener()
             elif vigia.convergio():
                 detenida.set()
-                ev.log(job, f"✅ Las fuerzas ya no cambian en la iteración {vigia.n}: se termina.")
-                runner.terminar_limpio()
+                final = vigia.final_previsto()
+                if final < int(job.params.get("max_iters", 0)):
+                    ev.log(job, f"✅ Las fuerzas ya no cambian en la iteración {vigia.n}: termina en la {final}.")
+                    runner.terminar_en(final)
 
         est = follow(runner, evento, lambda p: cambia(CORRIENDO, p), should_detach, poll_s,
                      lambda aviso: ev.log(job, aviso))

@@ -1,3 +1,5 @@
+> **Superado (2026-10-31).** Estas corridas no sirven como validación del programa. Se hicieron con los puntos de la malla redondeados a 6 cifras y con k y ω congelados por la tolerancia del solver lineal, y muchas con scripts que escribían sus propios casos. Ver [docs/VALIDACION.md](docs/VALIDACION.md).
+
 # Reporte de Validación OpenBlade 2D vs NASA TM 4074
 
 **Fecha**: 13 de mayo de 2026

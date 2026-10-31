@@ -114,7 +114,9 @@ class InputPanel(QWidget):
 
         # Modo de Análisis
         self.analysis_mode = QComboBox()
-        self.analysis_mode.addItems(["Punto Único", "Barrido de Ángulos"])
+        self.analysis_mode.addItems(["Punto Único", "Barrido de Ángulos", "Estudio de Malla"])
+        self.analysis_mode.setToolTip("Estudio de Malla: un paquete por cada uno de tres niveles "
+                                      "anidados, con la incertidumbre (GCI) de Cl y Cd.")
         
         self.aoa_min = QDoubleSpinBox()
         self.aoa_min.setRange(-45, 45)
@@ -673,7 +675,7 @@ class InputPanel(QWidget):
         self.geom_layout.setRowVisible(self.file_widget, is_custom)
         
     def _toggle_analysis_mode(self) -> None:
-        is_sweep = self.analysis_mode.currentIndex() == 1
+        is_sweep = "Barrido" in self.analysis_mode.currentText()
         self.geom_layout.setRowVisible(self.aoa_input, not is_sweep)
         self.geom_layout.setRowVisible(self.sweep_widget, is_sweep)
 

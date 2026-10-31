@@ -154,3 +154,21 @@ def test_other_ficha_on_the_server_stops_the_run():
     job.comprobar_ficha({})
     with pytest.raises(RemoteError):
         job.comprobar_ficha({"ficha_sha256": "b"})
+
+
+def test_report_shows_verdict_sheet_and_warns_when_not_valid(tmp_path):
+    """El informe dice el veredicto antes que los numeros, y la ficha del calculo."""
+    from core.report_generator import generate_pdf_report
+    ficha = {"programa": {"commit": "abc123def456", "modificados": []}, "versiones": {"gmsh": "4.15.2"},
+             "archivos": {"mesh.msh": "f" * 64}, "ejecucion": {"openfoam_build": "12-86e126a7bc4d", "maquina": "u@h",
+                                                               "procesos": "8"},
+             "checkmesh": {"celdas": 57344, "no_ortogonalidad_max": 28.0, "sesgo_max": 1.2}}
+    analisis = {"verdict": {"state": "NO CONVERGIDO", "reason": "Cd varía 3 %", "cl": 1.07, "cl_amp": 0.01, "cd": 0.012,
+                            "cd_amp": 0.001, "cm": 0.0, "cm_amp": 0.0, "window": 500, "n_rows": 6000, "transient": False},
+                "yplus_notice": {"level": "ok", "text": "y+ medio 0.70"}}
+    ruta = tmp_path / "informe.pdf"
+    generate_pdf_report(str(ruta), {"naca": "0012", "aoa": 10.0}, analisis, {}, ficha)
+    assert ruta.stat().st_size > 1000
+    divergido = dict(analisis, verdict=dict(analisis["verdict"], state="DIVERGIDO", cl=None))
+    generate_pdf_report(str(tmp_path / "d.pdf"), {"naca": "0012"}, divergido, {}, None)
+    assert (tmp_path / "d.pdf").stat().st_size > 1000

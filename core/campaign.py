@@ -1,0 +1,188 @@
+"""Campana en paquetes: polar con incertidumbre de malla y URANS donde RANS no converge.
+
+Cada punto es un paquete normal, con su carpeta, ficha y veredicto. La incertidumbre
+sale de un GCI con tres niveles anidados en los angulos que se indiquen; entre esos
+angulos se interpola la banda relativa. Un punto que no converge no se presenta como
+resultado: se indica, y si se pide se repite en transitorio.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import os
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+import numpy as np
+
+from core.defaults import case_params
+from core.gci import study_from_levels
+from core.jobs import Dispatcher, Events, Job, Machine, new_job
+
+NIVELES_GCI = (1, 2, 3)
+PARAM_TRANSITORIO = {"regime": "Transitorio (pimpleFoam)"}
+
+
+def verdict_of(job: Job) -> Dict[str, Any]:
+    return (job.analysis or {}).get("verdict") or {}
+
+
+def usable(job: Job) -> bool:
+    return verdict_of(job).get("state") == "CONVERGIDO" and verdict_of(job).get("cl") is not None
+
+
+def grid_study_cases(params: Dict[str, Any], niveles: Sequence[int] = NIVELES_GCI) -> List[Dict[str, Any]]:
+    """Los paquetes de un estudio de malla, del nivel mas grueso al mas fino."""
+    return [dict(params, mesher="cgrid", grid_level=int(n)) for n in sorted(niveles)]
+
+
+def grid_study_result(trabajos: Sequence[Job]) -> Dict[str, Any]:
+    """GCI de Cl, Cd y Cm a partir de los tres trabajos, del mas grueso al mas fino."""
+    orden = sorted(trabajos, key=lambda j: int(j.params.get("grid_level", 2)))
+    filas = [{"nivel": int(j.params.get("grid_level", 2)), "veredicto": verdict_of(j).get("state"),
+              "cl": verdict_of(j).get("cl"), "cd": verdict_of(j).get("cd"), "cm": verdict_of(j).get("cm"),
+              "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean"),
+              "trabajo": j.id} for j in orden]
+    malos = [f["nivel"] for f in filas if f["veredicto"] != "CONVERGIDO"]
+    resultado: Dict[str, Any] = {"aoa": float(orden[0].params.get("aoa", 0.0)), "niveles": filas,
+                                 "sin_converger": malos}
+    if malos:
+        resultado["motivo"] = f"Sin GCI: los niveles {malos} no convergieron"
+        return resultado
+    for nombre in ("cl", "cd", "cm"):
+        resultado[nombre] = study_from_levels([f[nombre] for f in filas]).to_dict()
+    return resultado
+
+
+def grid_study_text(r: Dict[str, Any]) -> str:
+    """Resumen de un estudio de malla para el usuario."""
+    if "motivo" in r:
+        return r["motivo"]
+    partes = []
+    for nombre in ("cl", "cd"):
+        g = r[nombre]
+        orden = f"orden {g['orden']:.2f}" if g["orden"] is not None else g["convergencia"]
+        ext = f", extrapolado {g['extrapolado']:.5f}" if g["extrapolado"] is not None else ""
+        partes.append(f"{nombre.capitalize()} = {g['fina']:.5f} ± {g['banda']:.5f} "
+                      f"(GCI {100 * g['gci_fina']:.2f} %, {orden}{ext})")
+    return "   ".join(partes)
+
+
+def _bandas(estudios: Sequence[Dict[str, Any]], nombre: str, aoa: float, clave: str) -> Optional[float]:
+    """Banda relativa interpolada entre los angulos con GCI."""
+    puntos = sorted((abs(e["aoa"]), e[nombre][clave]) for e in estudios if nombre in e)
+    if not puntos:
+        return None
+    return float(np.interp(abs(aoa), [p[0] for p in puntos], [p[1] for p in puntos]))
+
+
+def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = (),
+                nivel_gci: str = "gci_media") -> List[Dict[str, Any]]:
+    """Una fila por angulo, con el veredicto y la banda de malla de cada coeficiente.
+
+    La polar se calcula en la malla media, asi que por defecto lleva la banda de la media.
+    """
+    filas = []
+    for j in sorted(puntos, key=lambda x: float(x.params.get("aoa", 0.0))):
+        v = verdict_of(j)
+        a = float(j.params.get("aoa", 0.0))
+        fila = {"aoa": a, "veredicto": v.get("state"), "razon": v.get("reason"), "transitorio": j.transient,
+                "cl": None, "cl_amp": None, "cd": None, "cd_amp": None, "cm": None,
+                "banda_cl": None, "banda_cd": None, "periodo": v.get("period"), "trabajo": j.id,
+                "maquina": j.host, "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean")}
+        if usable(j):
+            rel_cl, rel_cd = _bandas(estudios, "cl", a, nivel_gci), _bandas(estudios, "cd", a, nivel_gci)
+            fila.update(cl=v["cl"], cl_amp=v["cl_amp"], cd=v["cd"], cd_amp=v["cd_amp"], cm=v["cm"])
+            if rel_cl is not None:
+                fila["banda_cl"] = rel_cl * abs(v["cl"])
+            if rel_cd is not None:
+                fila["banda_cd"] = rel_cd * abs(v["cd"])
+        filas.append(fila)
+    return filas
+
+
+def write_polar_csv(filas: Iterable[Dict[str, Any]], ruta: str) -> None:
+    columnas = ["aoa", "veredicto", "transitorio", "cl", "banda_cl", "cl_amp", "cd", "banda_cd", "cd_amp", "cm",
+                "yplus", "maquina", "trabajo", "razon"]
+    with open(ruta, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=columnas, extrasaction="ignore")
+        w.writeheader()
+        for fila in filas:
+            w.writerow(fila)
+
+
+def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[float],
+              angulos_gci: Sequence[float], events: Optional[Events] = None,
+              urans_si_no_converge: bool = False, urans: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Lanza la polar y los estudios de malla, y repite en transitorio lo que no converja."""
+    d = Dispatcher(events, poll_s=8.0)
+    d.set_machines(machines)
+    params = case_params(**base)
+    puntos = {}
+    estudios_trabajos: Dict[float, List[Job]] = {}
+    for a in angulos_gci:
+        grupo = []
+        for q in grid_study_cases(dict(params, aoa=float(a))):
+            j = new_job(q, label=f"gci_a{a:g}_n{q['grid_level']}")
+            grupo.append(j)
+            d.submit(j)
+        estudios_trabajos[float(a)] = grupo
+    nivel_polar = int(params.get("grid_level", 2))
+    for a in angulos:
+        ya = next((j for j in estudios_trabajos.get(float(a), [])
+                   if int(j.params["grid_level"]) == nivel_polar), None)
+        if ya is not None:
+            puntos[float(a)] = ya
+            continue
+        j = new_job(dict(params, aoa=float(a)), label=f"polar_a{a:g}")
+        puntos[float(a)] = j
+        d.submit(j)
+    d.wait()
+
+    transitorios = {}
+    if urans_si_no_converge:
+        for a, j in puntos.items():
+            if not usable(j):
+                q = dict(params, aoa=a, **PARAM_TRANSITORIO, **(urans or {}))
+                t = new_job(q, label=f"urans_a{a:g}")
+                transitorios[a] = t
+                d.submit(t)
+        d.wait()
+    finales = [transitorios.get(a, j) for a, j in puntos.items()]
+    estudios = [grid_study_result(g) for g in estudios_trabajos.values()]
+    return {"base": base, "filas": polar_table(finales, estudios), "estudios": estudios,
+            "rans_sin_converger": sorted(transitorios)}
+
+
+def write_polar_report(resultado: Dict[str, Any], carpeta: str) -> str:
+    """polar.json, polar.csv y una figura de Cl y Cd con su banda de malla."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from core.bench import ladson
+
+    os.makedirs(carpeta, exist_ok=True)
+    with open(os.path.join(carpeta, "polar.json"), "w") as f:
+        json.dump(resultado, f, indent=1, ensure_ascii=False)
+    write_polar_csv(resultado["filas"], os.path.join(carpeta, "polar.csv"))
+
+    filas = [f for f in resultado["filas"] if f["cl"] is not None]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.5), constrained_layout=True)
+    if filas:
+        alfa = [f["aoa"] for f in filas]
+        a1.errorbar(alfa, [f["cl"] for f in filas], yerr=[f["banda_cl"] or 0 for f in filas], fmt="o-", capsize=3,
+                    label="OpenBlade (SST)")
+        a2.errorbar([f["cd"] for f in filas], [f["cl"] for f in filas], xerr=[f["banda_cd"] or 0 for f in filas],
+                    yerr=[f["banda_cl"] or 0 for f in filas], fmt="o-", capsize=3, label="OpenBlade (SST)")
+    base = resultado.get("base", {})
+    if str(base.get("naca", "0012")) == "0012" and abs(float(base.get("reynolds", 0)) - 6e6) < 1:
+        ref = np.array([ladson(a) for a in np.arange(0.0, 17.1, 1.0)])
+        a1.plot(np.arange(0.0, 17.1, 1.0), ref[:, 0], "k--", label="Ladson 80 grit")
+        a2.plot(ref[:, 1], ref[:, 0], "k--", label="Ladson 80 grit")
+    a1.set_xlabel("α [°]"), a1.set_ylabel("Cl"), a1.grid(alpha=0.3), a1.legend()
+    a2.set_xlabel("Cd"), a2.set_ylabel("Cl"), a2.grid(alpha=0.3), a2.legend()
+    ruta = os.path.join(carpeta, "polar.png")
+    fig.savefig(ruta, dpi=140)
+    plt.close(fig)
+    return ruta

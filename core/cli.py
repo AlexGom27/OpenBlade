@@ -3,6 +3,7 @@
     python3 -m core.cli correr --host usuario@host --procesos 8 aoa=8 reynolds=6e6
     python3 -m core.cli control --hosts usuario@a,usuario@b --procesos 8
     python3 -m core.cli banco --maquinas usuario@a:10:1,usuario@b:8:1 --salida carpeta
+    python3 -m core.cli polar --maquinas usuario@a:10:1 --angulos 0,4,8 --gci 0,8 reynolds=6e6
 
 Cada simulacion sale de aqui o de la ventana; no hay otra forma de escribir un caso.
 """
@@ -116,6 +117,19 @@ def cmd_banco(args: argparse.Namespace) -> int:
     return 0 if r["cumplidas"] == r["total"] and not r["sin_converger"] else 1
 
 
+def cmd_polar(args: argparse.Namespace) -> int:
+    from core.campaign import run_polar, write_polar_report
+
+    angulos = [float(a) for a in args.angulos.split(",")]
+    gci = [float(a) for a in args.gci.split(",")] if args.gci else []
+    r = run_polar(_maquinas(args.maquinas), _ajustes(args.ajustes), angulos, gci, _Consola(), args.urans)
+    print("\nFigura:", write_polar_report(r, args.salida))
+    for f in r["filas"]:
+        cl = "" if f["cl"] is None else f"Cl {f['cl']:.4f} ± {f['banda_cl'] or 0:.4f}  Cd {f['cd']:.5f} ± {f['banda_cd'] or 0:.5f}"
+        print(f"  α={f['aoa']:6.2f}  {str(f['veredicto']):14s} {cl}")
+    return 0
+
+
 def main(argv: List[str] = None) -> int:
     p = argparse.ArgumentParser(prog="core.cli", description=__doc__)
     sub = p.add_subparsers(dest="orden", required=True)
@@ -138,6 +152,15 @@ def main(argv: List[str] = None) -> int:
     banco.add_argument("--maquinas", required=True, help="usuario@host:procesos:simultaneos,...")
     banco.add_argument("--salida", default="banco_validacion", help="carpeta del informe")
     banco.set_defaults(fn=cmd_banco)
+
+    polar = sub.add_parser("polar", help="polar con incertidumbre de malla")
+    polar.add_argument("--maquinas", required=True, help="usuario@host:procesos:simultaneos,...")
+    polar.add_argument("--angulos", required=True, help="angulos separados por comas")
+    polar.add_argument("--gci", default="", help="angulos con estudio de malla")
+    polar.add_argument("--urans", action="store_true", help="repite en transitorio lo que no converja")
+    polar.add_argument("--salida", default="polar", help="carpeta de resultados")
+    polar.add_argument("ajustes", nargs="*", help="clave=valor sobre los valores por defecto")
+    polar.set_defaults(fn=cmd_polar)
 
     args = p.parse_args(argv)
     return args.fn(args)

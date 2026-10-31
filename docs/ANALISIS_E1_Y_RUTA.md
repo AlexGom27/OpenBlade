@@ -1,3 +1,5 @@
+> **Superado (2026-10-31).** Estas corridas no sirven como validación del programa. Se hicieron con los puntos de la malla redondeados a 6 cifras y con k y ω congelados por la tolerancia del solver lineal, y muchas con scripts que escribían sus propios casos. Ver [docs/VALIDACION.md](VALIDACION.md).
+
 # Análisis de E1 y V1, y ruta de simulaciones
 
 Fecha: 2026-10-31. Elaborado por Claude y OpenClaw, cada uno con su análisis independiente y dos rondas de contraste.

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from core.defaults import case_params
+from core.defaults import DEFAULT_PARAMS, case_params
 from core.jobs import Dispatcher, Events, Job, Machine, new_job
 
 REFS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "validation", "refs")
@@ -41,7 +41,7 @@ TOL_TMR = {0.0: (0.01, 0.05), 10.0: (0.02, 0.05), 15.0: (0.03, 0.10)}
 TOL_LADSON = {0.0: (0.02, 0.05), 10.0: (0.03, 0.10), 15.0: (0.05, 0.20)}
 TOL_CP_RMS = 0.10
 TOL_CF_RMS = 1.5e-3
-TOL_DOMINIO = (0.01, 0.02)      # cambio de Cl y Cd entre los dos dominios de la prueba
+TOL_DOMINIO = (0.01, 0.02)      # cambio de Cl y Cd frente al dominio por defecto
 
 
 @dataclass
@@ -50,7 +50,7 @@ class BenchCase:
     aoa: float
     turbulencia: str = SST
     nivel: int = 2
-    radio: float = 500.0
+    radio: float = DEFAULT_PARAMS["farfield"]
     ajustes: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -58,13 +58,19 @@ def default_cases() -> List[BenchCase]:
     casos = [BenchCase(f"banco_sst_a{a:g}", a) for a in (0.0, 10.0, 15.0)]
     casos += [BenchCase(f"banco_sa_a{a:g}", a, SA) for a in (0.0, 10.0, 15.0)]
     casos += [BenchCase("banco_dominio_R40_a10", 10.0, radio=40.0),
-              BenchCase("banco_dominio_R200_a10", 10.0, radio=200.0)]
+              BenchCase("banco_dominio_R500_a10", 10.0, radio=500.0)]
     return casos
 
 
 def case_parameters(c: BenchCase) -> Dict[str, Any]:
     return case_params(reynolds=6e6, aoa=c.aoa, turbulence=c.turbulencia, grid_level=c.nivel,
                        farfield=c.radio, max_iters=40000, **c.ajustes)
+
+
+def case_of_job(job: Job) -> BenchCase:
+    """El caso del banco que corrio un trabajo, para evaluarlo tambien tras reabrir."""
+    p = job.params
+    return BenchCase(job.label, float(p["aoa"]), p["turbulence"], int(p["grid_level"]), float(p["farfield"]))
 
 
 def _zona(ruta: str, nombre: str) -> np.ndarray:
@@ -135,7 +141,7 @@ def evaluate(c: BenchCase, job: Job) -> Dict[str, Any]:
 
     if v.get("cl") is None or v.get("state") == "DIVERGIDO":
         return fila
-    if c.aoa in TMR.get(c.turbulencia, {}) and c.radio == 500.0:
+    if c.aoa in TMR.get(c.turbulencia, {}) and "dominio" not in c.etiqueta:
         ref_cl, ref_cd = _tmr_media(c.turbulencia, c.aoa)
         tol_cl, tol_cd = TOL_TMR[c.aoa]
         comprueba("Cl frente a TMR", _error_cl(v["cl"], ref_cl), tol_cl, f"{v['cl']:.4f} frente a {ref_cl:.4f}")
@@ -181,16 +187,22 @@ def summarize(casos: List[BenchCase], trabajos: List[Job]) -> Dict[str, Any]:
 
 
 def _domain_test(filas: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    grupo = [f for f in filas if "dominio" in f["caso"]["etiqueta"] and f["cl"] is not None]
-    if len(grupo) != 2:
+    """Cada dominio de la prueba frente al caso SST del mismo angulo con el dominio por defecto."""
+    base = next((f for f in filas if f["caso"]["etiqueta"] == "banco_sst_a10" and f["cl"] is not None), None)
+    if base is None:
         return []
-    a, b = sorted(grupo, key=lambda f: f["caso"]["radio"])
-    d_cl, d_cd = (a["cl"] - b["cl"]) / b["cl"], (a["cd"] - b["cd"]) / b["cd"]
-    texto = f"{a['caso']['radio']:g}c frente a {b['caso']['radio']:g}c"
-    return [{"nombre": "Efecto del dominio en Cl", "error": d_cl, "tope": TOL_DOMINIO[0],
-             "cumple": abs(d_cl) <= TOL_DOMINIO[0], "detalle": f"{a['cl']:.4f} y {b['cl']:.4f}, {texto}"},
-            {"nombre": "Efecto del dominio en Cd", "error": d_cd, "tope": TOL_DOMINIO[1],
-             "cumple": abs(d_cd) <= TOL_DOMINIO[1], "detalle": f"{a['cd']:.5f} y {b['cd']:.5f}, {texto}"}]
+    comprobaciones = []
+    for f in filas:
+        if "dominio" not in f["caso"]["etiqueta"] or f["cl"] is None:
+            continue
+        d_cl, d_cd = (f["cl"] - base["cl"]) / base["cl"], (f["cd"] - base["cd"]) / base["cd"]
+        texto = f"{f['caso']['radio']:g}c frente a {base['caso']['radio']:g}c"
+        comprobaciones += [
+            {"nombre": f"Dominio {f['caso']['radio']:g}c en Cl", "error": d_cl, "tope": TOL_DOMINIO[0],
+             "cumple": abs(d_cl) <= TOL_DOMINIO[0], "detalle": f"{f['cl']:.4f} y {base['cl']:.4f}, {texto}"},
+            {"nombre": f"Dominio {f['caso']['radio']:g}c en Cd", "error": d_cd, "tope": TOL_DOMINIO[1],
+             "cumple": abs(d_cd) <= TOL_DOMINIO[1], "detalle": f"{f['cd']:.5f} y {base['cd']:.5f}, {texto}"}]
+    return comprobaciones
 
 
 def write_report(resultado: Dict[str, Any], carpeta: str) -> str:

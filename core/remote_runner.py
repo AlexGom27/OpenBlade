@@ -290,9 +290,9 @@ class RemoteJob:
         # Solo el grupo de este trabajo: nunca afecta a otras campanas.
         self._run(f"kill -{sig} -- -{pgid}", timeout=20)
 
-    def terminar_limpio(self) -> None:
-        """Pide al solver que escriba y termine: las fuerzas ya no cambian."""
-        self._run("sed -i 's/^stopAt .*/stopAt writeNow;/' system/controlDict", timeout=30)
+    def terminar_en(self, iteracion: int) -> None:
+        """Adelanta el final del calculo a esa iteracion: las fuerzas ya no cambian."""
+        self._run(f"sed -i 's/^endTime .*/endTime         {int(iteracion)};/' system/controlDict", timeout=30)
 
     def detener(self) -> None:
         self._senal("CONT")

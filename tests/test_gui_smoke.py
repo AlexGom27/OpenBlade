@@ -122,6 +122,41 @@ def test_polar_is_built_from_finished_jobs_of_the_group(window):
     assert "1 DIVERGIDO" in window.verdict_banner.text()
 
 
+def test_grid_study_sends_three_nested_levels_and_shows_the_uncertainty(window):
+    from unittest.mock import patch
+    from core.jobs import TERMINADO
+    panel = window.input_panel
+    panel.set_params({"exec_mode": "server", "server_host": "u@h", "server_nproc": 2,
+                      "analysis_mode": "Estudio de Malla", "aoa": 4.0})
+    with patch.object(window.dispatcher, "submit") as enviar:
+        panel.btn_run.click()
+    panel.set_params({"exec_mode": "local", "analysis_mode": "Punto Único", "aoa": 0.0})
+    trabajos = [c.args[0] for c in enviar.call_args_list]
+    assert [j.params["grid_level"] for j in trabajos] == [1, 2, 3]
+    assert len({j.group for j in trabajos}) == 1 and all(j.params["aoa"] == 4.0 for j in trabajos)
+    for j, cl, cd in zip(trabajos, (0.44, 0.43, 0.4275), (0.0090, 0.0084, 0.0082)):
+        j.state = TERMINADO
+        j.analysis = {"verdict": {"state": "CONVERGIDO", "cl": cl, "cd": cd, "cm": 0.0}}
+    window._update_group(trabajos[0].group)
+    assert "GCI" in window.verdict_banner.text() and "Cd" in window.verdict_banner.text()
+
+
+def test_bench_asks_first_and_then_sends_its_packages(window):
+    from unittest.mock import patch
+    from qtpy.QtWidgets import QMessageBox
+    from core.bench import default_cases
+    window.jobs_panel.add_machine("a@h", 4)
+    with patch.object(QMessageBox, "question", return_value=QMessageBox.No), \
+            patch.object(window.dispatcher, "submit") as enviar:
+        window.on_run_bench()
+    assert enviar.call_count == 0
+    with patch.object(QMessageBox, "question", return_value=QMessageBox.Yes), \
+            patch.object(window.dispatcher, "submit") as enviar:
+        window.on_run_bench()
+    assert enviar.call_count == len(default_cases())
+    assert enviar.call_args_list[0].args[0].group.startswith("banco_")
+
+
 def test_closing_keeps_the_results_of_the_case(window, tmp_path):
     """Cerrar la ventana vaciaba postProcessing y los tiempos del caso."""
     caso = tmp_path / "caso"

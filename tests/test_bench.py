@@ -34,7 +34,7 @@ def test_default_bench_covers_both_models_and_the_domain_test():
     casos = default_cases()
     assert {c.aoa for c in casos} == {0.0, 10.0, 15.0}
     assert {c.turbulencia for c in casos} == {SST, SA}
-    assert sorted(c.radio for c in casos if "dominio" in c.etiqueta) == [40.0, 200.0]
+    assert sorted(c.radio for c in casos if "dominio" in c.etiqueta) == [40.0, 500.0]
     p = case_parameters(casos[1])
     assert (p["reynolds"], p["aoa"], p["mesher"], p["grid_level"]) == (6e6, 10.0, "cgrid", 2)
 
@@ -68,11 +68,12 @@ def test_zero_lift_error_is_absolute():
     assert {x["nombre"]: x for x in f["comprobaciones"]}["Cl frente a TMR"]["cumple"]
 
 
-def test_domain_test_compares_the_two_radii():
+def test_domain_test_compares_each_radius_with_the_default_case():
     filas = [{"caso": {"etiqueta": "banco_dominio_R40", "radio": 40.0}, "cl": 1.06, "cd": 0.0120},
-             {"caso": {"etiqueta": "banco_dominio_R200", "radio": 200.0}, "cl": 1.08, "cd": 0.0121}]
+             {"caso": {"etiqueta": "banco_sst_a10", "radio": 200.0}, "cl": 1.08, "cd": 0.0121},
+             {"caso": {"etiqueta": "banco_dominio_R500", "radio": 500.0}, "cl": 1.081, "cd": 0.0120}]
     d = _domain_test(filas)
-    assert not d[0]["cumple"] and d[1]["cumple"]
+    assert [x["cumple"] for x in d] == [False, True, True, True]
 
 
 def test_report_is_written_with_what_passed_and_what_did_not(tmp_path):

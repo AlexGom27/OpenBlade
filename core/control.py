@@ -1,6 +1,6 @@
 """Caso de control de cada entrega: el mismo paquete en dos maquinas y ocho compuertas.
 
-NACA 0012, cuerda 1, Re=6e6, valores por defecto de la ventana, 6000 iteraciones.
+NACA 0012, cuerda 1, Re=6e6, valores por defecto de la ventana.
 Las tolerancias detectan errores gruesos; no certifican precision.
 """
 
@@ -37,7 +37,7 @@ def run_control(hosts: List[str], nproc: int = 8, angulos: Tuple[float, ...] = (
     trabajos: Dict[Tuple[float, str], Job] = {}
     for angulo in angulos:
         for host in hosts:
-            j = new_job(case_params(aoa=angulo, reynolds=6e6, max_iters=6000), host, nproc,
+            j = new_job(case_params(aoa=angulo, reynolds=6e6), host, nproc,
                         label=f"control_a{angulo:g}_{host.split('@')[-1]}")
             trabajos[(angulo, host)] = j
             d.submit(j)

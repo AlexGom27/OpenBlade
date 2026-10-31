@@ -146,6 +146,12 @@ class MainWindow(QMainWindow):
         btn_report.triggered.connect(self.generate_report)
         toolbar.addAction(btn_report)
 
+        btn_banco = QAction("🧪 Banco de Validación", self)
+        btn_banco.setToolTip("NACA 0012 a Re = 6e6 frente a NASA TMR y Ladson, por el mismo camino "
+                             "que cualquier caso. Usa las máquinas marcadas en la pestaña Trabajos.")
+        btn_banco.triggered.connect(self.on_run_bench)
+        toolbar.addAction(btn_banco)
+
         self.btn_fsi = QAction("🌊 Análisis FSI", self)
         self.btn_fsi.triggered.connect(self.on_run_fsi)
         toolbar.addAction(self.btn_fsi)
@@ -375,6 +381,9 @@ class MainWindow(QMainWindow):
         if "Barrido" in p.get("analysis_mode", ""):
             self._run_sweep(p, destino)
             return
+        if "Estudio" in p.get("analysis_mode", ""):
+            self._run_grid_study(p, destino)
+            return
         self._lanzar(new_job(p, *destino))
 
     def _destino(self, p: Dict[str, Any]):
@@ -435,6 +444,7 @@ class MainWindow(QMainWindow):
         os.makedirs(self.case_dir, exist_ok=True)
         self.results_panel.case_dir = self.case_dir
         self.jobs_panel.select_row(job_id)
+        self._watch_on_server(job)
         self._current_aoa = float(job.params.get("aoa", 0.0))
         self._sim_transient = job.transient
         self._sim_end_time = (float(job.params.get("end_time", 0.5)) if job.transient
@@ -458,8 +468,13 @@ class MainWindow(QMainWindow):
             self._last_cl = self._last_cd = self._last_cm = 0.0
             self.aero_plot.update_plots([], [], [], [], [])
             if job.group:
-                self._update_polar(job.group)
+                self._update_group(job.group)
         self._refresh_run_controls()
+
+    def _watch_on_server(self, job) -> None:
+        """La pestaña Servidor muestra el trabajo a la vista, si corre en un servidor."""
+        if self.remote_panel is not None and job.remote_dir and job.host != LOCAL:
+            self.remote_panel.watch(job.host, "~/" + job.remote_dir)
 
     def _refresh_run_controls(self) -> None:
         job = self.current_job
@@ -484,8 +499,8 @@ class MainWindow(QMainWindow):
             return
         self.jobs_panel.update_job(job)
         if job.group and job.state in FINALES:
-            # El barrido se presenta como polar, no como el ultimo punto.
-            self._update_polar(job.group)
+            # Un grupo se presenta completo, no como su ultimo trabajo.
+            self._update_group(job.group)
         if job is self.current_job:
             self._sim_t0 = job.started or self._sim_t0
             if job.state in FINALES and not job.group:
@@ -496,6 +511,8 @@ class MainWindow(QMainWindow):
             self._refresh_run_controls()
             if job.state == CORRIENDO and job.step:
                 self.log(f"🖥️ {job.label}: {job.step}")
+                if job.step in ("verificando", "inicio"):
+                    self._watch_on_server(job)
 
     def _on_job_log(self, job_id: str, texto: str) -> None:
         job = self.dispatcher.jobs.get(job_id)
@@ -562,6 +579,71 @@ class MainWindow(QMainWindow):
         for angulo in angulos:
             q = dict(p, aoa=angulo, regime="Estacionario (simpleFoam)")
             self._lanzar(new_job(q, *destino, group=grupo))
+
+    def _run_grid_study(self, p: Dict[str, Any], destino) -> None:
+        """Tres niveles anidados del mismo caso; al terminar, el GCI de Cl y Cd."""
+        import secrets
+        from core.campaign import grid_study_cases
+        grupo = f"malla_{secrets.token_hex(3)}"
+        self.log(f"📐 Estudio de malla a α = {p.get('aoa', 0)}°: 225×65, 449×129 y 897×257")
+        for q in grid_study_cases(dict(p, analysis_mode="Punto Único")):
+            self._lanzar(new_job(q, *destino, group=grupo, label=f"malla_n{q['grid_level']}"))
+
+    def on_run_bench(self) -> None:
+        """Lanza el banco de validacion con las maquinas marcadas."""
+        import secrets
+        from core.bench import case_parameters, default_cases
+        if not self.jobs_panel.machines():
+            self.log("❌ Marca al menos una máquina en la pestaña Trabajos.")
+            self.tabs.setCurrentWidget(self.jobs_panel)
+            return
+        casos = default_cases()
+        if QMessageBox.question(self, "Banco de validación",
+                                f"Se lanzan {len(casos)} paquetes en las máquinas marcadas. ¿Continuar?"
+                                ) != QMessageBox.Yes:
+            return
+        grupo = f"banco_{secrets.token_hex(3)}"
+        for c in casos:
+            self._lanzar(new_job(case_parameters(c), group=grupo, label=c.etiqueta))
+
+    def _update_group(self, grupo: str) -> None:
+        if grupo.startswith("banco_"):
+            self._update_bench(grupo)
+        elif grupo.startswith("malla_"):
+            self._update_grid_study(grupo)
+        else:
+            self._update_polar(grupo)
+
+    def _trabajos_del_grupo(self, grupo: str):
+        trabajos = [j for j in self.dispatcher.jobs.values() if j.group == grupo]
+        return trabajos, [j for j in trabajos if j.state in FINALES]
+
+    def _update_grid_study(self, grupo: str) -> None:
+        from core.campaign import grid_study_result, grid_study_text
+        from core.verdict import CONVERGIDO, NO_CONVERGIDO
+        trabajos, hechos = self._trabajos_del_grupo(grupo)
+        if len(hechos) < len(trabajos):
+            self._set_banner("EN CURSO", f"📐 Estudio de malla: {len(hechos)} de {len(trabajos)} niveles terminados.")
+            return
+        r = grid_study_result(trabajos)
+        self._set_banner(NO_CONVERGIDO if "motivo" in r else CONVERGIDO, f"📐 {grid_study_text(r)}")
+        self.log(f"📐 {grid_study_text(r)}")
+
+    def _update_bench(self, grupo: str) -> None:
+        from core.bench import case_of_job, summarize, write_report
+        from core.verdict import CONVERGIDO, NO_CONVERGIDO
+        trabajos, hechos = self._trabajos_del_grupo(grupo)
+        if len(hechos) < len(trabajos):
+            self._set_banner("EN CURSO", f"🧪 Banco: {len(hechos)} de {len(trabajos)} paquetes terminados.")
+            return
+        r = summarize([case_of_job(j) for j in trabajos], trabajos)
+        ruta = write_report(r, os.path.join(paths.results_dir(), grupo))
+        bien = r["cumplidas"] == r["total"] and not r["sin_converger"]
+        self._set_banner(CONVERGIDO if bien else NO_CONVERGIDO,
+                         f"🧪 Banco: {r['cumplidas']} de {r['total']} comprobaciones cumplidas"
+                         + (f"; sin converger: {', '.join(r['sin_converger'])}" if r["sin_converger"] else "")
+                         + f".\nInforme: {ruta}")
+        self.log(f"🧪 Informe del banco: {ruta}")
 
     def _update_polar(self, grupo: str) -> None:
         """La polar con lo que ya termino, cada punto con su veredicto."""
@@ -651,7 +733,7 @@ class MainWindow(QMainWindow):
             # Carpeta propia: FsiRunner reescribe el caso que recibe.
             trabajo = new_job(p, LOCAL, label="fsi")
             os.makedirs(trabajo.case_dir, exist_ok=True)
-            runner = FsiRunner(trabajo.case_dir, p, log=self.log)
+            runner = FsiRunner(trabajo.case_dir, dict(p, msh_file=msh), log=self.log)
             result = runner.run()
         except Exception as e:  # noqa: BLE001
             self.log(f"❌ Error FSI: {e}")
