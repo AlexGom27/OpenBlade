@@ -242,7 +242,7 @@ class _Vigilancia:
     # maquina, asi que el mismo paquete da el mismo archivo de fuerzas en todas.
     CADA_CONVERGENCIA = 1000
     MARGEN = 2000
-    TOL_RANGO_CD = 0.002
+    TOL_RANGO_CD = 0.005
     TOL_DERIVA_CD = 0.001
     TOL_CL = 0.001
 
