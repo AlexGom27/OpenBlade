@@ -1,6 +1,11 @@
+import os
+
 from qtpy.QtWidgets import QApplication
 from qtpy.QtGui import QFont, QPalette, QColor
 from qtpy.QtCore import Qt
+
+# Ruta absoluta: las flechas tienen que verse aunque la ventana se abra desde otra carpeta.
+_ICONOS = os.path.dirname(os.path.abspath(__file__)).replace(os.sep, "/")
 
 # Colores base del tema (Estética Premium Dark)
 COLORS = {
@@ -174,12 +179,12 @@ QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {{
 }}
 
 QDoubleSpinBox::up-arrow, QSpinBox::up-arrow {{
-    image: url(gui/up_arrow.svg);
+    image: url("{_ICONOS}/up_arrow.svg");
     width: 14px;
     height: 14px;
 }}
 QDoubleSpinBox::down-arrow, QSpinBox::down-arrow {{
-    image: url(gui/down_arrow.svg);
+    image: url("{_ICONOS}/down_arrow.svg");
     width: 14px;
     height: 14px;
 }}
@@ -209,7 +214,7 @@ QComboBox::drop-down:hover {{
     background: #3a3a45;
 }}
 QComboBox::down-arrow {{
-    image: url(gui/down_arrow.svg);
+    image: url("{_ICONOS}/down_arrow.svg");
     width: 14px;
     height: 14px;
 }}

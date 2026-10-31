@@ -301,3 +301,10 @@ def test_residual_progress_speaks_of_iterations_when_steady(window):
     assert "de 400 s" in plot.progress_label.text()
     del plot._last_saved_time
     plot.reset()
+
+
+def test_theme_icons_are_found_from_any_folder():
+    import re
+    from gui.visual_theme import STYLESHEET
+    rutas = re.findall(r'url\("([^"]+)"\)', STYLESHEET)
+    assert rutas and all(os.path.isabs(r) and os.path.exists(r) for r in rutas)
