@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -63,6 +64,70 @@ def probar_servidor(host: str) -> Dict[str, Any]:
             "libres": max(0, int(nucleos - carga)),
             "rsync": v[2] == "rsync", "python3": v[3] == "python3",
             "openfoam": v[4] if v[4] != "fin" else ""}
+
+
+def _clave_publica() -> str:
+    """Devuelve la clave publica por defecto; si no hay ninguna, crea una."""
+    ssh_dir = os.path.expanduser("~/.ssh")
+    for nombre in ("id_ed25519", "id_ecdsa", "id_rsa"):
+        pub = os.path.join(ssh_dir, nombre + ".pub")
+        if os.path.exists(pub) and os.path.exists(pub[:-4]):
+            break
+    else:
+        os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+        pub = os.path.join(ssh_dir, "id_ed25519.pub")
+        r = subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "",
+                            "-f", pub[:-4]], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=30)
+        if r.returncode != 0:
+            raise RemoteError(f"No se pudo crear la clave SSH: {r.stderr.strip()[-200:]}")
+    with open(pub) as f:
+        return f.read().strip()
+
+
+def configurar_acceso(host: str, contrasena: str) -> None:
+    """Instala la clave SSH en el servidor usando la contrasena una sola vez.
+
+    La contrasena llega a ssh por SSH_ASKPASS, desde el entorno de ese proceso:
+    no aparece en la linea de comandos ni se escribe en disco.
+    """
+    host = validar_host(host)
+    if os.name == "nt":
+        raise RemoteError("En Windows configura la clave desde WSL")
+    if not shutil.which("ssh") or not shutil.which("ssh-keygen"):
+        raise RemoteError("Esta computadora no tiene el cliente de OpenSSH")
+    clave = _clave_publica()
+    remoto = ('umask 077; mkdir -p ~/.ssh; f=~/.ssh/authorized_keys; touch "$f"; '
+              'k=$(cat); [ -z "$(tail -c1 "$f")" ] || echo >> "$f"; '
+              'grep -qxF "$k" "$f" || printf \'%s\\n\' "$k" >> "$f"; '
+              'chmod 700 ~/.ssh; chmod 600 "$f"')
+    with tempfile.TemporaryDirectory() as tmp:
+        askpass = os.path.join(tmp, "askpass.sh")
+        with open(askpass, "w") as f:
+            f.write('#!/bin/sh\nprintf \'%s\\n\' "$OPENBLADE_SSH_PASS"\n')
+        os.chmod(askpass, 0o700)
+        env = dict(os.environ, SSH_ASKPASS=askpass, SSH_ASKPASS_REQUIRE="force",
+                   DISPLAY=os.environ.get("DISPLAY", ":0"),
+                   OPENBLADE_SSH_PASS=contrasena)
+        try:
+            r = subprocess.run(
+                ["ssh", "-o", "ConnectTimeout=10", "-o", "ControlPath=none",
+                 "-o", "StrictHostKeyChecking=accept-new",
+                 "-o", "NumberOfPasswordPrompts=1", host, remoto],
+                input=clave + "\n", capture_output=True, text=True, errors="replace",
+                env=env, start_new_session=True, timeout=40)
+        except subprocess.TimeoutExpired:
+            raise RemoteError(f"{host} no responde") from None
+    if r.returncode != 0:
+        if "IDENTIFICATION HAS CHANGED" in r.stderr:
+            raise RemoteError(f"La identidad de {host} cambio; no se envio la clave. "
+                              "Confirma que sea el servidor correcto.")
+        if "Permission denied" in r.stderr:
+            raise RemoteError("Usuario o contrasena incorrectos")
+        raise RemoteError(f"No se pudo conectar a {host}: {r.stderr.strip()[-200:]}")
+    if _ssh(host, "true", timeout=25).returncode != 0:
+        raise RemoteError("La clave se instalo pero no permite entrar; "
+                          "si tiene frase de contrasena, cargala en ssh-agent")
 
 
 class RemoteJob:

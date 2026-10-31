@@ -4,7 +4,8 @@ import threading
 
 from qtpy.QtWidgets import (QWidget, QFormLayout, QLineEdit, QDoubleSpinBox, QLabel,
     QVBoxLayout, QGroupBox, QComboBox, QPushButton, QFileDialog, QHBoxLayout,
-    QToolButton, QSizePolicy, QFrame, QLayout, QDialog, QDialogButtonBox, QCheckBox, QSpinBox)
+    QToolButton, QSizePolicy, QFrame, QLayout, QDialog, QDialogButtonBox, QCheckBox, QSpinBox,
+    QInputDialog)
 from qtpy.QtCore import Qt, QPropertyAnimation, QParallelAnimationGroup, Signal
 from typing import Optional, Dict, Any
 
@@ -40,6 +41,7 @@ class CollapsibleBox(QWidget):
 
 class InputPanel(QWidget):
     _server_probed = Signal(object)
+    _access_done = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -488,6 +490,12 @@ class InputPanel(QWidget):
         self.server_nproc.setValue(4)
         self.btn_test_server = QPushButton("Probar conexión")
         self.btn_test_server.clicked.connect(self._probe_server)
+        self.btn_server_access = QPushButton("Configurar acceso…")
+        self.btn_server_access.setToolTip(
+            "Primera vez en esta computadora: pide la contraseña del servidor una "
+            "sola vez e instala una clave SSH. La contraseña no se guarda.")
+        self.btn_server_access.clicked.connect(self._configure_access)
+        self._access_done.connect(self._on_access_done)
         self.server_status = QLabel("")
         self.server_status.setWordWrap(True)
         self._server_probed.connect(self._on_server_probed)
@@ -497,7 +505,10 @@ class InputPanel(QWidget):
         sub_form.setContentsMargins(0, 0, 0, 0)
         sub_form.addRow("Servidor:", self.server_host)
         sub_form.addRow("Procesos:", self.server_nproc)
-        sub_form.addRow("", self.btn_test_server)
+        botones = QHBoxLayout()
+        botones.addWidget(self.btn_test_server)
+        botones.addWidget(self.btn_server_access)
+        sub_form.addRow(botones)
         sub_form.addRow(self.server_status)
         self.server_widget.setVisible(False)
         form.addRow(self.server_widget)
@@ -550,10 +561,44 @@ class InputPanel(QWidget):
 
         threading.Thread(target=trabajo, daemon=True).start()
 
+    def _configure_access(self) -> None:
+        from core.remote_runner import RemoteError, configurar_acceso, validar_host
+        try:
+            host = validar_host(self.server_host.currentText())
+        except RemoteError as e:
+            self.server_status.setText(f"❌ {e}")
+            return
+        contrasena, ok = QInputDialog.getText(
+            self, "Configurar acceso",
+            f"Contraseña de {host}\n(se usa una sola vez y no se guarda):",
+            QLineEdit.Password)
+        if not ok or not contrasena:
+            return
+        self.btn_server_access.setEnabled(False)
+        self.server_status.setText("Configurando acceso…")
+
+        def trabajo():
+            try:
+                configurar_acceso(host, contrasena)
+                self._access_done.emit("")
+            except Exception as e:  # noqa: BLE001
+                self._access_done.emit(str(e))
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _on_access_done(self, error: str) -> None:
+        self.btn_server_access.setEnabled(True)
+        if error:
+            self.server_status.setText(f"❌ {error}")
+        else:
+            self._probe_server()
+
     def _on_server_probed(self, d: dict) -> None:
         self.btn_test_server.setEnabled(True)
         if "error" in d:
-            self.server_status.setText(f"❌ {d['error']}")
+            self.server_status.setText(
+                f"❌ {d['error']}\nSi es la primera vez en esta computadora, "
+                "pulsa «Configurar acceso…».")
             return
         faltan = [n for n, ok in (("OpenFOAM", d["openfoam"]), ("rsync", d["rsync"]),
                                   ("python3", d["python3"])) if not ok]

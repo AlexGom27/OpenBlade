@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from core.remote_runner import (LogParser, RemoteError, RemoteJob,
-                                coeficientes_finales, validar_host)
+                                coeficientes_finales, configurar_acceso, validar_host)
 
 
 def test_host_rejects_ssh_options():
@@ -42,3 +42,33 @@ def test_final_coefficients_use_the_header(tmp_path):
         "# Force coefficients\n# Time Cm Cd Cl Cl(f) Cl(r)\n"
         "1 0.1 0.2 0.3 0.4 0.5\n2 0.05 0.012 0.8 0.5 0.3\n")
     assert coeficientes_finales(str(tmp_path)) == (0.8, 0.012, 0.05)
+
+
+def _ssh_falso(tmp_path, monkeypatch):
+    """ssh que pide la contrasena por askpass y guarda la clave que recibe."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    script = bin_dir / "ssh"
+    script.write_text(
+        '#!/bin/sh\n'
+        'echo "$*" >> "$HOME/argv"\n'
+        'case "$*" in *BatchMode=yes*) [ -s "$HOME/recibida" ]; exit $? ;; esac\n'
+        '[ "$("$SSH_ASKPASS")" = "secreta 1" ] || { echo "Permission denied" >&2; exit 255; }\n'
+        'cat > "$HOME/recibida"\n')
+    script.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_configurar_acceso_creates_key_and_hides_password(tmp_path, monkeypatch):
+    _ssh_falso(tmp_path, monkeypatch)
+    configurar_acceso("u@h", "secreta 1")
+    pub = (tmp_path / ".ssh" / "id_ed25519.pub").read_text().strip()
+    assert (tmp_path / "recibida").read_text().strip() == pub
+    assert "secreta" not in (tmp_path / "argv").read_text()
+
+
+def test_configurar_acceso_reports_wrong_password(tmp_path, monkeypatch):
+    _ssh_falso(tmp_path, monkeypatch)
+    with pytest.raises(RemoteError, match="incorrectos"):
+        configurar_acceso("u@h", "otra")
