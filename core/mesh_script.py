@@ -48,6 +48,19 @@ except ImportError:
         return pts
 
 
+def fijar_puntos_perfil(mesh, n: int) -> None:
+    """Pone n puntos en cada superficie del perfil y en sus lineas opuestas."""
+    transfinita = gmsh.model.geo.mesh.setTransfiniteCurve
+    a = mesh.mesh_size_end / 2.0
+    b = mesh.mesh_size_end
+    # Misma ley que CType: de a junto al morro a b en el borde de salida.
+    r = (b / a) ** (1.0 / max(n - 2, 1)) if b > a else 1.0
+    transfinita(mesh.upper_spline_back.tag, n, "Progression", r)
+    transfinita(mesh.lower_spline_back.tag, n, "Progression", 1.0 / r)
+    transfinita(mesh.lines[1].tag, n, "Progression", 1.0 / r)
+    transfinita(mesh.lines[6].tag, n, "Progression", r)
+
+
 def main():
     if len(sys.argv) < 3:
         print("Uso: python3 mesh_script.py params.json output.msh")
@@ -61,7 +74,10 @@ def main():
     
     try:
         naca = p.get("naca", "0012")
-        chord = p.get("chord", 1.0)
+        # La geometria se construye con cuerda 1 y la malla se escala al escribirla:
+        # CType tiene longitudes fijas (x > 0.041, le - 3.5) que solo valen para c = 1.
+        cuerda_real = float(p.get("chord", 1.0))
+        chord = 1.0
         aoa_deg = p.get("aoa", 0.0)
         aoa_rad = aoa_deg * (math.pi / 180)
         print(f"DEBUG: Generando malla para AoA = {aoa_deg} deg")
@@ -72,7 +88,7 @@ def main():
         mesh_size = p.get("mesh_size_min", 0.02) * chord
         first_layer = p.get("bl_dist_min", 0.001) * chord # Ahora sí usa el parámetro de capa límite
         ratio = p.get("mesh_growth_rate", 1.15)
-        farfield_size = p.get("mesh_size_max", 1.0) * chord # Para que no quede tupido lejos
+        farfield_size = p.get("mesh_size_max", 0.5) * chord # Para que no quede tupido lejos
         # --- Proporciones del volumen de control --------------------------
         #
         # Criterio: NASA TMR, "Effect of Farfield Boundary" (naca0012_val_
@@ -82,7 +98,7 @@ def main():
         # La topología es C-Grid: semicírculo de radio `farfield` delante y
         # caja de longitud `wake_length` detrás. Si la estela queda más corta
         # que el radio lateral, el contorno la trunca y el Cd se distorsiona.
-        farfield = float(p.get("farfield", 10.0)) * chord
+        farfield = float(p.get("farfield", 50.0)) * chord
         wake_length = float(p.get("wake_length", 12.0)) * chord
         if wake_length < farfield:
             wake_length = max(wake_length, farfield)
@@ -92,8 +108,8 @@ def main():
         gmsh.model.add("NACA")
         
         # 2. CREAR GEOMETRÍA DEL PERFIL
-        nb_points = p.get("mesh_nb_points", 100)
-        
+        nb_points = 400
+
         if is_custom and p.get("file_path"):
             cloud_points = read_airfoil_from_file(p["file_path"])
         else:
@@ -153,21 +169,6 @@ def main():
                 # PLAN A: GmshAirfoil2D (Estructurado C-Grid)
                 airfoil = AirfoilSpline(rotated_points, mesh_size, name="airfoil")
 
-                # Numero de puntos en el contorno del perfil.
-                #
-                # CType calcula este numero a partir de mesh_size, que tambien
-                # fija el tamano de celda del dominio. Con mesh_size=0.008
-                # resultaban 87 puntos por superficie: 217 caras en el patch
-                # `airfoil`, demasiado pocas para integrar presion y friccion
-                # con precision.
-                #
-                # `nb_airfoil_pts` (parche en geometry_def.py) permite fijarlo
-                # aparte, de modo que el dominio se pueda mallar grueso sin
-                # perder resolucion en la superficie del alabe.
-                nb_superficie = int(p.get("nb_airfoil_pts", 0) or 0)
-                if nb_superficie > 0:
-                    airfoil.nb_airfoil_pts = nb_superficie
-
                 gmsh.model.geo.synchronize()
                 
                 # OJO: el 4o argumento de CType es el tamaño de malla del
@@ -183,9 +184,13 @@ def main():
                 # `bl_thickness` limita la capa límite a una fracción del radio:
                 # más allá de esa distancia el mallado vuelve a ser uniforme.
                 # Sin esto el dominio grande es inservible.
+                #
+                # CType recibe la altura TOTAL del dominio: el radio se duplica.
+                # Pasar el radio dejaba el contorno a la mitad de lo que decia
+                # el panel (25c con "50c").
                 bl_frac = float(p.get("bl_fraction", 1.0))
                 if bl_frac >= 1.0:
-                    mesh = CType(airfoil, wake_length, farfield,
+                    mesh = CType(airfoil, wake_length, 2.0 * farfield,
                                  mesh_size, first_layer, ratio, 0.0,
                                  structured=True)
                 else:
@@ -194,9 +199,16 @@ def main():
                     n_layers = int(p.get("mesh_num_layers", 30))
                     bl_total = first_layer * (ratio ** n_layers - 1) / (ratio - 1)
                     mesh = CType(airfoil, wake_length,
-                                 farfield * bl_frac + bl_total,
+                                 2.0 * (farfield * bl_frac + bl_total),
                                  mesh_size, first_layer, ratio, 0.0,
                                  structured=True)
+
+                # Puntos del perfil, aparte del tamaño de celda del dominio.
+                # CType los calcula con mesh_size; se sustituye su malla
+                # transfinita antes de generar, sin tocar la biblioteca.
+                nb_superficie = int(p.get("nb_airfoil_pts", 0) or 0)
+                if nb_superficie > 0:
+                    fijar_puntos_perfil(mesh, nb_superficie)
                 gmsh.model.geo.synchronize()
                 
             gmsh.model.mesh.generate(2)
@@ -405,6 +417,7 @@ def main():
         
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
         gmsh.option.setNumber("Mesh.Binary", 0)
+        gmsh.option.setNumber("Mesh.ScalingFactor", cuerda_real)
         gmsh.model.mesh.generate(3)
         
         gmsh.write(output_msh)

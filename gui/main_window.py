@@ -371,7 +371,8 @@ class MainWindow(QMainWindow):
         self._sim_steps = 0
         self._last_t = -1.0
         self._sim_t0 = time.time()
-        self._sim_end_time = float(p.get("end_time", 0.5))
+        self._sim_end_time = (float(p.get("end_time", 0.5)) if self._sim_transient
+                              else float(p.get("max_iters", 500)))
         self.input_panel.progress_label.setVisible(True)
         self.input_panel.progress_label.setText("Iniciando...")
         if en_servidor:
@@ -600,6 +601,8 @@ class MainWindow(QMainWindow):
         ahora = time.strftime("%H:%M")
         inicio = time.strftime("%H:%M", time.localtime(t0))
         estado = "⏸ PAUSADA" if getattr(self, "_paused", False) else "▶ en marcha"
+        avance = (f"t = {t_current:.4g} de {end:g} s" if transitorio
+                  else f"iteración {t_current:.0f} de {end:.0f}")
 
         lbl.setText(
             f"{estado}   {inicio} → {ahora}  ({elapsed_min:.0f} min)\n"
@@ -653,14 +656,14 @@ class MainWindow(QMainWindow):
                             (CONVERGIDO, NO_CONVERGIDO, DIVERGIDO, SIN_DATOS) if cuenta[e])
         self.log(f"📊 Barrido terminado: {resumen or 'sin puntos'}")
         self._reset_run_state()
-        if hasattr(self, 'aero_plot') and aoa_list:
-            self.aero_plot.update_plots(aoa_list, cl_list, cd_list, cm_list, estados)
-            self.tabs.setCurrentWidget(self.aero_plot)
         malos = len(estados) - cuenta[CONVERGIDO]
         self._set_banner(CONVERGIDO if estados and not malos else NO_CONVERGIDO,
                          f"Barrido: {resumen or 'sin puntos'}"
                          + (". Los puntos huecos no convergieron y los divergidos no "
                             "se dibujan." if malos else "."))
+        if hasattr(self, 'aero_plot') and aoa_list:
+            self.aero_plot.update_plots(aoa_list, cl_list, cd_list, cm_list, estados)
+            self.tabs.setCurrentWidget(self.aero_plot)
             self.log("📈 Gráfica polar actualizada en pestaña Cl/Cd.")
 
     def on_sim_done(self, code: int) -> None:

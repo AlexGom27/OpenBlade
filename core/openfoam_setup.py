@@ -1,3 +1,4 @@
+import math
 import os
 import shutil
 
@@ -5,7 +6,7 @@ class OpenFoamSetup:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
         self.case_dir = case_dir
         
-    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4) -> None:
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4, turb_intensity: float = 0.00052, viscosity_ratio: float = 0.009) -> None:
         # Create directories
         for d in ["0", "constant", "system"]:
             os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
@@ -33,6 +34,20 @@ class OpenFoamSetup:
                                 shutil.rmtree(item_path, ignore_errors=True)
                         except Exception:
                             pass
+
+                # 4. Campos y salidas de la corrida anterior: un 0/phi o un run.log
+                # viejos viajarian con el paquete y se confundirian con los nuevos.
+                cero = os.path.join(self.case_dir, "0")
+                for item in os.listdir(cero):
+                    os.remove(os.path.join(cero, item))
+                for item in os.listdir(self.case_dir):
+                    ruta = os.path.join(self.case_dir, item)
+                    if item.startswith(("log.", "processor")) or item in (
+                            "run.log", "resultado.json", "ficha.json", "status.json", "job.log"):
+                        if os.path.isdir(ruta):
+                            shutil.rmtree(ruta, ignore_errors=True)
+                        else:
+                            os.remove(ruta)
             except Exception as e_clean:
                 print(f"Aviso: No se pudo limpiar completamente la carpeta del caso: {e_clean}")
 
@@ -44,6 +59,9 @@ class OpenFoamSetup:
         # Se guarda la primera celda: _write_0 la usa para elegir el modelo de
         # pared (LowRe con y+~1, nutk con y+ alto).
         self.bl_dist_min = bl_dist_min
+        self.reynolds = float(reynolds)
+        self.turb_intensity = float(turb_intensity)
+        self.viscosity_ratio = float(viscosity_ratio)
 
         self._write_constant(turbulence, nu)
         self._write_0(u_inlet, p_outlet, chord, turbulence, nu)
@@ -53,7 +71,8 @@ class OpenFoamSetup:
         initial_dt = delta_t if transient else "1"
         endTime  = end_time if transient else str(max_iters)
         writeControl = "adjustableRunTime" if transient else "timeStep"
-        writeInterval = write_interval if transient else "50"
+        # El ultimo tiempo debe caer en una escritura: sus campos son el resultado.
+        writeInterval = write_interval if transient else str(math.gcd(50, int(max_iters)))
         purgeWrite = "0" if transient else "2"
         maxCoStr = f"adjustTimeStep  yes;\nmaxCo           {max_co};\nmaxDeltaT       0.05;" if transient else ""
         
@@ -92,6 +111,8 @@ runTimeModifiable true;
 
 functions
 {{
+    // Solo en los tiempos que se guardan: con otro intervalo se crea un
+    // directorio por escritura y la E/S domina el coste del solver.
     yPlus
     {{
         type            yPlus;
@@ -389,28 +410,22 @@ boundaryField {{
 
         # --- Condiciones de turbulencia en la entrada ---------------------
         #
-        # Fórmulas estándar (OpenFOAM User Guide, Boundary conditions ->
-        # turbulence):
-        #     k     = 1.5 * (U * I)^2
-        #     omega = sqrt(k) / (Cmu^0.25 * l)
-        # con Cmu = 0.09 y l = 0.07 * L (longitud de mezcla, L = cuerda).
+        # NASA TMR da la entrada del SST como Tu y razon de viscosidades:
+        #     k     = 1.5 * (U * Tu)^2
+        #     omega = k / (nut/nu * nu)
+        # con Tu = 0.052 % y nut/nu = 0.009 por defecto. La formula vale para
+        # cualquier velocidad y Reynolds.
         #
-        # Antes se usaba I = 0.01 y omega = k / (10 * nu). Ese cociente no
-        # tiene base física: para Re = 6e6 daba omega = 1350, unas 56 veces
-        # el valor correcto (~24). Una omega inflada genera viscosidad
-        # turbulenta desmedida, el campo de presión colapsa y el solver muere
-        # con SIGFPE tras unas pocas iteraciones.
+        # Antes estaban fijos I = 5 % y l = 0.07c, que daban nut/nu = 14 000 a
+        # Re = 6e6. Medido con la malla por defecto, 6000 iteraciones:
+        #   alpha=0: Cd = 0.01204 (+49 % frente a Ladson); con TMR 0.00776 (-3.7 %)
+        #   alpha=8: diverge (Cl de -897 a +728); con TMR Cl = 0.9345, Cd = 0.01061
         u_flt = float(u_inlet)
-        I = 0.05                        # 5 %: intensidad típica de túnel
-        k_val = max(1.5 * (u_flt * I)**2, 1e-5)
-
-        Cmu = 0.09
-        l_mix = 0.07 * chord
-        omega_val = max((k_val ** 0.5) / (Cmu ** 0.25 * l_mix), 1e-3)
-
-        # epsilon coherente con k y l (relación k-epsilon: eps = Cmu^0.75 *
-        # k^1.5 / l)
-        epsilon_val = max((Cmu ** 0.75) * (k_val ** 1.5) / l_mix, 1e-4)
+        Tu = float(getattr(self, "turb_intensity", 0.00052))
+        k_val = 1.5 * (u_flt * Tu) ** 2
+        omega_val = k_val / (float(getattr(self, "viscosity_ratio", 0.009)) * nu)
+        epsilon_val = 0.09 * k_val * omega_val
+        # Spalart-Allmaras tiene su propio estado libre: nuTilda = 3 nu (TMR).
         nuTilda_val = 3.0 * nu
         is_transition = "SST-LM" in turbulence_ui or "gamma-ReTheta" in turbulence_ui
 
@@ -419,12 +434,12 @@ boundaryField {{
             # k is used in k-epsilon, k-omega, and transition models
             k_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object k; }}
 dimensions      [0 2 -2 0 0 0 0];
-internalField   uniform {k_val:.6f};
+internalField   uniform {k_val:.6e};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform {k_val:.6f}; }}
+    inlet {{ type fixedValue; value uniform {k_val:.6e}; }}
     outlet {{ type zeroGradient; }}
     farfield {{ type zeroGradient; }}
-    airfoil {{ type kqRWallFunction; value uniform {k_val:.6f}; }}
+    airfoil {{ type kqRWallFunction; value uniform {k_val:.6e}; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
 }}
@@ -434,12 +449,12 @@ boundaryField {{
         if "Epsilon" in turbulence_ui:
             eps_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object epsilon; }}
 dimensions      [0 2 -3 0 0 0 0];
-internalField   uniform {epsilon_val:.6f};
+internalField   uniform {epsilon_val:.6e};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform {epsilon_val:.6f}; }}
+    inlet {{ type fixedValue; value uniform {epsilon_val:.6e}; }}
     outlet {{ type zeroGradient; }}
     farfield {{ type zeroGradient; }}
-    airfoil {{ type epsilonWallFunction; value uniform {epsilon_val:.6f}; }}
+    airfoil {{ type epsilonWallFunction; value uniform {epsilon_val:.6e}; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
 }}
@@ -449,12 +464,12 @@ boundaryField {{
         if "Omega" in turbulence_ui or is_transition:
             om_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object omega; }}
 dimensions      [0 0 -1 0 0 0 0];
-internalField   uniform {omega_val:.6f};
+internalField   uniform {omega_val:.6e};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform {omega_val:.6f}; }}
+    inlet {{ type fixedValue; value uniform {omega_val:.6e}; }}
     outlet {{ type zeroGradient; }}
     farfield {{ type zeroGradient; }}
-    airfoil {{ type omegaWallFunction; value uniform {omega_val:.6f}; }}
+    airfoil {{ type omegaWallFunction; value uniform {omega_val:.6e}; }}
     frontAndBack {{ type empty; }}
     defaultFaces {{ type empty; }}
 }}
@@ -464,9 +479,9 @@ boundaryField {{
         if "Spalart" in turbulence_ui:
             nt_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object nuTilda; }}
 dimensions      [0 2 -1 0 0 0 0];
-internalField   uniform {nuTilda_val:.6f};
+internalField   uniform {nuTilda_val:.6e};
 boundaryField {{
-    inlet {{ type fixedValue; value uniform {nuTilda_val:.6f}; }}
+    inlet {{ type fixedValue; value uniform {nuTilda_val:.6e}; }}
     outlet {{ type zeroGradient; }}
     farfield {{ type zeroGradient; }}
     airfoil {{ type fixedValue; value uniform 0; }} 
@@ -492,8 +507,12 @@ boundaryField {{
 """
             with open(os.path.join(self.case_dir, "0", "gammaInt"), "w") as f: f.write(gamma_content)
 
-            # ReThetat: estimación a partir de correlación empírica
-            Re_theta = max(100.0, 1173.51 - 589.428 * (I * 100) + 0.2196 / ((I * 100)**2))
+            # ReThetat: correlación de Langtry y Menter, con Tu en porcentaje.
+            tu_pct = max(100.0 * Tu, 0.027)
+            if tu_pct <= 1.3:
+                Re_theta = 1173.51 - 589.428 * tu_pct + 0.2196 / tu_pct ** 2
+            else:
+                Re_theta = 331.5 * (tu_pct - 0.5658) ** -0.671
             re_theta_content = f"""FoamFile {{ version 2.0; format ascii; class volScalarField; object ReThetat; }}
 dimensions      [0 0 0 0 0 0 0];
 internalField   uniform {Re_theta:.1f};
@@ -527,13 +546,12 @@ boundaryField {{
         #                        (normal ~10%) y Cd +310% respecto a Ladson
         #   nutUSpalding      -> no converge: Cl cae de 15.8 a 2.17 en 800 iter
         #
-        # Con malla fina (primera celda < 5e-5) se usa LowRe, el unico que
-        # resuelve la region donde se genera el cortante.
-        # La primera celda se guarda en la instancia desde create_case; si no
-        # estuviera, se asume un valor intermedio y se usa nutkWallFunction.
-        _bl = float(getattr(self, "bl_dist_min", 1e-4))
-
-        if "Spalart" in turbulence_ui or _bl < 5e-5:
+        # Se elige con el y+ que da la primera celda a este Reynolds: con y+ < 5
+        # (subcapa) va LowRe, el unico que resuelve donde se genera el cortante.
+        from core.yplus import YP_VISCOSA, estimate_yplus
+        y_mas = estimate_yplus(float(getattr(self, "bl_dist_min", 1e-4)),
+                               float(getattr(self, "reynolds", 1e6)))
+        if "Spalart" in turbulence_ui or y_mas < YP_VISCOSA:
             nut_wall = "nutLowReWallFunction"
         else:
             nut_wall = "nutkWallFunction"

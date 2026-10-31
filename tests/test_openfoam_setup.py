@@ -85,3 +85,97 @@ def test_yplus_does_not_write_every_iteration(tmp_path):
     control = (tmp_path / "c" / "system" / "controlDict").read_text()
     block = control.split("yPlus", 1)[1].split("}", 1)[0]
     assert "writeInterval   1;" not in block
+
+
+def _valor_entrada(caso, campo):
+    texto = (caso / "0" / campo).read_text()
+    return float(texto.split("internalField")[1].split("uniform")[1].split(";")[0])
+
+
+def test_inflow_comes_from_tu_and_viscosity_ratio(tmp_path):
+    """k = 1.5 (U Tu)^2, omega = k / (nut/nu nu); con .6f k se perdia al escribirse."""
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case(
+        u_inlet=15.0, chord=1.0, reynolds=6e6, turb_intensity=0.00052, viscosity_ratio=0.009)
+    k = 1.5 * (15.0 * 0.00052) ** 2
+    assert _valor_entrada(caso, "k") == pytest.approx(k, rel=1e-5)
+    assert _valor_entrada(caso, "omega") == pytest.approx(k / (0.009 * 2.5e-6), rel=1e-5)
+    assert "airfoil" in (caso / "0" / "k").read_text()
+
+
+def test_other_turbulence_models_get_consistent_inflow(tmp_path):
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case(
+        u_inlet=10.0, chord=1.0, reynolds=1e6, turbulence="k-Epsilon (RAS)",
+        turb_intensity=0.01, viscosity_ratio=1.0)
+    k = 1.5 * (10.0 * 0.01) ** 2
+    assert _valor_entrada(caso, "epsilon") == pytest.approx(0.09 * k * k / 1e-5, rel=1e-5)
+    caso = tmp_path / "sa"
+    OpenFoamSetup(case_dir=str(caso)).create_case(
+        u_inlet=15.0, chord=1.0, reynolds=6e6, turbulence="Spalart-Allmaras (RAS)")
+    assert _valor_entrada(caso, "nuTilda") == pytest.approx(3 * 2.5e-6, rel=1e-5)
+
+
+def test_retheta_uses_tu_in_percent_with_both_branches(tmp_path):
+    def re_theta(tu):
+        caso = tmp_path / f"t{tu}"
+        OpenFoamSetup(case_dir=str(caso)).create_case(
+            turbulence="k-Omega SST-LM Transición (RAS)", turb_intensity=tu)
+        return _valor_entrada(caso, "ReThetat")
+    assert re_theta(0.00052) == pytest.approx(1224, abs=2)
+    assert re_theta(0.05) == pytest.approx(331.5 * (5 - 0.5658) ** -0.671, abs=0.1)
+
+
+@pytest.mark.parametrize("reynolds,primera,condicion", [
+    (6e6, 2e-5, "nutLowReWallFunction"),
+    (1e6, 2e-5, "nutLowReWallFunction"),
+    (6e6, 1e-3, "nutkWallFunction"),
+    (1e9, 2e-5, "nutkWallFunction"),
+])
+def test_wall_condition_follows_the_estimated_yplus(tmp_path, reynolds, primera, condicion):
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case(reynolds=reynolds, bl_dist_min=primera)
+    assert condicion in (caso / "0" / "nut").read_text()
+
+
+@pytest.mark.parametrize("iteraciones,intervalo", [(6000, 50), (500, 50), (525, 25), (777, 1)])
+def test_last_iteration_is_always_written(tmp_path, iteraciones, intervalo):
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case(max_iters=iteraciones)
+    control = (caso / "system" / "controlDict").read_text()
+    assert f"writeInterval   {intervalo};" in control
+
+
+def test_gui_parameters_reach_the_case(tmp_path):
+    """Lo validado por scripts no era lo que corre la GUI: estos parametros se perdian."""
+    from core.solve_script import configure_case
+    caso = tmp_path / "c"
+    configure_case(str(caso), {
+        "u_inlet": 15.0, "p_outlet": 0.0, "chord": 2.0, "reynolds": 6e6,
+        "turbulence": "k-Omega SST (RAS)", "regime": "Estacionario (simpleFoam)",
+        "momentum_scheme": "upwind", "bl_dist_min": 1e-3, "turb_intensity": 0.2,
+        "viscosity_ratio": 2.0, "depth": 0.1, "max_iters": 100})
+    control = (caso / "system" / "controlDict").read_text()
+    # Aref = cuerda x profundidad; la malla extruye 0.1 cuerdas
+    assert "Aref            0.4;" in control
+    assert "Gauss upwind;" in (caso / "system" / "fvSchemes").read_text()
+    assert "nutkWallFunction" in (caso / "0" / "nut").read_text()
+    k = 1.5 * (15.0 * 0.002) ** 2
+    assert _valor_entrada(caso, "k") == pytest.approx(k, rel=1e-5)
+    assert _valor_entrada(caso, "omega") == pytest.approx(k / (2.0 * 5e-6), rel=1e-5)
+
+
+def test_previous_run_leaves_nothing_behind(tmp_path):
+    """Un 0/phi o un run.log viejos viajarian con el paquete siguiente."""
+    caso = tmp_path / "c"
+    setup = OpenFoamSetup(case_dir=str(caso))
+    setup.create_case()
+    for viejo in ("0/phi", "run.log", "log.gmshToFoam", "resultado.json", "ficha.json"):
+        (caso / viejo).write_text("viejo")
+    (caso / "processor0").mkdir()
+    (caso / "6000").mkdir()
+    setup.create_case()
+    for viejo in ("0/phi", "run.log", "log.gmshToFoam", "resultado.json", "ficha.json",
+                  "processor0", "6000"):
+        assert not (caso / viejo).exists(), viejo
+    assert (caso / "0" / "U").exists()

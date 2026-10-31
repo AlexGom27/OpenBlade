@@ -21,7 +21,13 @@ def configure_case(case_dir, p):
         end_time=p.get("end_time", "0.5"),
         write_interval=p.get("write_interval", "0.01"),
         max_co=p.get("max_co", 2.0),
-        max_iters=p.get("max_iters", 500)
+        max_iters=p.get("max_iters", 500),
+        momentum_scheme=p.get("momentum_scheme", "limitedLinearV"),
+        # La malla se extruye `depth` cuerdas: Aref debe usar la misma profundidad.
+        depth=float(p.get("depth", 0.1)) * float(p["chord"]),
+        bl_dist_min=p.get("bl_dist_min", 2e-5),
+        turb_intensity=float(p.get("turb_intensity", 0.052)) / 100.0,
+        viscosity_ratio=p.get("viscosity_ratio", 0.009),
     )
     return is_transient
 

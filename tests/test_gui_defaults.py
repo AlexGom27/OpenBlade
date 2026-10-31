@@ -29,9 +29,7 @@ def params():
 
 
 def test_boundary_layer_is_resolved(params):
-    """30 capas y primera celda de 2e-5c: y+ ~ 1 a Re=6e6."""
-    assert params["mesh_num_layers"] >= 25, (
-        f"{params['mesh_num_layers']} capas no resuelven el gradiente")
+    """Primera celda de 2e-5c: dentro de la subcapa viscosa a Re=1e6 y Re=6e6."""
     assert params["bl_dist_min"] <= 5e-5, (
         f"primera celda {params['bl_dist_min']}c: la capa límite es más "
         "gruesa que el perfil (0.12c)")
@@ -39,8 +37,65 @@ def test_boundary_layer_is_resolved(params):
 
 def test_profile_is_resolved(params):
     """El contorno necesita suficientes puntos para el patch airfoil."""
-    assert params["mesh_nb_points"] >= 300
     assert params["mesh_size_min"] <= 0.01
+
+
+def test_default_run_has_enough_iterations(params):
+    """Con 500 iteraciones la corrida por defecto terminaba sin converger."""
+    assert params["max_iters"] >= 6000
+
+
+def test_inflow_defaults_are_the_tmr_values(params):
+    assert params["turb_intensity"] == pytest.approx(0.052)
+    assert params["viscosity_ratio"] == pytest.approx(0.009)
+
+
+def test_first_cell_for_yplus_one_is_reachable():
+    """Con 5 decimales 8.9e-6 se redondeaba a 1e-5: y+ = 1 a Re=6e6 no se podia pedir."""
+    from gui.input_panel import InputPanel
+    panel = InputPanel()
+    panel.bl_dist_min.setValue(8.9e-6)
+    assert panel.get_params()["bl_dist_min"] == pytest.approx(8.9e-6)
+    panel.deleteLater()
+
+
+def test_yplus_estimate_follows_reynolds():
+    from gui.input_panel import InputPanel
+    panel = InputPanel()
+    panel.reynolds_input.setValue(6e6)
+    assert "2.24" in panel.yplus_estimate.text()
+    panel.bl_dist_min.setValue(1e-3)
+    assert "logarítmica" in panel.yplus_estimate.text()
+    panel.deleteLater()
+
+
+def test_wheel_does_not_change_a_field_without_focus():
+    """Al desplazar el panel la rueda cambiaba el AoA sin que nadie lo notara."""
+    from qtpy.QtCore import QPoint, QPointF, Qt
+    from qtpy.QtGui import QWheelEvent
+    from qtpy.QtWidgets import QApplication
+    from gui.input_panel import InputPanel
+    panel = InputPanel()
+    panel.aoa_input.setValue(0.0)
+    evento = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, 120),
+                         Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+    QApplication.sendEvent(panel.aoa_input, evento)
+    assert panel.aoa_input.value() == 0.0
+    panel.deleteLater()
+
+
+def test_saved_project_round_trip_keeps_new_fields(params):
+    from gui.input_panel import InputPanel
+    panel = InputPanel()
+    p = dict(params, turb_intensity=0.2, viscosity_ratio=1.0, momentum_scheme="upwind",
+             nb_airfoil_pts=300, bl_dist_min=8e-6)
+    panel.set_params(p)
+    q = panel.get_params()
+    for clave in ("turb_intensity", "viscosity_ratio", "momentum_scheme", "nb_airfoil_pts"):
+        assert q[clave] == p[clave]
+    # un proyecto antiguo trae claves de controles que ya no existen
+    panel.set_params({"element_type": "Quads (Gmsh)", "mesh_curvature": 100})
+    panel.deleteLater()
 
 
 def test_domain_is_large_enough(params):

@@ -5,9 +5,23 @@ import threading
 from qtpy.QtWidgets import (QWidget, QFormLayout, QLineEdit, QDoubleSpinBox, QLabel,
     QVBoxLayout, QGroupBox, QComboBox, QPushButton, QFileDialog, QHBoxLayout,
     QToolButton, QSizePolicy, QFrame, QLayout, QDialog, QDialogButtonBox, QCheckBox, QSpinBox,
-    QInputDialog)
-from qtpy.QtCore import Qt, QPropertyAnimation, QParallelAnimationGroup, Signal
+    QInputDialog, QAbstractSpinBox)
+from qtpy.QtCore import Qt, QEvent, QObject, QPropertyAnimation, QParallelAnimationGroup, Signal
 from typing import Optional, Dict, Any
+
+
+class _SinRuedaSinFoco(QObject):
+    """La rueda desplaza el panel; solo cambia un valor si el campo tiene el foco.
+
+    Al desplazarse con el cursor sobre un campo, la rueda cambiaba el valor sin
+    que nadie lo notara: asi el AoA paso de 0 a 1 en una corrida.
+    """
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Wheel and not obj.hasFocus():
+            event.ignore()
+            return True
+        return False
 
 
 class CollapsibleBox(QWidget):
@@ -176,10 +190,6 @@ class InputPanel(QWidget):
         mesh_layout = QFormLayout()
         mesh_layout.setContentsMargins(8, 8, 8, 8)
         
-        self.element_type = QComboBox()
-        self.element_type.addItems(["Quads (Gmsh)", "Hexaedros (Gmsh)", "Tetraedros (Gmsh)", "Automático (Mixto)", "Estructurada (O-Grid blockMesh)"])
-
-        
         self.mesh_size_min = QDoubleSpinBox()
         self.mesh_size_min.setRange(0.001, 1.0)
         # Valor validado contra NASA TM 4074: 0.006c da error de Cd < 2% en el
@@ -188,34 +198,20 @@ class InputPanel(QWidget):
         self.mesh_size_min.setValue(0.006)
         self.mesh_size_min.setSingleStep(0.001)
         self.mesh_size_min.setSuffix(" c")
-        self.mesh_size_min.setToolTip("En fracciones de cuerda")
-        
-        self.mesh_size_max = QDoubleSpinBox()
-        self.mesh_size_max.setRange(0.01, 10.0)
-        # 0.5c en el farfield a 50c de distancia: equilibrio entre coste y que la
-        # estela no se refleje. Con 1.0c la malla exterior es demasiado gruesa.
-        self.mesh_size_max.setDecimals(3)
-        self.mesh_size_max.setValue(0.5)
-        self.mesh_size_max.setSuffix(" c")
+        self.mesh_size_min.setToolTip("En fracciones de cuerda. En el borde de salida "
+                                      "y al inicio de la estela la celda mide el doble.")
         
         self.bl_dist_min = QDoubleSpinBox()
-        # La primera celda debe dar y+ ~ 1. Para Re=6e6 y U=15 m/s eso es ~2e-5c.
-        # Con 0.05c la "capa límite" es MÁS GRUESA QUE EL PERFIL (0.12c de
-        # espesor) y no resuelve nada.
-        self.bl_dist_min.setRange(0.000001, 0.1)
+        # Altura de la primera celda. Con 2e-5c, y+ medio es ~0.5 a Re=1e6 y ~2.5 a
+        # Re=6e6; y+ = 1 a Re=6e6 pide ~8e-6c. Con 0.05c la "capa límite" es MÁS
+        # GRUESA QUE EL PERFIL (0.12c de espesor) y no resuelve nada.
+        self.bl_dist_min.setRange(0.0000001, 0.1)
         # setDecimals ANTES de setValue: con los decimales por defecto (2),
         # 0.00002 se redondea a 0.00 y la capa límite desaparece.
-        self.bl_dist_min.setDecimals(5)
+        self.bl_dist_min.setDecimals(7)
         self.bl_dist_min.setValue(0.00002)
-        self.bl_dist_min.setSingleStep(0.001)
+        self.bl_dist_min.setSingleStep(0.000001)
         self.bl_dist_min.setSuffix(" c")
-        
-        self.mesh_num_layers = QSpinBox()
-        self.mesh_num_layers.setRange(1, 100)
-        # 30 capas es lo mínimo para resolver el gradiente con k-omega SST.
-        # Con 5 capas el perfil queda prácticamente sin capa límite.
-        self.mesh_num_layers.setValue(30)
-
         
         self.mesh_growth_rate = QDoubleSpinBox()
         self.mesh_growth_rate.setRange(1.01, 2.0)
@@ -223,34 +219,30 @@ class InputPanel(QWidget):
         self.mesh_growth_rate.setSingleStep(0.05)
         self.mesh_growth_rate.setDecimals(2)
         
-        self.mesh_curvature = QSpinBox()
-        self.mesh_curvature.setRange(0, 500)
-        self.mesh_curvature.setValue(100)
-        self.mesh_curvature.setSuffix(" p")
-        self.mesh_curvature.setToolTip("Número de puntos por círculo completo (curvatura).")
-        
-        self.mesh_nb_points = QSpinBox()
-        self.mesh_nb_points.setRange(50, 2000)
-        # 400 puntos en el contorno: menos deja el borde de ataque mal definido y
-        # el patch `airfoil` con muy pocas caras.
-        self.mesh_nb_points.setValue(400)
-        self.mesh_nb_points.setSingleStep(50)
-        self.mesh_nb_points.setSuffix(" pts")
-        self.mesh_nb_points.setToolTip("Puntos en el contorno del perfil (mayor valor = líneas más ortogonales)")
-        
+        self.nb_airfoil_pts = QSpinBox()
+        self.nb_airfoil_pts.setRange(0, 4000)
+        self.nb_airfoil_pts.setSingleStep(50)
+        self.nb_airfoil_pts.setSpecialValueText("Según tamaño mín")
+        self.nb_airfoil_pts.setSuffix(" pts")
+        self.nb_airfoil_pts.setToolTip(
+            "Puntos por superficie entre x/c≈0.04 y el borde de salida. 0: los decide "
+            "el tamaño mínimo, que también fija las celdas del resto del dominio.")
+
         self.btn_yplus = QPushButton("🧮 Evaluar y+")
         self.btn_yplus.setToolTip("Estima la altura inicial basándose en el Re y modelo turbulento.")
         self.btn_yplus.clicked.connect(self._show_yplus_calculator)
+        self.yplus_estimate = QLabel("")
+        self.yplus_estimate.setWordWrap(True)
         
         bl_min_layout = QHBoxLayout()
         bl_min_layout.addWidget(self.bl_dist_min)
         bl_min_layout.addWidget(self.btn_yplus)
         
         self.wake_length = QDoubleSpinBox()
-        self.wake_length.setRange(1.0, 40.0)
-        # 12c: coherente con DOMAIN_DEFAULT de core/geometry.py. Con 5c la
-        # estela no cabe en el dominio y el contorno la trunca.
-        self.wake_length.setValue(12.0)
+        self.wake_length.setRange(1.0, 1000.0)
+        self.wake_length.setToolTip("Se usa la mayor entre esta longitud y el radio del "
+                                    "dominio: una estela más corta se trunca en el contorno.")
+        self.wake_length.setValue(50.0)
         self.wake_length.setDecimals(1)
         self.wake_length.setSuffix(" c")
         
@@ -258,32 +250,24 @@ class InputPanel(QWidget):
         # mesh_script usa 10c, un dominio 5x menor que el validado (50c).
         # Con 10c la estela se refleja en el contorno y el Cd se distorsiona.
         self.farfield = QDoubleSpinBox()
-        self.farfield.setRange(5.0, 500.0)
+        self.farfield.setRange(5.0, 1000.0)
         self.farfield.setDecimals(0)
         self.farfield.setValue(50.0)
         self.farfield.setSingleStep(5.0)
         self.farfield.setSuffix(" c")
         self.farfield.setToolTip(
-            "Radio del dominio exterior. NASA TMR recomienda 500c para "
-            "resultados libres de bloqueo, pero el C-Grid estructurado produce "
-            "celdas degeneradas por encima de ~60c. 50c es el compromiso validado.")
+            "Distancia del perfil al contorno exterior. NASA TMR usa 500c para "
+            "resultados libres de bloqueo.")
 
-        self.wake_refine = QDoubleSpinBox()
-        self.wake_refine.setRange(0.5, 5.0)
-        self.wake_refine.setValue(1.0)
-        self.wake_refine.setDecimals(1)
-        self.wake_refine.setToolTip("Multiplicador del tamaño mínimo en la estela (1.0 = 3x cl_min)")
-        
-        mesh_layout.addRow("Tipo Elemento:", self.element_type)
-        mesh_layout.addRow("Resolución Contorno:", self.mesh_nb_points)
+        # Solo lo que cambia la malla. Tipo de elemento, curvatura y factor de
+        # estela no llegaban a ningun sitio: la malla C siempre es de cuadrilateros.
+        mesh_layout.addRow("Puntos del perfil:", self.nb_airfoil_pts)
         mesh_layout.addRow("Tamaño Mín Elemento:", self.mesh_size_min)
-        mesh_layout.addRow("Tamaño Máx Elemento:", self.mesh_size_max)
-        mesh_layout.addRow("Capa Límite (dist mín):", bl_min_layout)
-        mesh_layout.addRow("Número de Capas:", self.mesh_num_layers)
+        mesh_layout.addRow("Primera celda:", bl_min_layout)
+        mesh_layout.addRow("", self.yplus_estimate)
         mesh_layout.addRow("Tasa Crecimiento:", self.mesh_growth_rate)
-        mesh_layout.addRow("Ref. Curvatura:", self.mesh_curvature)
+        mesh_layout.addRow("Radio del dominio:", self.farfield)
         mesh_layout.addRow("Longitud Estela:", self.wake_length)
-        mesh_layout.addRow("Factor Refin. Estela:", self.wake_refine)
         mesh_box.setContentLayout(mesh_layout)
         
         # ═══════════════════════════════════════════
@@ -317,8 +301,9 @@ class InputPanel(QWidget):
         steady_layout = QFormLayout(self.steady_widget)
         steady_layout.setContentsMargins(0, 0, 0, 0)
         self.max_iters_input = QSpinBox()
-        self.max_iters_input.setRange(10, 100000)
-        self.max_iters_input.setValue(500)
+        self.max_iters_input.setRange(10, 1000000)
+        # Con 500 la corrida por defecto terminaba con Cd aún bajando.
+        self.max_iters_input.setValue(6000)
         self.max_iters_input.setSingleStep(50)
         steady_layout.addRow("Iteraciones Máximas:", self.max_iters_input)
 
@@ -356,6 +341,27 @@ class InputPanel(QWidget):
         self.turbulence_model.setCurrentText("k-Omega SST (RAS)")
         
         self.tol_input = QLineEdit("1e-4")
+
+        # Entrada de turbulencia: valores de NASA TMR para el SST.
+        self.turb_intensity = QDoubleSpinBox()
+        self.turb_intensity.setDecimals(3)
+        self.turb_intensity.setRange(0.001, 30.0)
+        self.turb_intensity.setSingleStep(0.01)
+        self.turb_intensity.setValue(0.052)
+        self.turb_intensity.setSuffix(" %")
+        self.turb_intensity.setToolTip("k = 1.5 (U·Tu)². NASA TMR usa 0.052 % para el SST.")
+        self.viscosity_ratio = QDoubleSpinBox()
+        self.viscosity_ratio.setDecimals(4)
+        self.viscosity_ratio.setRange(0.0001, 100000.0)
+        self.viscosity_ratio.setSingleStep(0.001)
+        self.viscosity_ratio.setValue(0.009)
+        self.viscosity_ratio.setToolTip("ω = k / (νt/ν · ν). NASA TMR usa 0.009 para el SST.")
+
+        self.momentum_scheme = QComboBox()
+        self.momentum_scheme.addItem("limitedLinearV 1 (por defecto)", "limitedLinearV")
+        self.momentum_scheme.addItem("linearUpwind (2.º orden sin limitar)", "linearUpwind")
+        self.momentum_scheme.addItem("upwind (1.er orden, difusivo)", "upwind")
+        self.momentum_scheme.setToolTip("Esquema convectivo de la velocidad")
         
         self.native_foam_cb = QCheckBox("Usar OpenFOAM Nativo (Sin Docker)")
         self.native_foam_cb.setChecked(False)
@@ -368,6 +374,9 @@ class InputPanel(QWidget):
         cf_layout.addRow("Nº de Reynolds:", self.reynolds_input)
         cf_layout.addRow("Velocidad de Entrada:", self.vel_input)
         cf_layout.addRow("Presión de Salida:", self.pres_input)
+        cf_layout.addRow("Turbulencia de entrada Tu:", self.turb_intensity)
+        cf_layout.addRow("Razón de viscosidades νt/ν:", self.viscosity_ratio)
+        cf_layout.addRow("Esquema convectivo U:", self.momentum_scheme)
         cf_layout.addRow("Tolerancia Residual:", self.tol_input)
         cf_layout.addRow("", self.native_foam_cb)
         cf_box.setContentLayout(cf_layout)
@@ -469,7 +478,15 @@ class InputPanel(QWidget):
         
         main_layout.addLayout(btn_layout)
 
+        self._filtro_rueda = _SinRuedaSinFoco(self)
+        for campo in self.scroll_content.findChildren(QAbstractSpinBox) + \
+                self.scroll_content.findChildren(QComboBox):
+            campo.setFocusPolicy(Qt.StrongFocus)
+            campo.installEventFilter(self._filtro_rueda)
 
+        self.reynolds_input.valueChanged.connect(self._update_yplus_estimate)
+        self.bl_dist_min.valueChanged.connect(self._update_yplus_estimate)
+        self._update_yplus_estimate()
 
     # ------------------------------------------------------- dónde se ejecuta
     def _build_exec_box(self) -> CollapsibleBox:
@@ -640,11 +657,7 @@ class InputPanel(QWidget):
         yplus_target.setRange(0.1, 500)
         yplus_target.setValue(1.0 if "SST" in self.turbulence_model.currentText() else 30.0)
         
-        chord_spin = QDoubleSpinBox()
-        chord_spin.setValue(self.chord_input.value())
-        
         layout.addRow("Número de Reynolds:", re_spin)
-        layout.addRow("Cuerda (m):", chord_spin)
         layout.addRow("y+ Objetivo:", yplus_target)
         
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -653,19 +666,16 @@ class InputPanel(QWidget):
         layout.addRow(btn_box)
         
         if dialog.exec() == QDialog.Accepted:
-            re = re_spin.value()
-            c = chord_spin.value()
-            yp = yplus_target.value()
-            # Empirical flat plate Cf
-            cf = 0.026 / (re ** (1/7))
-            # tau_w approx = 0.5 * rho * U^2 * Cf -> U* = U * sqrt(Cf / 2)
-            # U = Re * nu / c. Re = U*c/nu -> U/nu = Re/c
-            # delta_s = y+ * nu / U* = y+ * nu / (U * sqrt(Cf/2)) 
-            # delta_s / c = y+ / (Re * sqrt(Cf/2))
-            
-            delta_s_c = yp / (re * ((cf / 2) ** 0.5))
-            # limit delta_s_c to avoid weird spinbox rounding error out of bounds
-            self.bl_dist_min.setValue(max(0.00001, min(delta_s_c, 1.0)))
+            from core.yplus import first_cell_for_yplus
+            self.bl_dist_min.setValue(first_cell_for_yplus(yplus_target.value(), re_spin.value()))
+
+    def _update_yplus_estimate(self) -> None:
+        """y+ esperado con la primera celda y el Reynolds que hay en el panel."""
+        from core.yplus import YP_LOG_MIN, YP_VISCOSA, estimate_yplus
+        y = estimate_yplus(self.bl_dist_min.value(), self.reynolds_input.value())
+        zona = ("subcapa viscosa" if y <= YP_VISCOSA else
+                "zona de transición: evítala" if y < YP_LOG_MIN else "zona logarítmica")
+        self.yplus_estimate.setText(f"y+ medio estimado ≈ {y:.2f} ({zona})")
 
     def _pick_file(self) -> None:
         file_name, _ = QFileDialog.getOpenFileName(self, "Seleccionar Perfil 2D", "", "Text Files (*.txt *.csv);;All Files (*)")
@@ -712,37 +722,31 @@ class InputPanel(QWidget):
             if self.aoa_min.value() >= self.aoa_max.value():
                 raise ValueError("En 'Barrido de Ángulos', el valor mínimo de AoA debe ser menor al máximo.")
                 
-        if self.mesh_size_min.value() >= self.mesh_size_max.value():
-            raise ValueError("El tamaño MÍNIMO de malla no puede ser mayor o igual al MÁXIMO.")
-
-
         return {
             "profile_type": self.profile_type.currentText(),
             "naca": self.naca_input.text(),
             "file_path": self.file_path_label.text(),
             "chord": self.chord_input.value(),
-            "element_type": self.element_type.currentText(),
             "analysis_mode": self.analysis_mode.currentText(),
             "aoa": self.aoa_input.value(),
             "aoa_min": self.aoa_min.value(),
             "aoa_max": self.aoa_max.value(),
             "aoa_step": self.aoa_step.value(),
             "mesh_size_min": self.mesh_size_min.value(),
-            "mesh_size_max": self.mesh_size_max.value(),
             "bl_dist_min": self.bl_dist_min.value(),
-            "mesh_num_layers": self.mesh_num_layers.value(),
             "mesh_growth_rate": self.mesh_growth_rate.value(),
-            "mesh_curvature": self.mesh_curvature.value(),
-            "mesh_nb_points": self.mesh_nb_points.value(),
+            "nb_airfoil_pts": self.nb_airfoil_pts.value(),
             "wake_length": self.wake_length.value(),
             "farfield": self.farfield.value(),
-            "wake_refine": self.wake_refine.value(),
             "regime": self.regime_selector.currentText(),
             "reynolds": self.reynolds_input.value(),
             "u_inlet": self.vel_input.value(),
             "p_outlet": self.pres_input.value(),
             "tolerance": self.tol_input.text(),
             "turbulence": self.turbulence_model.currentText(),
+            "turb_intensity": self.turb_intensity.value(),
+            "viscosity_ratio": self.viscosity_ratio.value(),
+            "momentum_scheme": self.momentum_scheme.currentData(),
             "delta_t": self.delta_t_input.text(),
             "end_time": self.end_time_input.text(),
             "write_interval": self.write_interval_input.text(),
@@ -785,9 +789,6 @@ class InputPanel(QWidget):
             self.file_path_label.setText(str(p["file_path"]))
         if "chord" in p:
             self.chord_input.setValue(float(p["chord"]))
-        if "element_type" in p:
-            idx = self.element_type.findText(p["element_type"])
-            if idx >= 0: self.element_type.setCurrentIndex(idx)
         if "analysis_mode" in p:
             idx = self.analysis_mode.findText(p["analysis_mode"])
             if idx >= 0: self.analysis_mode.setCurrentIndex(idx)
@@ -801,24 +802,16 @@ class InputPanel(QWidget):
             self.aoa_step.setValue(float(p["aoa_step"]))
         if "mesh_size_min" in p:
             self.mesh_size_min.setValue(float(p["mesh_size_min"]))
-        if "mesh_size_max" in p:
-            self.mesh_size_max.setValue(float(p["mesh_size_max"]))
         if "bl_dist_min" in p:
             self.bl_dist_min.setValue(float(p["bl_dist_min"]))
-        if "mesh_num_layers" in p:
-            self.mesh_num_layers.setValue(int(p["mesh_num_layers"]))
         if "mesh_growth_rate" in p:
             self.mesh_growth_rate.setValue(float(p["mesh_growth_rate"]))
-        if "mesh_curvature" in p:
-            self.mesh_curvature.setValue(int(p["mesh_curvature"]))
-        if "mesh_nb_points" in p:
-            self.mesh_nb_points.setValue(int(p["mesh_nb_points"]))
+        if "nb_airfoil_pts" in p:
+            self.nb_airfoil_pts.setValue(int(p["nb_airfoil_pts"]))
         if "wake_length" in p:
             self.wake_length.setValue(float(p["wake_length"]))
         if "farfield" in p:
             self.farfield.setValue(float(p["farfield"]))
-        if "wake_refine" in p:
-            self.wake_refine.setValue(float(p["wake_refine"]))
         if "regime" in p:
             idx = self.regime_selector.findText(p["regime"])
             if idx >= 0: self.regime_selector.setCurrentIndex(idx)
@@ -830,6 +823,13 @@ class InputPanel(QWidget):
             self.pres_input.setValue(float(p["p_outlet"]))
         if "tolerance" in p:
             self.tol_input.setText(str(p["tolerance"]))
+        if "turb_intensity" in p:
+            self.turb_intensity.setValue(float(p["turb_intensity"]))
+        if "viscosity_ratio" in p:
+            self.viscosity_ratio.setValue(float(p["viscosity_ratio"]))
+        if "momentum_scheme" in p:
+            i = self.momentum_scheme.findData(p["momentum_scheme"])
+            if i >= 0: self.momentum_scheme.setCurrentIndex(i)
         if "turbulence" in p:
             idx = self.turbulence_model.findText(p["turbulence"])
             if idx >= 0: self.turbulence_model.setCurrentIndex(idx)
