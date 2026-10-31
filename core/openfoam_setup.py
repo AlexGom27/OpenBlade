@@ -325,24 +325,29 @@ potentialFlow
 solvers {{
     p {{
         solver          {p_solver};
-        tolerance       1e-6;
-        relTol          0.1;
+        tolerance       1e-9;
+        relTol          0.05;
         smoother        GaussSeidel;
     }}
     pFinal {{
         $p;
         relTol 0;
     }}
+    // La tolerancia absoluta debe quedar muy por debajo de relTol. El residuo se
+    // normaliza con el campo, y omega en la pared vale del orden de 1e9: con 1e-6 el
+    // residuo de k y omega ya cumplia antes de empezar ("No Iterations 0"), los campos
+    // quedaban congelados y las fuerzas parecian convergidas. Medido a alfa=10 en
+    // 897x257: Cd = 0.0213 con Cf doble del real, y veredicto CONVERGIDO.
     "{field_names}" {{
         solver          PBiCGStab;
         preconditioner  DILU;
-        tolerance       1e-6;
+        tolerance       1e-14;
         relTol          0.1;
     }}
     "{field_names}Final" {{
         solver          PBiCGStab;
         preconditioner  DILU;
-        tolerance       1e-6;
+        tolerance       1e-14;
         relTol          0;
     }}
     Phi {{

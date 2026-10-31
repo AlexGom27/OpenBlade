@@ -33,6 +33,18 @@ class RemoteError(RuntimeError):
     pass
 
 
+class FichaDistinta(RemoteError):
+    """El servidor verifico otra ficha: no es un corte de red, no se reintenta."""
+
+
+def _aviso_tailscale(salida) -> str:
+    """Tailscale SSH puede pedir autenticarse: ssh se queda esperando y solo da un enlace."""
+    if isinstance(salida, bytes):
+        salida = salida.decode(errors="replace")
+    m = re.search(r"https://login\.tailscale\.com/\S+", salida or "")
+    return f"Tailscale pide autenticarse: abre {m.group(0)}" if m else ""
+
+
 def validar_host(host: str) -> str:
     """Admite usuario@host; un '-' inicial se interpretaria como opcion de ssh."""
     host = (host or "").strip()
@@ -42,9 +54,15 @@ def validar_host(host: str) -> str:
 
 
 def _ssh(host: str, comando: str, timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(["ssh"] + SSH_OPTS + [host, comando],
-                          capture_output=True, text=True, errors="replace",
-                          stdin=subprocess.DEVNULL, timeout=timeout)
+    try:
+        return subprocess.run(["ssh"] + SSH_OPTS + [host, comando],
+                              capture_output=True, text=True, errors="replace",
+                              stdin=subprocess.DEVNULL, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        aviso = _aviso_tailscale(e.stdout) or _aviso_tailscale(e.stderr)
+        if aviso:
+            raise RemoteError(aviso) from None
+        raise
 
 
 def probar_servidor(host: str) -> Dict[str, Any]:
@@ -119,8 +137,9 @@ def configurar_acceso(host: str, contrasena: str) -> None:
                  "-o", "NumberOfPasswordPrompts=1", host, remoto],
                 input=clave + "\n", capture_output=True, text=True, errors="replace",
                 env=env, start_new_session=True, timeout=40)
-        except subprocess.TimeoutExpired:
-            raise RemoteError(f"{host} no responde") from None
+        except subprocess.TimeoutExpired as e:
+            aviso = _aviso_tailscale(e.stdout) or _aviso_tailscale(e.stderr)
+            raise RemoteError(aviso or f"{host} no responde") from None
     if r.returncode != 0:
         if "IDENTIFICATION HAS CHANGED" in r.stderr:
             raise RemoteError(f"La identidad de {host} cambio; no se envio la clave. "
@@ -226,7 +245,7 @@ class RemoteJob:
         """El servidor verifico la misma ficha que se envio."""
         huella = estado.get("ficha_sha256")
         if self.ficha_sha256 and huella and huella != self.ficha_sha256:
-            raise RemoteError("La ficha del servidor no es la que se envió")
+            raise FichaDistinta("La ficha del servidor no es la que se envió")
 
     def estado(self) -> Dict[str, Any]:
         """Estado del trabajo, comprobando que su proceso siga vivo.
@@ -246,12 +265,18 @@ class RemoteJob:
 
     def leer_log(self, maximo: int = 2_000_000) -> str:
         """Texto nuevo de run.log desde la ultima lectura."""
-        salida = subprocess.run(
-            ["ssh"] + SSH_OPTS + [
-                self.host,
-                f"tail -c +{self.offset + 1} ~/{self.job_dir}/run.log 2>/dev/null "
-                f"| head -c {maximo}"],
-            capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
+        try:
+            salida = subprocess.run(
+                ["ssh"] + SSH_OPTS + [
+                    self.host,
+                    f"tail -c +{self.offset + 1} ~/{self.job_dir}/run.log 2>/dev/null "
+                    f"| head -c {maximo}"],
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
+        except subprocess.TimeoutExpired as e:
+            aviso = _aviso_tailscale(e.stdout) or _aviso_tailscale(e.stderr)
+            if aviso:
+                raise RemoteError(aviso) from None
+            raise
         if salida.returncode != 0:
             raise RemoteError(salida.stderr.decode(errors="replace").strip()[-200:])
         self.offset += len(salida.stdout)

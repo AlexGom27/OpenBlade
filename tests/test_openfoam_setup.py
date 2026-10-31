@@ -212,3 +212,13 @@ def test_mesh_points_keep_their_precision(tmp_path):
     caso = tmp_path / "c"
     OpenFoamSetup(case_dir=str(caso)).create_case()
     assert "writePrecision  15;" in (caso / "system" / "controlDict").read_text()
+
+
+def test_turbulence_equations_are_never_frozen_by_the_absolute_tolerance(tmp_path):
+    """Con 1e-6, k y omega hacian 0 iteraciones y las fuerzas parecian convergidas."""
+    import re
+    caso = tmp_path / "c"
+    OpenFoamSetup(case_dir=str(caso)).create_case()
+    solucion = (caso / "system" / "fvSolution").read_text()
+    bloque = solucion[solucion.index('"(U|k|omega)"'):]
+    assert float(re.search(r"tolerance\s+([0-9e.-]+);", bloque).group(1)) <= 1e-12

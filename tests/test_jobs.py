@@ -74,6 +74,37 @@ def test_follow_reports_steps_and_events_until_the_end():
     assert ("residual", "p", 0.1, 1.0) in eventos and ("fuerza", "Cl", "0.5") in eventos
 
 
+def test_network_cut_does_not_fail_the_job_and_warns_once():
+    """Un corte de red marcaba como fallido un trabajo que seguia corriendo."""
+    from core.remote_runner import RemoteError
+
+    class Cortado(_RunnerFalso):
+        fallos = 3
+
+        def estado(self):
+            if self.fallos:
+                self.fallos -= 1
+                raise RemoteError("Tailscale pide autenticarse: abre https://login.tailscale.com/a/x")
+            return {"state": "done", "rc": 0}
+
+    avisos = []
+    est = follow(Cortado([{}]), lambda e: None, lambda p: None, lambda: False, poll_s=0,
+                 on_notice=avisos.append)
+    assert est["state"] == "done"
+    assert len(avisos) == 1 and "login.tailscale.com" in avisos[0]
+
+
+def test_other_ficha_is_fatal_not_a_network_cut():
+    from core.remote_runner import FichaDistinta
+
+    class Distinta(_RunnerFalso):
+        def comprobar_ficha(self, est):
+            raise FichaDistinta("otra ficha")
+
+    with pytest.raises(FichaDistinta):
+        follow(Distinta([{"state": "running"}]), lambda e: None, lambda p: None, lambda: False, poll_s=0)
+
+
 def test_follow_returns_none_when_asked_to_let_go():
     assert follow(_RunnerFalso([{"state": "running"}]), lambda e: None, lambda p: None,
                   lambda: True, poll_s=0) is None

@@ -92,3 +92,12 @@ def test_rsync_is_retried_before_giving_up(monkeypatch):
     monkeypatch.setattr(rr.subprocess, "run", lambda cmd, **_k: R(12))
     with pytest.raises(RemoteError, match="rsync"):
         RemoteJob("u@h", job_dir="jobs/x").descargar("/tmp/x")
+
+
+def test_tailscale_check_is_reported_with_its_link():
+    """ssh se quedaba esperando sin decir nada: la ventana solo veia 'no responde'."""
+    from core.remote_runner import _aviso_tailscale
+    salida = "# Tailscale SSH requires an additional check.\n# To authenticate, visit: https://login.tailscale.com/a/abc\n"
+    assert _aviso_tailscale(salida) == "Tailscale pide autenticarse: abre https://login.tailscale.com/a/abc"
+    assert _aviso_tailscale(salida.encode()) .endswith("/a/abc")
+    assert _aviso_tailscale("otra cosa") == "" and _aviso_tailscale(None) == ""

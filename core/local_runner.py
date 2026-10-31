@@ -17,7 +17,7 @@ import signal
 import subprocess
 from typing import Any, Dict, Optional
 
-from core.remote_runner import RemoteError
+from core.remote_runner import FichaDistinta, RemoteError
 
 # Misma version que los servidores: el paquete openfoam12 20250206 de Ubuntu 24.04.
 IMAGEN = "openblade/openfoam12:20250206"
@@ -129,7 +129,7 @@ class LocalJob:
     def comprobar_ficha(self, estado: Dict[str, Any]) -> None:
         huella = estado.get("ficha_sha256")
         if self.ficha_sha256 and huella and huella != self.ficha_sha256:
-            raise RemoteError("La ficha del trabajo no es la que se creó")
+            raise FichaDistinta("La ficha del trabajo no es la que se creó")
 
     def leer_log(self, maximo: int = 2_000_000) -> str:
         try:

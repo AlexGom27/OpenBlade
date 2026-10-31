@@ -26,7 +26,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from core import paths
-from core.remote_runner import LogParser, RemoteError, RemoteJob
+from core.remote_runner import FichaDistinta, LogParser, RemoteError, RemoteJob
 
 PENDIENTE = "pendiente"
 MALLANDO = "mallando"
@@ -42,6 +42,7 @@ FINALES = (TERMINADO, FALLIDO, DETENIDO)
 
 LOCAL = "local"
 RC_DETENIDA = 143
+MAX_FALLOS = 180        # intentos sin respuesta antes de dar por perdido el seguimiento
 # Lo que define la malla. Con los mismos valores se reutiliza el mismo archivo:
 # dos paquetes del mismo caso llevan exactamente la misma malla.
 CLAVES_MALLA = ("profile_type", "naca", "chord", "aoa", "mesh_size_min", "mesh_size_max",
@@ -285,14 +286,15 @@ class _Vigilancia:
 
 
 def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], None],
-           should_stop: Callable[[], bool], poll_s: float = 4.0) -> Optional[Dict[str, Any]]:
+           should_stop: Callable[[], bool], poll_s: float = 4.0,
+           on_notice: Callable[[str], None] = lambda _: None) -> Optional[Dict[str, Any]]:
     """Sigue un trabajo hasta que termina y devuelve su estado final.
 
-    Un corte de red no lo detiene: se reintenta durante unos minutos. Devuelve
-    None si se pidio dejar de seguirlo.
+    Un corte de red no lo detiene, sigue corriendo en su maquina: se reintenta
+    durante un buen rato y se avisa una vez. Devuelve None si se pidio dejar de seguirlo.
     """
     parser = LogParser()
-    paso, fallos = None, 0
+    paso, fallos, avisado = None, 0, ""
     while not should_stop():
         try:
             for ev in parser.feed(runner.leer_log()):
@@ -300,11 +302,15 @@ def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], N
             est = runner.estado()
             runner.comprobar_ficha(est)
             fallos = 0
-        except RemoteError:
+            avisado = ""
+        except FichaDistinta:
             raise
-        except (subprocess.TimeoutExpired, OSError) as e:
+        except (RemoteError, subprocess.TimeoutExpired, OSError) as e:
             fallos += 1
-            if fallos >= 45:
+            if str(e) != avisado:
+                avisado = str(e)
+                on_notice(f"⚠️ Sin respuesta de la máquina; el trabajo sigue allí. {e}")
+            if fallos >= MAX_FALLOS:
                 raise RemoteError(f"Sin conexión con la máquina: {e}") from e
             time.sleep(poll_s)
             continue
@@ -378,7 +384,8 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
                 ev.log(job, f"✅ Las fuerzas ya no cambian en la iteración {vigia.n}: se termina.")
                 runner.terminar_limpio()
 
-        est = follow(runner, evento, lambda p: cambia(CORRIENDO, p), should_detach, poll_s)
+        est = follow(runner, evento, lambda p: cambia(CORRIENDO, p), should_detach, poll_s,
+                     lambda aviso: ev.log(job, aviso))
         if est is None:
             return
 
