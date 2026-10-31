@@ -145,6 +145,22 @@ def test_watch_detects_when_forces_stop_changing_at_fixed_iterations():
     assert not oscila.convergio()
 
 
+def test_watch_waits_longer_on_a_slow_mesh():
+    import math
+    def termina_en(tau):
+        v = J._Vigilancia()
+        for i in range(1, 100001):
+            v.agrega("Cd", str(0.012 + 0.002 * math.exp(-i / tau)))
+            v.agrega("Cl", str(1.06 - 0.03 * math.exp(-i / tau)))
+            if i % 1000 == 0 and v.convergio():
+                return i
+        return None
+    rapida, lenta = termina_en(1500), termina_en(7000)
+    assert rapida < 15000
+    # Proporcional al tiempo de relajacion, y parando cuando ya casi no falta nada.
+    assert lenta > 30000 and 0.002 * math.exp(-lenta / 7000) / 0.012 < 0.002
+
+
 def test_watch_detects_divergence_only_after_enough_iterations():
     v = J._Vigilancia()
     for i in range(600):

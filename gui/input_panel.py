@@ -335,7 +335,7 @@ class InputPanel(QWidget):
         self.max_iters_input = QSpinBox()
         self.max_iters_input.setRange(10, 1000000)
         # Es un tope: la corrida termina antes si las fuerzas ya no cambian.
-        self.max_iters_input.setValue(20000)
+        self.max_iters_input.setValue(40000)
         self.max_iters_input.setSingleStep(50)
         steady_layout.addRow("Iteraciones Máximas:", self.max_iters_input)
 

@@ -21,12 +21,14 @@ DIVERGIDO = "DIVERGIDO"
 SIN_DATOS = "SIN DATOS"
 
 VENTANA = 500           # iteraciones finales que se evaluan
+FRACCION_TRAMO = 10     # la deriva se mide entre los dos ultimos decimos de la corrida
 MIN_FILAS = 100         # con menos no se puede juzgar nada
 TOL_RANGO = 0.01        # (max-min)/|media| dentro de la ventana
-TOL_DERIVA = 0.005      # cambio de la media frente a la ventana anterior
+TOL_DERIVA = 0.003      # cambio de la media de Cd entre esos dos tramos
 TOL_DERIVA_TRANS = 0.01
-TOL_DERIVA_CL = 0.002   # cambio de la media de Cl frente a la ventana anterior
-TOL_CL_ABS = 0.002      # con Cl casi nulo la tolerancia relativa no sirve
+TOL_DERIVA_CL = 0.0015  # cambio de la media de Cl entre esos dos tramos, sobre max(|Cl|, CL_REF)
+CL_REF = 0.1            # con Cl casi nulo la tolerancia relativa no sirve
+TOL_CL_ABS = 0.002      # amplitud minima de Cl que se tolera en la ventana
 TOL_CM_ABS = 0.002
 ARRANQUE = 0.2          # fraccion inicial donde un pico de fuerzas es normal
 # Ningun perfil aislado sin soplado se acerca a estos valores.
@@ -107,6 +109,18 @@ def _periodos_enteros(t: List[float], v: List[float]) -> Tuple[int, int, Optiona
     return cruces[0], cruces[-1] + 1, periodo
 
 
+def tramo_final(x: List[float]) -> Tuple[float, float]:
+    """Media del ultimo decimo de la corrida y del anterior, nunca menos que la ventana.
+
+    En una malla fina la convergencia es mas lenta: entre dos ventanas fijas de 500
+    iteraciones Cd cambia muy poco y aun le falta mas de un 1 %. Con tramos que crecen con
+    la corrida el cambio medido no depende de la malla.
+    """
+    n = len(x)
+    w = min(max(VENTANA, n // FRACCION_TRAMO), n // 2)
+    return sum(x[n - w:]) / w, sum(x[n - 2 * w:n - w]) / w
+
+
 def _inicio_ventana(h: ForceHistory, transient: bool) -> Tuple[int, int]:
     """Indices donde empiezan la ventana anterior y la evaluada."""
     n = len(h)
@@ -180,14 +194,14 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
                                           f"(Cl = {h.cl[i]:.1f}) antes de estabilizarse", **base)
 
     rango_cd = 100.0 * 2 * a_cd / abs(m_cd) if m_cd else math.inf
-    cd_previo = h.cd[previo:corte]
     if transient:
         t_previo = h.time[previo:corte]
+        cd_previo = h.cd[previo:corte]
         j0, j1, _ = _periodos_enteros(t_previo, h.cl[previo:corte])
-        media_previa = _media_temporal(t_previo[j0:j1], cd_previo[j0:j1])
+        media_previa, cd_reciente = _media_temporal(t_previo[j0:j1], cd_previo[j0:j1]), m_cd
     else:
-        media_previa = sum(cd_previo) / len(cd_previo)
-    deriva_cd = 100.0 * abs(m_cd - media_previa) / abs(m_cd) if m_cd else math.inf
+        cd_reciente, media_previa = tramo_final(h.cd)
+    deriva_cd = 100.0 * abs(cd_reciente - media_previa) / abs(cd_reciente) if cd_reciente else math.inf
     base.update(cd_range_pct=rango_cd, cd_drift_pct=deriva_cd)
 
     if rc == RC_DETENIDA:
@@ -200,14 +214,16 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
     tol_deriva = 100.0 * (TOL_DERIVA_TRANS if transient else TOL_DERIVA)
     if deriva_cd > tol_deriva:
         return Verdict(NO_CONVERGIDO, f"La media de Cd aún cambia {deriva_cd:.2f} % "
-                                      f"entre ventanas (máximo {tol_deriva:g} %)", **base)
-    cl_previo = h.cl[previo:corte]
-    media_cl_previa = (_media_temporal(t_previo[j0:j1], cl_previo[j0:j1]) if transient
-                       else sum(cl_previo) / len(cl_previo))
+                                      f"entre tramos (máximo {tol_deriva:g} %)", **base)
     # Una deriva lenta no se ve en el rango de una ventana y puede sumar varios por ciento.
-    if abs(m_cl - media_cl_previa) > max(TOL_DERIVA_CL * abs(m_cl), TOL_CL_ABS / 2):
+    if transient:
+        cl_previo = h.cl[previo:corte]
+        cl_reciente, media_cl_previa = m_cl, _media_temporal(t_previo[j0:j1], cl_previo[j0:j1])
+    else:
+        cl_reciente, media_cl_previa = tramo_final(h.cl)
+    if abs(cl_reciente - media_cl_previa) > TOL_DERIVA_CL * max(abs(cl_reciente), CL_REF):
         return Verdict(NO_CONVERGIDO, f"La media de Cl aún cambia de {media_cl_previa:.4f} a "
-                                      f"{m_cl:.4f} entre ventanas", **base)
+                                      f"{cl_reciente:.4f} entre tramos", **base)
     if not transient:
         if rango_cd > 100.0 * TOL_RANGO:
             return Verdict(NO_CONVERGIDO, f"Cd varía {rango_cd:.2f} % en {ventana} "

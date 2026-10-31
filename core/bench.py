@@ -64,7 +64,7 @@ def default_cases() -> List[BenchCase]:
 
 def case_parameters(c: BenchCase) -> Dict[str, Any]:
     return case_params(reynolds=6e6, aoa=c.aoa, turbulence=c.turbulencia, grid_level=c.nivel,
-                       farfield=c.radio, max_iters=40000, **c.ajustes)
+                       farfield=c.radio, **c.ajustes)
 
 
 def case_of_job(job: Job) -> BenchCase:

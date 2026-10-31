@@ -53,6 +53,16 @@ def test_slow_lift_drift_is_not_converged():
     assert v.state == NO_CONVERGIDO and "Cl" in v.reason
 
 
+def test_slow_approach_of_a_fine_mesh_is_not_converged_yet():
+    """Medido en la malla 897 x 257: a la iteracion 18 000 Cd aun iba a bajar mas de 1 %."""
+    def corrida(n):
+        return historia([1.06 - 0.03 * math.exp(-i / 7000) for i in range(n)],
+                        [0.0119 + 0.0017 * math.exp(-i / 7000) for i in range(n)])
+    pronto = evaluate(corrida(18000))
+    assert pronto.state == NO_CONVERGIDO and "Cd" in pronto.reason and not pronto.oscila
+    assert evaluate(corrida(60000)).state == CONVERGIDO
+
+
 def test_oscillating_steady_run_is_not_converged_and_reports_amplitude():
     n = 3000
     v = evaluate(historia([1.0 + 0.1 * math.sin(i / 7) for i in range(n)],

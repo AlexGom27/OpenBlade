@@ -36,7 +36,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "end_time": "0.5",
     "write_interval": "0.01",
     "max_co": 2.0,
-    "max_iters": 20000,
+    "max_iters": 40000,
     "native_foam": False,
 }
 

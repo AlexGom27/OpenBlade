@@ -25,6 +25,7 @@ def test_grid_study_has_three_nested_levels_of_the_same_case():
     casos = grid_study_cases(case_params(aoa=4.0))
     assert [c["grid_level"] for c in casos] == [1, 2, 3]
     assert all(c["mesher"] == "cgrid" and c["aoa"] == 4.0 for c in casos)
+    assert [c["max_iters"] for c in grid_study_cases(case_params(max_iters=20000))] == [10000, 20000, 40000]
 
 
 def test_gci_needs_all_levels_converged():
@@ -84,3 +85,28 @@ def test_a_level_that_oscillates_as_much_as_the_jump_does_not():
     trabajos = [_nivel_que_oscila(0.001), trabajo(nivel=2, cl=1.50, cd=0.0199), trabajo(nivel=3, cl=1.505, cd=0.0205)]
     r = grid_study_result(trabajos)
     assert r["oscilan"] == [] and "no convergieron" in r["motivo"]
+
+
+def test_polar_sends_the_fine_meshes_last(monkeypatch):
+    import core.campaign as C
+
+    enviados = []
+
+    class Falso:
+        def __init__(self, *a, **k):
+            pass
+
+        def set_machines(self, m):
+            pass
+
+        def submit(self, j):
+            enviados.append(j.label)
+            j.state = TERMINADO
+
+        def wait(self):
+            pass
+
+    monkeypatch.setattr(C, "Dispatcher", Falso)
+    r = C.run_polar([], {"reynolds": 6e6}, [0.0, 4.0], [0.0])
+    assert enviados == ["gci_a0_n1", "gci_a0_n2", "polar_a4", "gci_a0_n3"]
+    assert [f["aoa"] for f in r["filas"]] == [0.0, 4.0]

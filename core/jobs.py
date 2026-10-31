@@ -21,7 +21,6 @@ import subprocess
 import sys
 import threading
 import time
-from collections import deque
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -242,15 +241,18 @@ class _Vigilancia:
     # maquina, asi que el mismo paquete da el mismo archivo de fuerzas en todas.
     CADA_CONVERGENCIA = 1000
     MARGEN = 2000
-    HISTORIA = 3000     # la media debe mantenerse en todo este tramo, no solo en dos ventanas
-    TOL_RANGO_CD = 0.005
+    TOL_RANGO_CD = 0.008
+    TOL_RANGO_CL = 0.005
+    # Cambio de la media entre tramos de la corrida (verdict.tramo_final). Medido en el
+    # NACA 0012, nivel 2: al terminar asi, Cl y Cd quedan a menos de 0.01 % de lo que dan
+    # muchas mas iteraciones a 10 y 15 grados, y Cd a 0.07 % a 0 grados.
     TOL_DERIVA_CD = 0.001
-    TOL_CL = 0.001
+    TOL_DERIVA_CL = 0.0005
 
     def __init__(self) -> None:
         self.n = 0
-        self.cl = deque(maxlen=self.HISTORIA)
-        self.cd = deque(maxlen=self.HISTORIA)
+        self.cl: List[float] = []
+        self.cd: List[float] = []
 
     def agrega(self, nombre: str, valor: str) -> None:
         try:
@@ -268,7 +270,7 @@ class _Vigilancia:
         from core.verdict import CD_IMPOSIBLE, CL_IMPOSIBLE
         if self.n < self.MINIMO:
             return False
-        cl, cd = list(self.cl)[-self.VENTANA:], list(self.cd)[-self.VENTANA:]
+        cl, cd = self.cl[-self.VENTANA:], self.cd[-self.VENTANA:]
         malos = sum(1 for x in cd if abs(x) > CD_IMPOSIBLE)
         malos += sum(1 for x in cl if abs(x) > CL_IMPOSIBLE)
         return malos > 0.2 * self.VENTANA
@@ -279,28 +281,22 @@ class _Vigilancia:
 
     def convergio(self) -> bool:
         """Las fuerzas ya no cambian: seguir solo gastaria maquina."""
-        if self.n % self.CADA_CONVERGENCIA:
+        from core.verdict import tramo_final
+        if self.n % self.CADA_CONVERGENCIA or self.n < self.MINIMO:
             return False
-        if self.n < self.MINIMO or len(self.cl) < self.HISTORIA or len(self.cd) < self.HISTORIA:
-            return False
-        cl, cd = list(self.cl), list(self.cd)
-        ultimo_cd, ultimo_cl = cd[-self.VENTANA:], cl[-self.VENTANA:]
+        ultimo_cd, ultimo_cl = self.cd[-self.VENTANA:], self.cl[-self.VENTANA:]
         media_cd = sum(ultimo_cd) / self.VENTANA
         media_cl = sum(ultimo_cl) / self.VENTANA
         if media_cd <= 0 or (max(ultimo_cd) - min(ultimo_cd)) / media_cd >= self.TOL_RANGO_CD:
             return False
-        tol_cl = max(self.TOL_CL * abs(media_cl), 2e-4)
-        if max(ultimo_cl) - min(ultimo_cl) >= tol_cl:
+        if max(ultimo_cl) - min(ultimo_cl) >= max(self.TOL_RANGO_CL * abs(media_cl), 2e-4):
             return False
-        # Cada ventana anterior del tramo debe tener la misma media.
-        for k in range(1, self.HISTORIA // self.VENTANA):
-            fin = self.HISTORIA - k * self.VENTANA
-            previo_cd = sum(cd[fin - self.VENTANA:fin]) / self.VENTANA
-            previo_cl = sum(cl[fin - self.VENTANA:fin]) / self.VENTANA
-            if (abs(media_cd - previo_cd) / media_cd >= self.TOL_DERIVA_CD
-                    or abs(media_cl - previo_cl) >= tol_cl):
-                return False
-        return True
+        # La media tiene que haberse quedado quieta en un tramo proporcional a la corrida.
+        reciente, previo = tramo_final(self.cd)
+        if abs(reciente - previo) / media_cd >= self.TOL_DERIVA_CD:
+            return False
+        reciente, previo = tramo_final(self.cl)
+        return abs(reciente - previo) < self.TOL_DERIVA_CL * max(abs(media_cl), 0.1)
 
 
 def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], None],

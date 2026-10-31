@@ -246,7 +246,7 @@ Todas estas órdenes usan las mismas funciones que la ventana. En la ventana est
 | Velocidad de entrada | 15 m/s |
 | Régimen | Estacionario (simpleFoam) |
 | Modelo de turbulencia | k-Omega SST |
-| Iteraciones máximas | 20000 (es un tope: termina antes si las fuerzas ya no cambian) |
+| Iteraciones máximas | 40000 (es un tope: termina antes si las fuerzas ya no cambian) |
 
 ---
 

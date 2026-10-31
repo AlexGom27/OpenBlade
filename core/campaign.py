@@ -15,11 +15,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 
-from core.defaults import case_params
+from core.defaults import DEFAULT_PARAMS, case_params
 from core.gci import study_from_levels
 from core.jobs import Dispatcher, Events, Job, Machine, new_job
 
 NIVELES_GCI = (1, 2, 3)
+NIVEL_BASE = 2
 # Un nivel cuya media es estable pero oscila sirve para el GCI si su amplitud es pequena
 # frente a lo que separa las mallas: el error iterativo no tapa al de discretizacion.
 OSCILACION_MAX = 0.25
@@ -35,8 +36,14 @@ def usable(job: Job) -> bool:
 
 
 def grid_study_cases(params: Dict[str, Any], niveles: Sequence[int] = NIVELES_GCI) -> List[Dict[str, Any]]:
-    """Los paquetes de un estudio de malla, del nivel mas grueso al mas fino."""
-    return [dict(params, mesher="cgrid", grid_level=int(n)) for n in sorted(niveles)]
+    """Los paquetes de un estudio de malla, del nivel mas grueso al mas fino.
+
+    Cada nivel fino pide del orden del doble de iteraciones que el anterior: el tope se
+    escala para que el mas fino no se quede a medias.
+    """
+    tope = int(params.get("max_iters", DEFAULT_PARAMS["max_iters"]))
+    return [dict(params, mesher="cgrid", grid_level=int(n), max_iters=int(tope * 2.0 ** (int(n) - NIVEL_BASE)))
+            for n in sorted(niveles)]
 
 
 def _oscila_poco(filas: Sequence[Dict[str, Any]], i: int) -> bool:
@@ -141,12 +148,11 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
     params = case_params(**base)
     puntos = {}
     estudios_trabajos: Dict[float, List[Job]] = {}
+    pendientes: List[Job] = []
     for a in angulos_gci:
-        grupo = []
-        for q in grid_study_cases(dict(params, aoa=float(a))):
-            j = new_job(q, label=f"gci_a{a:g}_n{q['grid_level']}")
-            grupo.append(j)
-            d.submit(j)
+        grupo = [new_job(q, label=f"gci_a{a:g}_n{q['grid_level']}")
+                 for q in grid_study_cases(dict(params, aoa=float(a)))]
+        pendientes += grupo
         estudios_trabajos[float(a)] = grupo
     nivel_polar = int(params.get("grid_level", 2))
     for a in angulos:
@@ -157,6 +163,9 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
             continue
         j = new_job(dict(params, aoa=float(a)), label=f"polar_a{a:g}")
         puntos[float(a)] = j
+        pendientes.append(j)
+    # Primero lo rapido: la polar queda lista aunque las mallas finas tarden horas.
+    for j in sorted(pendientes, key=lambda j: int(j.params.get("grid_level", 2))):
         d.submit(j)
     d.wait()
 
