@@ -97,7 +97,7 @@ NACA 0012, cuerda 1, Re=6e6, α=0, valores por defecto de la GUI, 6000 iteracion
 | 2 | md5 de `forceCoeffs.dat` igual entre servidores | exacto, mientras CPU y build sean iguales |
 | 3 | `Cl` y `Cd` leídos por nombre | si faltan, falla |
 | 4 | Rango de Cd en las últimas 500 iteraciones | < 1 % |
-| 5 | En esa misma ventana, \|Cl\| > 2 o algún Cd < 0 | falla |
+| 5 | \|Cl\| > 2 en toda la corrida, o algún Cd < 0 en esa misma ventana | falla |
 | 6 | Cd frente a Ladson 0.00806 | ±5 % |
 | 7 | \|Cl\| a α=0 | < 0.01 |
 | 8 | y+ con u_τ, calculado por el programa, igual entre servidores | ±1 % |
