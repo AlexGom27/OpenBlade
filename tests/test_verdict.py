@@ -61,6 +61,14 @@ def test_oscillating_steady_run_is_not_converged_and_reports_amplitude():
     assert v.cl_amp == pytest.approx(0.1, rel=0.01)
 
 
+def test_only_an_oscillation_with_a_stable_mean_is_marked_as_such():
+    n = 2000
+    oscila = evaluate(historia([1.0] * n, [0.01 + 2e-4 * (-1) ** i for i in range(n)]))
+    assert oscila.state == NO_CONVERGIDO and oscila.oscila
+    deriva = evaluate(historia([1.0] * n, [0.01 * (1 - i / 4000) for i in range(n)]))
+    assert deriva.state == NO_CONVERGIDO and not deriva.oscila
+
+
 def test_zero_lift_uses_absolute_tolerance():
     n = 1000
     v = evaluate(historia([1e-4 * math.sin(i) for i in range(n)], [0.008] * n))

@@ -20,6 +20,9 @@ from core.gci import study_from_levels
 from core.jobs import Dispatcher, Events, Job, Machine, new_job
 
 NIVELES_GCI = (1, 2, 3)
+# Un nivel cuya media es estable pero oscila sirve para el GCI si su amplitud es pequena
+# frente a lo que separa las mallas: el error iterativo no tapa al de discretizacion.
+OSCILACION_MAX = 0.25
 PARAM_TRANSITORIO = {"regime": "Transitorio (pimpleFoam)"}
 
 
@@ -36,16 +39,32 @@ def grid_study_cases(params: Dict[str, Any], niveles: Sequence[int] = NIVELES_GC
     return [dict(params, mesher="cgrid", grid_level=int(n)) for n in sorted(niveles)]
 
 
+def _oscila_poco(filas: Sequence[Dict[str, Any]], i: int) -> bool:
+    """¿La amplitud del nivel i es pequena frente a sus saltos con los niveles vecinos?"""
+    vecinos = [filas[k] for k in (i - 1, i + 1) if 0 <= k < len(filas)]
+    for nombre in ("cl", "cd"):
+        for v in vecinos:
+            if filas[i][nombre] is None or v[nombre] is None:
+                return False
+            if filas[i][f"{nombre}_amp"] > OSCILACION_MAX * abs(filas[i][nombre] - v[nombre]):
+                return False
+    return True
+
+
 def grid_study_result(trabajos: Sequence[Job]) -> Dict[str, Any]:
     """GCI de Cl, Cd y Cm a partir de los tres trabajos, del mas grueso al mas fino."""
     orden = sorted(trabajos, key=lambda j: int(j.params.get("grid_level", 2)))
     filas = [{"nivel": int(j.params.get("grid_level", 2)), "veredicto": verdict_of(j).get("state"),
-              "cl": verdict_of(j).get("cl"), "cd": verdict_of(j).get("cd"), "cm": verdict_of(j).get("cm"),
+              "cl": verdict_of(j).get("cl"), "cl_amp": verdict_of(j).get("cl_amp"),
+              "cd": verdict_of(j).get("cd"), "cd_amp": verdict_of(j).get("cd_amp"), "cm": verdict_of(j).get("cm"),
+              "oscila": bool(verdict_of(j).get("oscila")),
               "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean"),
               "trabajo": j.id} for j in orden]
-    malos = [f["nivel"] for f in filas if f["veredicto"] != "CONVERGIDO"]
+    sin_converger = [f["nivel"] for f in filas if f["veredicto"] != "CONVERGIDO"]
+    oscilan = [f["nivel"] for i, f in enumerate(filas) if f["oscila"] and _oscila_poco(filas, i)]
+    malos = [n for n in sin_converger if n not in oscilan]
     resultado: Dict[str, Any] = {"aoa": float(orden[0].params.get("aoa", 0.0)), "niveles": filas,
-                                 "sin_converger": malos}
+                                 "sin_converger": sin_converger, "oscilan": oscilan}
     if malos:
         resultado["motivo"] = f"Sin GCI: los niveles {malos} no convergieron"
         return resultado
@@ -65,6 +84,8 @@ def grid_study_text(r: Dict[str, Any]) -> str:
         ext = f", extrapolado {g['extrapolado']:.5f}" if g["extrapolado"] is not None else ""
         partes.append(f"{nombre.capitalize()} = {g['fina']:.5f} ± {g['banda']:.5f} "
                       f"(GCI {100 * g['gci_fina']:.2f} %, {orden}{ext})")
+    if r.get("oscilan"):
+        partes.append(f"Los niveles {r['oscilan']} oscilan poco con media estable: se usa su media.")
     return "   ".join(partes)
 
 

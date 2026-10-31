@@ -64,3 +64,23 @@ def test_results_are_saved(tmp_path):
                               str(tmp_path / "salida"))
     assert (tmp_path / "salida" / "polar.csv").exists() and (tmp_path / "salida" / "polar.json").exists()
     assert ruta.endswith("polar.png")
+
+
+def _nivel_que_oscila(cd_amp):
+    j = trabajo(nivel=1, estado="NO CONVERGIDO", cl=1.48, cd=0.0186)
+    j.analysis["verdict"].update(oscila=True, cd_amp=cd_amp)
+    return j
+
+
+def test_a_level_that_barely_oscillates_counts_for_the_grid_study():
+    trabajos = [_nivel_que_oscila(0.0002), trabajo(nivel=2, cl=1.50, cd=0.0199), trabajo(nivel=3, cl=1.505, cd=0.0205)]
+    r = grid_study_result(trabajos)
+    assert r["sin_converger"] == [1] and r["oscilan"] == [1]
+    assert "motivo" not in r and r["cd"]["orden"] is not None
+    assert "oscilan" in grid_study_text(r)
+
+
+def test_a_level_that_oscillates_as_much_as_the_jump_does_not():
+    trabajos = [_nivel_que_oscila(0.001), trabajo(nivel=2, cl=1.50, cd=0.0199), trabajo(nivel=3, cl=1.505, cd=0.0205)]
+    r = grid_study_result(trabajos)
+    assert r["oscilan"] == [] and "no convergieron" in r["motivo"]

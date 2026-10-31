@@ -52,6 +52,7 @@ class Verdict:
     cd_drift_pct: Optional[float] = None
     max_abs_cl: Optional[float] = None
     period: Optional[float] = None
+    oscila: bool = False    # NO CONVERGIDO solo por la amplitud: la media ya es estable
 
     @property
     def usable(self) -> bool:
@@ -210,12 +211,12 @@ def evaluate(h: ForceHistory, transient: bool = False, rc: int = 0,
     if not transient:
         if rango_cd > 100.0 * TOL_RANGO:
             return Verdict(NO_CONVERGIDO, f"Cd varía {rango_cd:.2f} % en {ventana} "
-                                          f"(máximo {100 * TOL_RANGO:.0f} %)", **base)
+                                          f"(máximo {100 * TOL_RANGO:.0f} %)", oscila=True, **base)
         if 2 * a_cl > _tol_cl(m_cl):
             return Verdict(NO_CONVERGIDO, f"Cl varía {2 * a_cl:.4f} en {ventana} "
-                                          f"(máximo {_tol_cl(m_cl):.4f})", **base)
+                                          f"(máximo {_tol_cl(m_cl):.4f})", oscila=True, **base)
         if 2 * a_cm > max(TOL_RANGO * abs(m_cm), TOL_CM_ABS):
-            return Verdict(NO_CONVERGIDO, f"Cm varía {2 * a_cm:.4f} en {ventana}", **base)
+            return Verdict(NO_CONVERGIDO, f"Cm varía {2 * a_cm:.4f} en {ventana}", oscila=True, **base)
         return Verdict(CONVERGIDO, f"Cd varía {rango_cd:.2f} % en {ventana}", **base)
     return Verdict(CONVERGIDO, f"La media de Cd cambia {deriva_cd:.2f} % entre "
                                f"ventanas; {ventana} promedia el régimen", **base)
