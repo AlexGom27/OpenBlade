@@ -17,6 +17,7 @@ import numpy as np
 
 from core.defaults import DEFAULT_PARAMS, case_params
 from core.gci import study_from_levels
+from core.initial_field import latest_fields
 from core.jobs import (DESCARGANDO, DETENIDO, Dispatcher, Events, FALLIDO, FINALES, Job, Machine, load_jobs,
                        new_job)
 
@@ -212,6 +213,9 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
         for a, j in puntos.items():
             if not usable(j):
                 q = dict(params, aoa=a, **PARAM_TRANSITORIO, **(urans or {}))
+                # Del campo estacionario, si lo hay: el arranque impulsivo revienta a angulos altos.
+                if verdict_of(j).get("state") == "NO CONVERGIDO" and latest_fields(j.case_dir):
+                    q["campo_inicial"] = j.case_dir
                 t = new_job(q, label=f"urans_a{a:g}")
                 transitorios[a] = t
                 d.submit(t)

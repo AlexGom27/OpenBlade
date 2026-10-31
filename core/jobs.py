@@ -419,6 +419,10 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
             msh = ensure_mesh(job.params, lambda t: ev.log(job, t))
             cambia(PREPARANDO)
             transient = configure_case(job.case_dir, job.params)
+            if job.params.get("campo_inicial"):
+                from core.initial_field import start_from
+                tiempo = start_from(job.params["campo_inicial"], job.case_dir, msh)
+                ev.log(job, f"🔁 Arranca del campo de la iteración {tiempo} de {job.params['campo_inicial']}")
             if transient and job.params.get("mesher") == "cgrid":
                 from core.cgrid import transient_notice
                 ev.log(job, transient_notice(job.params))

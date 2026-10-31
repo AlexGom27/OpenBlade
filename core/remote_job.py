@@ -132,9 +132,11 @@ def main():
         correr(["checkMesh", "-noFunctionObjects"], env, "log.checkMesh", obligatorio=False)
 
         # Igual que en local: si falla, la simulacion aun puede continuar.
-        guardar_estado(step="potentialFoam")
-        correr(["potentialFoam", "-writep"], env, "log.potentialFoam",
-               obligatorio=False)
+        # Si el caso arranca del campo de otra corrida, no hay que pisarlo.
+        if not job.get("sin_potencial"):
+            guardar_estado(step="potentialFoam")
+            correr(["potentialFoam", "-writep"], env, "log.potentialFoam",
+                   obligatorio=False)
 
         cmd = comando_solver(job, env)
         if nproc > 1:

@@ -230,7 +230,8 @@ class RemoteJob:
         malla = os.path.join(case_dir, "mesh.msh")
         shutil.copy2(msh_file, malla)
         with open(os.path.join(case_dir, "job.json"), "w") as f:
-            json.dump({"nproc": nproc, "transient": transient}, f)
+            json.dump({"nproc": nproc, "transient": transient,
+                       "sin_potencial": bool(params.get("campo_inicial"))}, f)
         shutil.copy2(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "remote_job.py"),
                      os.path.join(case_dir, "remote_job.py"))
