@@ -10,11 +10,13 @@ Desarrollador: Jesús Miguel Ruiz Martínez.
 
 ## Descripción
 
-OpenBlade 2D es un entorno de simulación CFD (Computational Fluid Dynamics) para el análisis aerodinámico de perfiles alares. Utiliza **Gmsh** para la generación de mallas y **OpenFOAM** (vía Docker) como solver Navier-Stokes, con una interfaz gráfica profesional construida en Python.
+OpenBlade 2D es un entorno de simulación CFD (Computational Fluid Dynamics) para el análisis aerodinámico de perfiles alares. Genera la malla en esta máquina y resuelve con **OpenFOAM 12**, en local (vía Docker) o en servidores por SSH, con una interfaz gráfica construida en Python.
+
+Lo que se ha validado, con qué tolerancias y lo que no cumple está en [docs/VALIDACION.md](docs/VALIDACION.md).
 
 ### Características principales
 - Generación automática de perfiles NACA (4 dígitos) o importación de perfiles personalizados
-- Malla C estructurada de hexaedros, con y+ estimado antes de calcular y medido después
+- Malla C estructurada propia, con niveles anidados para estudios de malla (GCI), y con y+ estimado antes de calcular y medido después
 - Solvers estacionarios (simpleFoam) y transitorios (pimpleFoam)
 - Inicialización de flujo potencial (potentialFoam)
 - Modelos de turbulencia: k-ω SST, k-ε, Spalart-Allmaras, k-ω SST-LM (transición)
@@ -24,6 +26,7 @@ OpenBlade 2D es un entorno de simulación CFD (Computational Fluid Dynamics) par
 - Veredicto en cada corrida: CONVERGIDO, NO CONVERGIDO o DIVERGIDO, con media y amplitud de Cl, Cd y Cm
 - Ficha por caso con las huellas sha256 de la malla y de los diccionarios, versiones y checkMesh
 - Cola de trabajos: cada paquete tiene su carpeta y se reparte entre Local y varios servidores
+- Estudio de malla con incertidumbre (GCI) y banco de validación frente a NASA TMR y Ladson, con informe PDF
 
 ---
 
@@ -204,7 +207,21 @@ python3 -m core.cli correr --host usuario@host --procesos 8 aoa=8 reynolds=6e6
 python3 -m core.cli control --hosts usuario@a,usuario@b --procesos 8
 ```
 
-`control` corre el caso de control en cada máquina y evalúa sus 8 compuertas (ver `docs/ESTRATEGIA_PROGRAMA.md`). Las dos órdenes usan las mismas funciones que la ventana.
+`control` corre el caso de control en cada máquina y evalúa sus 8 compuertas (ver `docs/ESTRATEGIA_PROGRAMA.md`).
+
+```bash
+python3 -m core.cli banco --maquinas usuario@a:10:1,usuario@b:8:1 --salida carpeta
+```
+
+`banco` corre el NACA 0012 frente a NASA TMR y Ladson y deja un informe PDF con lo que cumple y lo que no.
+
+```bash
+python3 -m core.cli polar --maquinas usuario@a:10:1 --angulos 0,4,8 --gci 0,8 --urans reynolds=6e6
+```
+
+`polar` lanza un paquete por ángulo, añade un GCI de tres mallas en los ángulos de `--gci` y deja `polar.csv`, `polar.json` y `polar.png`. Con `--urans` repite en transitorio los ángulos que no convergen.
+
+Todas estas órdenes usan las mismas funciones que la ventana. En la ventana están en el botón **Banco de Validación** y en **Análisis: Estudio de Malla**. Para abrir un proyecto guardado: `python3 main.py proyecto.obp`.
 
 ## 🚀 Uso Rápido
 
