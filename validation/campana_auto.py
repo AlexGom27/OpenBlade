@@ -19,7 +19,6 @@ Uso:
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -30,6 +29,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+
+from core.forces import tail_statistics  # noqa: E402
 
 # ---------------------------------------------------------------- referencias
 # Datos experimentales publicados. Solo se incluyen casos con fuente verificada.
@@ -88,27 +90,7 @@ def env_foam() -> dict:
 
 
 def leer_coeffs(caso: str):
-    files = glob.glob(os.path.join(caso, "postProcessing", "forceCoeffs",
-                                   "*", "*.dat"))
-    if not files:
-        return None
-    f = max(files, key=os.path.getmtime)
-    filas = []
-    for l in open(f, errors="replace"):
-        if l.strip() and not l.lstrip().startswith("#"):
-            v = l.split()
-            if len(v) >= 5:
-                try:
-                    filas.append((float(v[0]), float(v[2]), float(v[3])))
-                except ValueError:
-                    pass
-    if len(filas) < 50:
-        return None
-    cola = filas[int(0.8 * len(filas)):]
-    cl = sum(x[2] for x in cola) / len(cola)
-    cd = sum(x[1] for x in cola) / len(cola)
-    sd = (sum((x[2] - cl) ** 2 for x in cola) / len(cola)) ** 0.5
-    return {"cl": cl, "cd": cd, "n": len(cola), "cl_std": sd}
+    return tail_statistics(caso, 0.8, minimo=50)
 
 
 def correr(perfil: str, aoa: float, work: str, nproc: int, env: dict,

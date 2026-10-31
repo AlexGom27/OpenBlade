@@ -30,6 +30,8 @@ ROOT = os.path.dirname(HERE)
 OUT = os.path.join(HERE, "sweep")
 sys.path.insert(0, ROOT)
 
+from core.forces import find_force_files, read_forces  # noqa: E402
+
 IMAGE = "opencfd/openfoam-default"
 REF_CL = {0.0: -0.0121, 4.0: 0.4272, 8.0: 0.8615, 10.0: 1.0669}
 REF_CD = {0.0: 0.00807, 4.0: 0.00823, 8.0: 0.00989, 10.0: 0.01168}
@@ -120,22 +122,15 @@ def make_case(work: str, aoa: float, scheme: str, transient: bool,
     return True
 
 
-def read_coeffs(work: str, name: str = "forceCoeffs"):
+def read_coeffs(work: str):
     """Últimos Cl/Cd del fichero de coeficientes."""
-    import glob
-    files = glob.glob(os.path.join(work, "postProcessing", name, "*",
-                                   "coefficient.dat"))
-    if not files:
+    if not find_force_files(work):
         return None
-    lines = [l for l in open(sorted(files)[-1])
-             if l.strip() and not l.lstrip().startswith("#")]
-    if not lines:
+    h = read_forces(work)
+    if not len(h):
         return None
-    v = lines[-1].split()
-    if len(v) < 8:
-        return None
-    return {"t": float(v[0]), "cd": float(v[1]), "cl": float(v[4]),
-            "cm": float(v[7]), "n": len(lines)}
+    return {"t": h.time[-1], "cd": h.cd[-1], "cl": h.cl[-1],
+            "cm": h.cm[-1], "n": len(h)}
 
 
 def test_steady_schemes() -> dict:
@@ -204,19 +199,9 @@ def test_transient() -> dict:
         c = read_coeffs(work)
         # Serie temporal para ver si oscila (solución periódica) o diverge
         series = []
-        import glob
-        files = glob.glob(os.path.join(work, "postProcessing", "forceCoeffs",
-                                       "*", "coefficient.dat"))
-        if files:
-            for line in open(sorted(files)[-1]):
-                if line.lstrip().startswith("#"):
-                    continue
-                v = line.split()
-                if len(v) >= 8:
-                    try:
-                        series.append([float(v[0]), float(v[4]), float(v[1])])
-                    except ValueError:
-                        pass
+        if find_force_files(work):
+            h = read_forces(work)
+            series = [list(fila) for fila in zip(h.time, h.cl, h.cd)]
 
         # ¿Oscila? Amplitud de los últimos 30% de la serie
         osc = None

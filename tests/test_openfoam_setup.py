@@ -52,11 +52,11 @@ def test_transient_parameter_application(tmp_path):
     assert "deltaT          1e-4;" in content
 
 
-def test_momentum_scheme_default_is_upwind(tmp_path):
+def test_momentum_scheme_default_is_limited_linear(tmp_path):
     setup = OpenFoamSetup(case_dir=str(tmp_path / "c"))
     setup.create_case()
     schemes = (tmp_path / "c" / "system" / "fvSchemes").read_text()
-    assert "div(phi,U)      bounded Gauss upwind;" in schemes
+    assert "div(phi,U)      bounded Gauss limitedLinearV 1;" in schemes
 
 
 def test_linear_upwind_gets_gradient_argument(tmp_path):

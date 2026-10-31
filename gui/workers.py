@@ -324,24 +324,12 @@ class SweepWorker(QThread):
                 if self._stop_requested:
                     break
 
-                if cl is not None and cd is not None:
-                    aoa_results.append(angle)
-                    cl_results.append(cl)
-                    cd_results.append(cd)
-                    cm_results.append(cm if cm is not None else 0.0)
-                    self.log_msg.emit(f"  ✅ AoA={angle}°: Cl={cl:.4f}, Cd={cd:.4f}")
-                else:
-                    # Intentar extraer desde archivos de postprocessing
-                    cl, cd, cm = self._extract_from_postprocessing()
-                    if cl is not None:
-                        aoa_results.append(angle)
-                        cl_results.append(cl)
-                        cd_results.append(cd)
-                        cm_results.append(cm if cm is not None else 0.0)
-                        self.log_msg.emit(f"  ✅ (postprocess) AoA={angle}°: Cl={cl:.4f}, Cd={cd:.4f}")
-                    else:
-                        self.log_msg.emit(f"  ⚠️ No se pudieron extraer coeficientes para AoA={angle}°")
-                        
+                aoa_results.append(angle)
+                cl_results.append(cl)
+                cd_results.append(cd)
+                cm_results.append(cm)
+                self.log_msg.emit(f"  ✅ AoA={angle}°: Cl={cl:.4f}, Cd={cd:.4f}")
+
             except subprocess.TimeoutExpired:
                 self.log_msg.emit(f"  ⏱️ Timeout en AoA={angle}°, saltando...")
                 continue
@@ -361,78 +349,13 @@ class SweepWorker(QThread):
     
     def _solve_angle(self, params, json_path, msh_file, angle):
         """Resuelve un angulo y devuelve (cl, cd, cm); local por defecto."""
-        result = self._run_cmd(
+        from core.forces import final_coefficients
+
+        self._run_cmd(
             [sys.executable, "-m", "core.solve_script", json_path, msh_file],
             timeout=1200
         )
-        # Paso 3: Extraer Cl y Cd de la salida
-        return self._extract_coefficients(result.stdout)
-
-    def _extract_coefficients(self, output: str):
-        """Extrae Cl, Cd, Cm de la salida del solver (FORCE_DATA lines)."""
-        cl, cd, cm = None, None, None
-        for line in output.splitlines():
-            clean = line.strip()
-            if clean.startswith("FORCE_DATA|"):
-                parts = clean.split("|")
-                if len(parts) >= 3:
-                    name = parts[1].lower()
-                    try:
-                        val = float(parts[2])
-                        # Nombres normalizados: evita que "cl" capture "clock" u otros.
-                        if name.startswith("cl"): cl = val
-                        elif name.startswith("cd"): cd = val
-                        elif name.startswith("cm"): cm = val
-                    except ValueError:
-                        pass
-        return cl, cd, cm
-    
-    def _extract_from_postprocessing(self):
-        """Extrae coeficientes del directorio de postprocessing de OpenFOAM."""
-        try:
-            coeff_dir = os.path.join(self.case_dir, "postProcessing", "forceCoeffs")
-            if not os.path.exists(coeff_dir):
-                return None, None, None
-                
-            # Encontrar el último directorio de tiempo
-            time_dirs = sorted([d for d in os.listdir(coeff_dir) 
-                              if os.path.isdir(os.path.join(coeff_dir, d))],
-                             key=lambda x: float(x) if x.replace('.', '').isdigit() else 0)
-            
-            if not time_dirs:
-                return None, None, None
-                
-            coeff_file = os.path.join(coeff_dir, time_dirs[-1], "coefficient.dat")
-            if not os.path.exists(coeff_file):
-                coeff_file = os.path.join(coeff_dir, time_dirs[-1], "forceCoeffs.dat")
-            
-            if not os.path.exists(coeff_file):
-                return None, None, None
-            
-            # Leer la última línea de datos
-            with open(coeff_file, 'r') as f:
-                lines = [l.strip() for l in f.readlines() if l.strip() and not l.startswith('#')]
-            
-            if lines:
-                parts = lines[-1].split()
-                if len(parts) >= 8:
-                    # Formato OpenFOAM v2xxx:
-                    # Time  Cd  Cd(f)  Cd(r)  Cl  Cl(f)  Cl(r)  CmPitch  CmRoll  CmYaw ...
-                    cd = float(parts[1])
-                    cl = float(parts[4])
-                    cm = float(parts[7])
-                    return cl, cd, cm
-                elif len(parts) >= 4:
-                    # Formato antiguo (fallback): Time Cm Cd Cl
-                    cm = float(parts[1])
-                    cd = float(parts[2])
-                    cl = float(parts[3])
-                    return cl, cd, cm
-                    
-        except Exception as e:
-            print(f"Error leyendo postprocessing: {e}")
-        
-        return None, None, None
+        return final_coefficients(self.case_dir)
 
 
 def _follow_remote_job(worker, job, parser_events, should_stop, poll_s=4.0):
@@ -575,7 +498,8 @@ class RemoteSweepWorker(SweepWorker):
                 self.log_msg.emit(f"⚠️ No se pudo detener el trabajo: {e}")
 
     def _solve_angle(self, params, json_path, msh_file, angle):
-        from core.remote_runner import RemoteJob, coeficientes_finales
+        from core.forces import final_coefficients
+        from core.remote_runner import RemoteError, RemoteJob
         from core.solve_script import configure_case
 
         transient = configure_case(self.case_dir, params)
@@ -586,7 +510,6 @@ class RemoteSweepWorker(SweepWorker):
         est = _follow_remote_job(self, self._job, lambda ev: None,
                                  lambda: self._stop_requested)
         if est is None or est.get("rc"):
-            self.log_msg.emit(f"  ❌ Servidor: {(est or {}).get('error', 'trabajo detenido')}")
-            return None, None, None
+            raise RemoteError((est or {}).get("error", "trabajo detenido"))
         self._job.descargar(self.case_dir)
-        return coeficientes_finales(self.case_dir)
+        return final_coefficients(self.case_dir)

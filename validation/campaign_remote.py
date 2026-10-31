@@ -20,7 +20,6 @@ Uso
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -31,6 +30,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+
+from core.forces import find_force_files, read_forces  # noqa: E402
 
 # Ladson, NASA TM 4074 (1988), Re = 6e6, transición forzada
 REF = {
@@ -77,34 +79,16 @@ def foam_env():
 
 
 def leer_coeffs(case):
-    files = glob.glob(os.path.join(case, "postProcessing", "forceCoeffs",
-                                   "*", "*.dat"))
-    if not files:
+    if not find_force_files(case):
         return None
-    f = max(files, key=os.path.getmtime)
-    filas = [l for l in open(f) if l.strip()
-             and not l.lstrip().startswith("#")]
-    if not filas:
-        return None
-    datos = []
-    for l in filas:
-        v = l.split()
-        if len(v) >= 5:
-            try:
-                datos.append((float(v[0]), float(v[1]), float(v[4])))
-            except ValueError:
-                pass
-    if not datos:
+    h = read_forces(case, ("Time", "Cl", "Cd"))
+    if not len(h):
         return None
     # régimen asentado: último 25 %
-    cola = datos[int(0.75 * len(datos)):]
-    cl = sum(d[2] for d in cola) / len(cola)
-    cd = sum(d[1] for d in cola) / len(cola)
-    # dispersión
-    cl_min = min(d[2] for d in cola)
-    cl_max = max(d[2] for d in cola)
-    return {"cl": cl, "cd": cd, "n": len(cola),
-            "amp_cl": (cl_max - cl_min) / 2.0}
+    inicio = int(0.75 * len(h))
+    cl, cd = h.cl[inicio:], h.cd[inicio:]
+    return {"cl": sum(cl) / len(cl), "cd": sum(cd) / len(cd), "n": len(cl),
+            "amp_cl": (max(cl) - min(cl)) / 2.0}
 
 
 def correr_angulo(aoa, work, nproc, env, max_iters=800):

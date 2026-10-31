@@ -23,6 +23,10 @@ import statistics as st
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.forces import find_force_files, read_forces  # noqa: E402
+
 # Ladson, NASA TM 4074 (1988), Re = 6e6, transición forzada
 LADSON = {
     0.0: (-0.0121, 0.00807),
@@ -36,27 +40,12 @@ LADSON = {
 
 
 def leer_coeffs(case: str):
-    """Devuelve listas de t, Cm, Cd, Cl, Cl(f), Cl(r) del forceCoeffs."""
-    files = glob.glob(os.path.join(case, "postProcessing", "forceCoeffs",
-                                   "*", "*.dat"))
-    if not files:
+    """Filas [t, Cm, Cd, Cl, Cl(f), Cl(r)] del forceCoeffs."""
+    if not find_force_files(case):
         return None
-    f = max(files, key=os.path.getmtime)
-
-    filas = []
-    for linea in open(f, errors="replace"):
-        if not linea.strip() or linea.lstrip().startswith("#"):
-            continue
-        v = linea.split()
-        if len(v) >= 6:
-            try:
-                # orden: Time Cm Cd Cl Cl(f) Cl(r)
-                filas.append([float(x) for x in v[:6]])
-            except ValueError:
-                pass
-    if not filas:
-        return None
-    return filas
+    columnas = ("Time", "Cm", "Cd", "Cl", "Cl(f)", "Cl(r)")
+    h = read_forces(case, columnas)
+    return [list(fila) for fila in zip(*(h.column(c) for c in columnas))] or None
 
 
 def yplus_medio(case: str):

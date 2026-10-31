@@ -23,6 +23,10 @@ import sys
 import time
 
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.forces import find_force_files, read_forces  # noqa: E402
+
 PUNTOS_SERIE = 400   # puntos de la historia de Cl/Cd que se envian a la GUI
 LOG_ACTIVO_S = 120   # sin escribir en run.log este tiempo, el caso no corre
 
@@ -96,32 +100,12 @@ def case_stats(case):
 
 
 def coeffs(case):
-    files = glob.glob(os.path.join(case, "postProcessing", "forceCoeffs", "*",
-                                   "*.dat"))
-    if not files:
+    if not find_force_files(case):
         return None
-    mejor = max(files, key=os.path.getmtime)
-    texto = _read(mejor).splitlines()
-    # El orden de columnas cambia entre versiones de OpenFOAM (en la 12:
-    # Time Cm Cd Cl Cl(f) Cl(r)), asi que se toma de la cabecera del archivo.
-    nombres = []
-    for l in texto:
-        if l.startswith("#") and l[1:].split()[:1] == ["Time"]:
-            nombres = l[1:].split()
-    if "Cd" not in nombres or "Cl" not in nombres:
+    h = read_forces(case, ("Time", "Cd", "Cl"))
+    if not len(h):
         return None
-    i_cd, i_cl = nombres.index("Cd"), nombres.index("Cl")
-
-    filas = []
-    for l in texto:
-        if l.strip() and not l.lstrip().startswith("#"):
-            v = l.split()
-            try:
-                filas.append((float(v[0]), float(v[i_cd]), float(v[i_cl])))
-            except (IndexError, ValueError):
-                pass
-    if not filas:
-        return None
+    filas = list(zip(h.time, h.cd, h.cl))
     paso = max(1, len(filas) // PUNTOS_SERIE)
     serie = filas[-1::-paso][::-1]
     t, cd, cl = filas[-1]

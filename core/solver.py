@@ -307,7 +307,7 @@ class SolverRunner:
                         if cl_match:
                             force_callback("Cl", cl_match.group(1))
                             
-                        cm_match = re.search(r"^\s*CmPitch\s*[:=]\s*([0-9eE\.\+\-]+)", clean_line)
+                        cm_match = re.search(r"^\s*(?:Cm|CmPitch)\s*[:=]\s*([0-9eE\.\+\-]+)", clean_line)
                         if cm_match:
                             force_callback("Cm", cm_match.group(1))
                             

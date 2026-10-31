@@ -862,11 +862,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.log(f"Aviso al guardar imágenes para informe: {e}")
             
-        results = {
-            "Cl": self._last_cl,
-            "Cd": self._last_cd,
-            "Cm": self._last_cm
-        }
+        from core.forces import ForceDataError, final_coefficients
+        try:
+            cl, cd, cm = final_coefficients(self.case_dir)
+            results = {"Cl": cl, "Cd": cd, "Cm": cm}
+        except ForceDataError as e:
+            self.log(f"⚠️ El informe sale sin coeficientes: {e}")
+            results = {"Cl": "sin datos", "Cd": "sin datos", "Cm": "sin datos"}
         
         filename, _ = QFileDialog.getSaveFileName(self, "Guardar Informe", "informe_cfd.pdf", "PDF Files (*.pdf)")
         if filename:

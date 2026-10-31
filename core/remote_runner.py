@@ -254,30 +254,3 @@ class LogParser:
                 nombre = "Cm" if m.group(1) == "CmPitch" else m.group(1)
                 eventos.append(("fuerza", nombre, m.group(2)))
         return eventos
-
-
-def coeficientes_finales(case_dir: str) -> Tuple[Optional[float], ...]:
-    """(Cl, Cd, Cm) de la ultima fila de forceCoeffs, segun su cabecera."""
-    import glob
-    archivos = glob.glob(os.path.join(case_dir, "postProcessing", "forceCoeffs",
-                                      "*", "*.dat"))
-    if not archivos:
-        return None, None, None
-    nombres, ultima = [], None
-    for l in open(max(archivos, key=os.path.getmtime), errors="replace"):
-        if l.startswith("#"):
-            if l[1:].split()[:1] == ["Time"]:
-                nombres = l[1:].split()
-        elif l.strip():
-            ultima = l.split()
-    if not nombres or ultima is None:
-        return None, None, None
-    fila = dict(zip(nombres, ultima))
-
-    def valor(*claves):
-        for c in claves:
-            if c in fila:
-                return float(fila[c])
-        return None
-
-    return valor("Cl"), valor("Cd"), valor("Cm", "CmPitch")

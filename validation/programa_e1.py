@@ -41,6 +41,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 
+from core.forces import find_force_files, read_forces  # noqa: E402
+
 from programa_v3 import MALLA, env_foam, log, malla, run  # noqa: E402
 
 U = 15.0
@@ -91,19 +93,11 @@ def interp(tabla, aoa):
 
 
 def fuerzas(caso):
-    """Filas (it, cd, cl) de forceCoeffs: Time Cm Cd Cl Cl(f) Cl(r)."""
-    filas = []
-    for f in sorted(glob.glob(os.path.join(caso, "postProcessing",
-                                           "forceCoeffs", "*", "*.dat"))):
-        for l in open(f, errors="replace"):
-            if l.strip() and not l.lstrip().startswith("#"):
-                v = l.split()
-                if len(v) >= 4:
-                    try:
-                        filas.append((float(v[0]), float(v[2]), float(v[3])))
-                    except ValueError:
-                        pass
-    return filas
+    """Filas (it, cd, cl) de forceCoeffs."""
+    if not find_force_files(caso):
+        return []
+    h = read_forces(caso, ("Time", "Cd", "Cl"))
+    return list(zip(h.time, h.cd, h.cl))
 
 
 def evaluar(filas):

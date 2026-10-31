@@ -26,6 +26,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+from core.forces import find_force_files, read_forces  # noqa: E402
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -445,14 +447,9 @@ def fig_convergence():
     save(fig, "fig11_convergencia.png")
 
     # Coeficientes vs iteración
-    coef = os.path.join(case, "postProcessing", "forceCoeffs", "0", "coefficient.dat")
-    if os.path.exists(coef):
-        rows = []
-        for line in open(coef):
-            if line.strip().startswith("#") or not line.strip():
-                continue
-            p = line.split()
-            rows.append((float(p[0]), float(p[1]), float(p[4])))
+    if find_force_files(case):
+        h = read_forces(case)
+        rows = list(zip(h.time, h.cd, h.cl))
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.plot([r[0] for r in rows], [r[1] for r in rows], lw=1.0, color="#c62828", label="C_d")
         ax.plot([r[0] for r in rows], [r[2] for r in rows], lw=1.0, color="#1565c0", label="C_l")

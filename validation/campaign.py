@@ -43,6 +43,8 @@ REFS = os.path.join(HERE, "refs")
 OUT = os.path.join(HERE, "campaign")
 sys.path.insert(0, ROOT)
 
+from core.forces import final_coefficients  # noqa: E402
+
 
 # --------------------------------------------------------------------------
 # Perfiles y sus referencias
@@ -117,21 +119,7 @@ def load_ref(entry) -> dict:
 
 def read_force_coeffs(case_dir: str):
     """Últimos Cl, Cd y Cm del forceCoeffs de OpenFOAM."""
-    import glob
-    import re as _re
-
-    files = glob.glob(os.path.join(case_dir, "postProcessing", "forceCoeffs", "*", "coefficient.dat"))
-    if not files:
-        files = glob.glob(os.path.join(case_dir, "postProcessing", "**", "coefficient.dat"),
-                           recursive=True)
-    if not files:
-        raise RuntimeError("no hay coefficient.dat")
-
-    lines = [ln for ln in open(sorted(files)[-1])
-             if ln.strip() and not ln.lstrip().startswith("#")]
-    last = lines[-1].split()
-    # columnas típicas: Time Cd Cd(f) Cd(r) Cl Cl(f) Cl(r) CmPitch ...
-    return float(last[4]), float(last[1]), float(last[7])
+    return final_coefficients(case_dir)
 
 
 def run_case(name: str, entry: dict, mesh_only: bool = False) -> dict:
