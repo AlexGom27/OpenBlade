@@ -330,7 +330,7 @@ def instantanea(host: str, caso: str) -> Dict[str, Any]:
 cat status.json 2>/dev/null; echo; echo ---F
 {remote_tail_command()}
 echo ---L; tail -c 6000 run.log 2>/dev/null
-echo ---E; grep -m1 '^endTime' system/controlDict 2>/dev/null
+echo ---E; grep -m1 -E '^endTime' system/controlDict 2>/dev/null; grep -m1 -E '^application' system/controlDict 2>/dev/null
 echo ---S; cat /proc/loadavg; nproc; grep -E 'MemTotal|MemAvailable' /proc/meminfo
 df -k . | tail -1; pgrep -c 'foamRun|simpleFoam|pimpleFoam'; true""", timeout=40)
     if r.returncode != 0:
@@ -358,6 +358,7 @@ df -k . | tail -1; pgrep -c 'foamRun|simpleFoam|pimpleFoam'; true""", timeout=40
         r"Solving for (\w+), Initial residual = ([-+0-9.eE]+)", log)}
     m = re.search(r"endTime\s+([0-9.eE+\-]+);", fin_txt)
     d["endTime"] = float(m.group(1)) if m else None
+    d["estacionario"] = "simpleFoam" in fin_txt
     d["pct"] = 100.0 * d["t"] / d["endTime"] if d["t"] is not None and d["endTime"] else None
 
     d["coeffs"] = None

@@ -21,11 +21,13 @@ from core.jobs import Dispatcher, Events, Job, Machine, new_job
 
 NIVELES_GCI = (1, 2, 3)
 NIVEL_BASE = 2
-# Un nivel que oscila poco con media estable sirve para el GCI: lo que entra en el calculo
-# es su media, y esa debe moverse mucho menos que lo que separa las mallas.
+# El nivel mas grueso puede oscilar poco con media estable: lo que entra en el calculo es su
+# media, y esa debe moverse mucho menos que lo que separa las mallas. Los niveles finos no:
+# su resultado es el que se usa, y la banda no dice nada de una oscilacion.
 OSCILACION_MAX = 0.03   # amplitud frente a la media
 DERIVA_MAX = 0.1        # cambio de la media entre tramos frente al salto entre mallas
 CL_MINIMO = 0.1         # con Cl casi nulo la amplitud relativa no sirve
+CM_AMP_MAX = 0.005      # Cm es casi nulo: su amplitud se mide en absoluto
 PARAM_TRANSITORIO = {"regime": "Transitorio (pimpleFoam)"}
 
 
@@ -48,15 +50,18 @@ def grid_study_cases(params: Dict[str, Any], niveles: Sequence[int] = NIVELES_GC
             for n in sorted(niveles)]
 
 
-def _oscila_poco(filas: Sequence[Dict[str, Any]], i: int) -> bool:
-    """¿El nivel i oscila poco y su media se mueve mucho menos que el salto a sus vecinos?"""
-    f = filas[i]
-    vecinos = [filas[k] for k in (i - 1, i + 1) if 0 <= k < len(filas)]
+def _oscila_poco(filas: Sequence[Dict[str, Any]]) -> bool:
+    """¿El nivel mas grueso oscila poco y su media se mueve mucho menos que el salto al siguiente?"""
+    f, siguiente = filas[0], filas[1]
+    if (f["cm_amp"] or 0.0) > CM_AMP_MAX:
+        return False
     for nombre, deriva, escala in (("cl", f["cl_deriva"], max(abs(f["cl"] or 0.0), CL_MINIMO)),
                                    ("cd", f["cd_deriva"], abs(f["cd"] or 0.0))):
-        if f[nombre] is None or deriva is None or f[f"{nombre}_amp"] > OSCILACION_MAX * escala:
+        if f[nombre] is None or siguiente[nombre] is None or deriva is None:
             return False
-        if any(v[nombre] is None or deriva > DERIVA_MAX * abs(f[nombre] - v[nombre]) for v in vecinos):
+        if f[f"{nombre}_amp"] > OSCILACION_MAX * escala:
+            return False
+        if deriva > DERIVA_MAX * abs(f[nombre] - siguiente[nombre]):
             return False
     return True
 
@@ -66,14 +71,15 @@ def grid_study_result(trabajos: Sequence[Job]) -> Dict[str, Any]:
     orden = sorted(trabajos, key=lambda j: int(j.params.get("grid_level", 2)))
     filas = [{"nivel": int(j.params.get("grid_level", 2)), "veredicto": verdict_of(j).get("state"),
               "cl": verdict_of(j).get("cl"), "cl_amp": verdict_of(j).get("cl_amp"),
-              "cd": verdict_of(j).get("cd"), "cd_amp": verdict_of(j).get("cd_amp"), "cm": verdict_of(j).get("cm"),
+              "cd": verdict_of(j).get("cd"), "cd_amp": verdict_of(j).get("cd_amp"),
+              "cm": verdict_of(j).get("cm"), "cm_amp": verdict_of(j).get("cm_amp"),
               "oscila": bool(verdict_of(j).get("oscila")), "cl_deriva": verdict_of(j).get("cl_drift"),
               "cd_deriva": 0.01 * (verdict_of(j).get("cd_drift_pct") or 0.0) * abs(verdict_of(j).get("cd") or 0.0)
               if verdict_of(j).get("cd_drift_pct") is not None else None,
               "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean"),
               "trabajo": j.id} for j in orden]
     sin_converger = [f["nivel"] for f in filas if f["veredicto"] != "CONVERGIDO"]
-    oscilan = [f["nivel"] for i, f in enumerate(filas) if f["oscila"] and _oscila_poco(filas, i)]
+    oscilan = [filas[0]["nivel"]] if filas[0]["oscila"] and _oscila_poco(filas) else []
     malos = [n for n in sin_converger if n not in oscilan]
     resultado: Dict[str, Any] = {"aoa": float(orden[0].params.get("aoa", 0.0)), "niveles": filas,
                                  "sin_converger": sin_converger, "oscilan": oscilan}
@@ -97,16 +103,16 @@ def grid_study_text(r: Dict[str, Any]) -> str:
         partes.append(f"{nombre.capitalize()} = {g['fina']:.5f} ± {g['banda']:.5f} "
                       f"(GCI {100 * g['gci_fina']:.2f} %, {orden}{ext})")
     if r.get("oscilan"):
-        partes.append(f"Los niveles {r['oscilan']} oscilan poco con media estable: se usa su media.")
+        partes.append(f"El nivel {r['oscilan'][0]} oscila poco con media estable: se usa su media.")
     return "   ".join(partes)
 
 
 def _bandas(estudios: Sequence[Dict[str, Any]], nombre: str, aoa: float, clave: str) -> Optional[float]:
-    """Banda relativa interpolada entre los angulos con GCI."""
-    puntos = sorted((abs(e["aoa"]), e[nombre][clave]) for e in estudios if nombre in e)
-    if not puntos:
+    """Banda relativa interpolada entre los angulos con GCI; fuera de ellos no se sabe."""
+    puntos = sorted((e["aoa"], e[nombre][clave]) for e in estudios if nombre in e)
+    if not puntos or not puntos[0][0] <= aoa <= puntos[-1][0]:
         return None
-    return float(np.interp(abs(aoa), [p[0] for p in puntos], [p[1] for p in puntos]))
+    return float(np.interp(aoa, [p[0] for p in puntos], [p[1] for p in puntos]))
 
 
 def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = (),

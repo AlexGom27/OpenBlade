@@ -186,7 +186,8 @@ class RemoteMonitorPanel(QWidget):
 
         txt = f"{estado}   {d.get('caso','')}\n"
         if t is not None and end:
-            txt += f"t = {t:.5f} / {end:g} s   [{barra}] {pct:.1f}%\n"
+            avance = f"iteración {t:.0f} de {end:g}" if d.get("estacionario") else f"t = {t:.5f} / {end:g} s"
+            txt += f"{avance}   [{barra}] {pct:.1f}%\n"
         c = d.get("coeffs")
         txt += f"filas de fuerzas: {(c or {}).get('n', 0):,}"
         if c:

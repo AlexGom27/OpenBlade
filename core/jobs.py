@@ -246,11 +246,10 @@ class _Vigilancia:
     MARGEN = 2000
     TOL_RANGO_CD = 0.008
     TOL_RANGO_CL = 0.005
-    # Cambio de la media entre tramos de la corrida (verdict.tramo_final). Medido en el
-    # NACA 0012, nivel 2: al terminar asi, Cl y Cd quedan a menos de 0.01 % de lo que dan
-    # muchas mas iteraciones a 10 y 15 grados, y Cd a 0.07 % a 0 grados.
-    TOL_DERIVA_CD = 0.001
-    TOL_DERIVA_CL = 0.0005
+    # Cambio de la media entre tramos de la corrida (verdict.tramo_final), algo mas estricto
+    # que el del veredicto: una corrida que termina antes de tiempo sale CONVERGIDO.
+    TOL_DERIVA_CD = 0.002
+    TOL_DERIVA_CL = 0.001
 
     def __init__(self) -> None:
         self.n = 0

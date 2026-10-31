@@ -54,6 +54,9 @@ def test_polar_applies_interpolated_band_and_hides_what_did_not_converge():
     assert filas[1]["cl"] is None and filas[1]["veredicto"] == "NO CONVERGIDO"
     assert filas[2]["cl"] is None
     assert not usable(t[1])
+    # Fuera de los angulos con estudio de malla no se inventa una banda
+    fuera = polar_table([trabajo(aoa=12.0, cl=1.2, cd=0.015)], estudio)
+    assert fuera[0]["cl"] == 1.2 and fuera[0]["banda_cl"] is None and fuera[0]["banda_cd"] is None
 
 
 def test_results_are_saved(tmp_path):
@@ -81,7 +84,7 @@ def test_a_level_that_barely_oscillates_counts_for_the_grid_study():
     r = grid_study_result([_nivel_que_oscila()] + _finos())
     assert r["sin_converger"] == [1] and r["oscilan"] == [1]
     assert "motivo" not in r and r["cd"]["orden"] is not None
-    assert "oscilan" in grid_study_text(r)
+    assert "oscila poco" in grid_study_text(r)
 
 
 def test_the_amplitude_may_exceed_a_small_jump_if_the_mean_is_stable():
@@ -94,6 +97,20 @@ def test_the_amplitude_may_exceed_a_small_jump_if_the_mean_is_stable():
 def test_a_level_that_oscillates_a_lot_or_whose_mean_moves_does_not_count(ajuste):
     r = grid_study_result([_nivel_que_oscila(**ajuste)] + _finos())
     assert r["oscilan"] == [] and "no convergieron" in r["motivo"]
+
+
+def test_pitching_moment_counts_for_the_oscillation():
+    j = _nivel_que_oscila()
+    j.analysis["verdict"]["cm_amp"] = 0.05
+    assert grid_study_result([j] + _finos())["oscilan"] == []
+
+
+def test_only_the_coarsest_level_may_oscillate():
+    # La banda sale de la media: no diria nada de una oscilacion en el nivel que se usa.
+    medio = trabajo(nivel=2, estado="NO CONVERGIDO", cl=1.50, cd=0.0199)
+    medio.analysis["verdict"].update(oscila=True, cl_amp=0.03, cd_amp=0.0002, cd_drift_pct=0.002, cl_drift=1e-5)
+    r = grid_study_result([trabajo(nivel=1, cl=1.48, cd=0.0186), medio, trabajo(nivel=3, cl=1.505, cd=0.0205)])
+    assert r["sin_converger"] == [2] and r["oscilan"] == [] and "motivo" in r
 
 
 def test_polar_sends_the_fine_meshes_last(monkeypatch):

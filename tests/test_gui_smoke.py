@@ -259,7 +259,10 @@ def test_server_tab_shows_the_state_when_the_case_has_no_error(window):
     panel.case = "caso"
     panel._aplicar({"caso": "caso", "status": {"state": "running"}, "error": None, "t": 5.0, "endTime": 10.0,
                     "pct": 50.0, "procesos": 4, "coeffs": None, "residuales": {}, "servidor": {}})
-    assert "EN CURSO" in panel.lbl_estado.text()
+    assert "EN CURSO" in panel.lbl_estado.text() and "t = 5.00000 / 10 s" in panel.lbl_estado.text()
+    panel._aplicar({"caso": "caso", "status": {"state": "running"}, "error": None, "t": 500.0, "endTime": 1000.0,
+                    "pct": 50.0, "estacionario": True, "coeffs": None, "residuales": {}, "servidor": {}})
+    assert "iteración 500 de 1000" in panel.lbl_estado.text()
     panel._aplicar({"error": "sin red"})
     assert "sin red" in panel.lbl_estado.text()
 

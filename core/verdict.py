@@ -21,7 +21,7 @@ DIVERGIDO = "DIVERGIDO"
 SIN_DATOS = "SIN DATOS"
 
 VENTANA = 500           # iteraciones finales que se evaluan
-FRACCION_TRAMO = 10     # la deriva se mide entre los dos ultimos decimos de la corrida
+FRACCION_TRAMO = 5      # la deriva se mide entre los dos ultimos quintos de la corrida
 MIN_FILAS = 100         # con menos no se puede juzgar nada
 TOL_RANGO = 0.01        # (max-min)/|media| dentro de la ventana
 TOL_DERIVA = 0.003      # cambio de la media de Cd entre esos dos tramos
@@ -111,11 +111,13 @@ def _periodos_enteros(t: List[float], v: List[float]) -> Tuple[int, int, Optiona
 
 
 def tramo_final(x: List[float]) -> Tuple[float, float]:
-    """Media del ultimo decimo de la corrida y del anterior, nunca menos que la ventana.
+    """Media del ultimo quinto de la corrida y del anterior, nunca menos que la ventana.
 
     En una malla fina la convergencia es mas lenta: entre dos ventanas fijas de 500
     iteraciones Cd cambia muy poco y aun le falta mas de un 1 %. Con tramos que crecen con
-    la corrida el cambio medido no depende de la malla.
+    la corrida el cambio medido no depende de la malla. Medido en el NACA 0012: la primera
+    iteracion con CONVERGIDO queda a 0.39 % de Cd del valor final como mucho, y con un
+    decimo de la corrida quedaba a 1.9 %.
     """
     n = len(x)
     w = min(max(VENTANA, n // FRACCION_TRAMO), n // 2)
