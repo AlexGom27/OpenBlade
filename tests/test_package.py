@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from core import remote_job
 from core.package import (build_ficha, complete_ficha, mesh_notice, package_files,
                           parse_checkmesh, read_ficha, sha256_file)
-from core.remote_runner import RemoteJob, RemoteError
+from core.remote_runner import RemoteError, RemoteJob, interpret_status
 
 CHECKMESH_REAL = """Build  : 12-86e126a7bc4d
 Mesh stats
@@ -123,21 +123,28 @@ def test_ficha_is_completed_with_execution_and_result(caso):
     assert list(ficha["fuerzas_sha256"]) == [os.path.join("postProcessing", "forceCoeffs", "0", "forceCoeffs.dat")]
 
 
-def _trabajo_con_salida(monkeypatch, salida):
-    job = RemoteJob("u@h", job_dir="jobs/x")
-    monkeypatch.setattr(job, "_run", lambda *a, **k: salida)
-    return job
-
-
-def test_job_that_never_started_is_a_failure_not_running(monkeypatch):
-    job = _trabajo_con_salida(monkeypatch, "\n--\npython3: command not found\n")
-    est = job.estado()
+def test_job_that_never_started_is_a_failure_not_running():
+    est = interpret_status("", "", "python3: command not found")
     assert est["state"] == "failed" and "command not found" in est["error"]
 
 
-def test_job_without_status_yet_is_running(monkeypatch):
-    assert _trabajo_con_salida(monkeypatch, "\n--\n").estado()["state"] == "running"
-    assert _trabajo_con_salida(monkeypatch, '{"state": "done"}').estado()["state"] == "done"
+def test_job_without_status_yet_is_running():
+    assert interpret_status("", "", "")["state"] == "running"
+    assert interpret_status('{"state": "done"}', "", "")["state"] == "done"
+
+
+def test_job_whose_process_died_is_a_failure_not_running_forever():
+    """Hallado por OpenClaw: un reinicio del servidor dejaba el seguimiento en un bucle."""
+    vivo = interpret_status('{"state": "running", "step": "solver", "pid": 7}', "vivo", "")
+    assert vivo["state"] == "running"
+    muerto = interpret_status('{"state": "running", "step": "solver", "pid": 7}', "muerto", "")
+    assert muerto["state"] == "failed" and "solver" in muerto["error"]
+    # Si ya termino, que el proceso no exista es lo normal.
+    assert interpret_status('{"state": "done", "pid": 7}', "muerto", "")["state"] == "done"
+
+
+def test_unreadable_status_is_a_failure():
+    assert interpret_status("{corrupto", "", "")["state"] == "failed"
 
 
 def test_other_ficha_on_the_server_stops_the_run():

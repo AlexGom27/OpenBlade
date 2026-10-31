@@ -193,6 +193,25 @@ class InputPanel(QWidget):
         mesh_layout = QFormLayout()
         mesh_layout.setContentsMargins(8, 8, 8, 8)
         
+        self.mesher = QComboBox()
+        self.mesher.addItem("C propia (recomendada)", "cgrid")
+        self.mesher.addItem("C de gmshairfoil2d (anterior)", "gmsh")
+        self.mesher.setToolTip("La propia sale normal a la pared, no cambia con el ángulo "
+                               "(lo da el flujo) y sus niveles están anidados.")
+        self.grid_level = QComboBox()
+        for nivel, texto in enumerate(("Muy gruesa (113 × 33)", "Gruesa (225 × 65)", "Media (449 × 129)",
+                                       "Fina (897 × 257)", "Muy fina (1793 × 513)")):
+            self.grid_level.addItem(texto, nivel)
+        self.grid_level.setCurrentIndex(2)
+        self.grid_level.setToolTip("Cada nivel tiene el doble de puntos por dirección que el anterior "
+                                   "y contiene sus puntos: permite un estudio de malla exacto.")
+        self.yplus_target = QDoubleSpinBox()
+        self.yplus_target.setRange(0.05, 300.0)
+        self.yplus_target.setDecimals(2)
+        self.yplus_target.setSingleStep(0.1)
+        self.yplus_target.setValue(0.5)
+        self.yplus_target.setToolTip("y+ medio buscado en la malla media. Cada nivel más grueso lo duplica.")
+
         self.mesh_size_min = QDoubleSpinBox()
         self.mesh_size_min.setRange(0.001, 1.0)
         # Valor validado contra NASA TM 4074: 0.006c da error de Cd < 2% en el
@@ -242,10 +261,10 @@ class InputPanel(QWidget):
         bl_min_layout.addWidget(self.btn_yplus)
         
         self.wake_length = QDoubleSpinBox()
-        self.wake_length.setRange(1.0, 1000.0)
-        self.wake_length.setToolTip("Se usa la mayor entre esta longitud y el radio del "
-                                    "dominio: una estela más corta se trunca en el contorno.")
-        self.wake_length.setValue(50.0)
+        self.wake_length.setRange(0.0, 1000.0)
+        self.wake_length.setSpecialValueText("Igual al radio")
+        self.wake_length.setToolTip("Distancia del borde de salida a la salida del dominio.")
+        self.wake_length.setValue(0.0)
         self.wake_length.setDecimals(1)
         self.wake_length.setSuffix(" c")
         
@@ -255,22 +274,30 @@ class InputPanel(QWidget):
         self.farfield = QDoubleSpinBox()
         self.farfield.setRange(5.0, 1000.0)
         self.farfield.setDecimals(0)
-        self.farfield.setValue(50.0)
-        self.farfield.setSingleStep(5.0)
+        self.farfield.setValue(200.0)
+        self.farfield.setSingleStep(50.0)
         self.farfield.setSuffix(" c")
         self.farfield.setToolTip(
-            "Distancia del perfil al contorno exterior. NASA TMR usa 500c para "
-            "resultados libres de bloqueo.")
+            "Distancia del perfil al contorno exterior. Medido a alfa=10 en la malla media: "
+            "con 200c converge (Cl 1.0763); con 500c Cd oscila 3.5 % y no converge; con 50c "
+            "Cl baja a 1.0652. NASA TMR da 1.0778.")
 
         # Solo lo que cambia la malla. Tipo de elemento, curvatura y factor de
         # estela no llegaban a ningun sitio: la malla C siempre es de cuadrilateros.
+        mesh_layout.addRow("Malla:", self.mesher)
+        mesh_layout.addRow("Nivel:", self.grid_level)
+        mesh_layout.addRow("y+ objetivo:", self.yplus_target)
         mesh_layout.addRow("Puntos del perfil:", self.nb_airfoil_pts)
         mesh_layout.addRow("Tamaño Mín Elemento:", self.mesh_size_min)
-        mesh_layout.addRow("Primera celda:", bl_min_layout)
-        mesh_layout.addRow("", self.yplus_estimate)
+        self.fila_primera_celda = QWidget()
+        self.fila_primera_celda.setLayout(bl_min_layout)
+        bl_min_layout.setContentsMargins(0, 0, 0, 0)
+        mesh_layout.addRow("Primera celda:", self.fila_primera_celda)
         mesh_layout.addRow("Tasa Crecimiento:", self.mesh_growth_rate)
+        mesh_layout.addRow("", self.yplus_estimate)
         mesh_layout.addRow("Radio del dominio:", self.farfield)
         mesh_layout.addRow("Longitud Estela:", self.wake_length)
+        self.mesh_layout = mesh_layout
         mesh_box.setContentLayout(mesh_layout)
         
         # ═══════════════════════════════════════════
@@ -336,7 +363,6 @@ class InputPanel(QWidget):
             "Laminar", 
             "k-Omega SST (RAS)",
             "k-Omega SST-LM Transición (RAS)",
-            "gamma-ReTheta Transición (RAS)",
             "k-Epsilon (RAS)", 
             "k-Omega (RAS)", 
             "Spalart-Allmaras (RAS)"
@@ -488,8 +514,13 @@ class InputPanel(QWidget):
             campo.setFocusPolicy(Qt.StrongFocus)
             campo.installEventFilter(self._filtro_rueda)
 
-        self.reynolds_input.valueChanged.connect(self._update_yplus_estimate)
-        self.bl_dist_min.valueChanged.connect(self._update_yplus_estimate)
+        for senal in (self.reynolds_input.valueChanged, self.bl_dist_min.valueChanged,
+                      self.yplus_target.valueChanged, self.grid_level.currentIndexChanged,
+                      self.mesher.currentIndexChanged):
+            senal.connect(self._update_yplus_estimate)
+        self.turbulence_model.currentIndexChanged.connect(self._on_turbulence_changed)
+        self.mesher.currentIndexChanged.connect(self._toggle_mesher)
+        self._toggle_mesher()
         self._update_yplus_estimate()
 
     # ------------------------------------------------------- dónde se ejecuta
@@ -676,13 +707,34 @@ class InputPanel(QWidget):
             from core.yplus import first_cell_for_yplus
             self.bl_dist_min.setValue(first_cell_for_yplus(yplus_target.value(), re_spin.value()))
 
+    def _on_turbulence_changed(self) -> None:
+        """k-ε necesita ley de pared; los demas, resolver la subcapa."""
+        ley_de_pared = "Epsilon" in self.turbulence_model.currentText()
+        self.yplus_target.setValue(60.0 if ley_de_pared else 0.5)
+
+    def _toggle_mesher(self) -> None:
+        """Cada malla muestra solo los controles que la cambian."""
+        propia = self.mesher.currentData() == "cgrid"
+        for campo in (self.grid_level, self.yplus_target):
+            self.mesh_layout.setRowVisible(campo, propia)
+        for campo in (self.nb_airfoil_pts, self.mesh_size_min, self.fila_primera_celda,
+                      self.mesh_growth_rate):
+            self.mesh_layout.setRowVisible(campo, not propia)
+
     def _update_yplus_estimate(self) -> None:
-        """y+ esperado con la primera celda y el Reynolds que hay en el panel."""
+        """y+ esperado con los valores que hay en el panel."""
+        from core.cgrid import first_cell_at_level
         from core.yplus import YP_LOG_MIN, YP_VISCOSA, estimate_yplus
-        y = estimate_yplus(self.bl_dist_min.value(), self.reynolds_input.value())
+        reynolds = self.reynolds_input.value()
+        if self.mesher.currentData() == "cgrid":
+            primera = first_cell_at_level({"reynolds": reynolds, "yplus_target": self.yplus_target.value(),
+                                           "grid_level": self.grid_level.currentData()})
+        else:
+            primera = self.bl_dist_min.value()
+        y = estimate_yplus(primera, reynolds)
         zona = ("subcapa viscosa" if y <= YP_VISCOSA else
                 "zona de transición: evítala" if y < YP_LOG_MIN else "zona logarítmica")
-        self.yplus_estimate.setText(f"y+ medio estimado ≈ {y:.2f} ({zona})")
+        self.yplus_estimate.setText(f"Primera celda {primera:.2e} c; y+ medio estimado ≈ {y:.2f} ({zona})")
 
     def _pick_file(self) -> None:
         file_name, _ = QFileDialog.getOpenFileName(self, "Seleccionar Perfil 2D", "", "Text Files (*.txt *.csv);;All Files (*)")
@@ -739,6 +791,9 @@ class InputPanel(QWidget):
             "aoa_min": self.aoa_min.value(),
             "aoa_max": self.aoa_max.value(),
             "aoa_step": self.aoa_step.value(),
+            "mesher": self.mesher.currentData(),
+            "grid_level": self.grid_level.currentData(),
+            "yplus_target": self.yplus_target.value(),
             "mesh_size_min": self.mesh_size_min.value(),
             "bl_dist_min": self.bl_dist_min.value(),
             "mesh_growth_rate": self.mesh_growth_rate.value(),
@@ -807,6 +862,14 @@ class InputPanel(QWidget):
             self.aoa_max.setValue(float(p["aoa_max"]))
         if "aoa_step" in p:
             self.aoa_step.setValue(float(p["aoa_step"]))
+        if "mesher" in p:
+            i = self.mesher.findData(p["mesher"])
+            if i >= 0: self.mesher.setCurrentIndex(i)
+        if "grid_level" in p:
+            i = self.grid_level.findData(int(p["grid_level"]))
+            if i >= 0: self.grid_level.setCurrentIndex(i)
+        if "yplus_target" in p:
+            self.yplus_target.setValue(float(p["yplus_target"]))
         if "mesh_size_min" in p:
             self.mesh_size_min.setValue(float(p["mesh_size_min"]))
         if "bl_dist_min" in p:

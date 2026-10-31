@@ -71,6 +71,12 @@ def main():
     
     with open(json_path, 'r') as f:
         p = json.load(f)
+
+    if p.get("mesher") == "cgrid":
+        from core.cgrid import build_mesh
+        info = build_mesh(p, output_msh)
+        print(f"✅ Malla {info['mallador']}: {info['celdas']} celdas, {output_msh}")
+        return
     
     try:
         naca = p.get("naca", "0012")
@@ -99,7 +105,7 @@ def main():
         # caja de longitud `wake_length` detrás. Si la estela queda más corta
         # que el radio lateral, el contorno la trunca y el Cd se distorsiona.
         farfield = float(p.get("farfield", 50.0)) * chord
-        wake_length = float(p.get("wake_length", 12.0)) * chord
+        wake_length = float(p.get("wake_length", 0.0)) * chord
         if wake_length < farfield:
             wake_length = max(wake_length, farfield)
         depth = float(p.get("depth", 0.1)) * chord

@@ -105,3 +105,38 @@ NACA 0012, cuerda 1, Re=6e6, α=0, valores por defecto de la GUI, 6000 iteracion
 Si fallan 1 o 2, se arregla el flujo antes de discutir física. Cuando α=0 pase, se añade α=8: Cl 0.8593 ±10 %, Cd 0.00979 ±10 %, rango < 1 %. Esas tolerancias detectan errores gruesos; no certifican precisión.
 
 Hoy el control pasa 1-5 y 7, y falla 6 (+49 %). La compuerta 8 no se puede evaluar hasta E3.
+
+## 8. Estado de la ejecución (2026-10-31)
+
+| Fase | Estado | Commit |
+|---|---|---|
+| E0 | Hecha | `bcb814a` |
+| E3 | Hecha | `b263b60` |
+| E2 | Hecha | `1472da2` |
+| E1 | Hecha | `ed7aac8` |
+| E4 | Hecha | `c2317cb` |
+| E5 | En curso: malla nueva y banco escritos; el banco aún no se ha corrido | último commit |
+| E6 | Sin empezar | |
+
+**Hallazgo que cambia §2 y §3 (M).** `writePrecision 6` hacía que `gmshToFoam` redondeara los puntos de la malla a 6 cifras (`f88d55a`). Todas las corridas anteriores lo arrastran, y las tablas de §3 son de antes de corregirlo. No ortogonalidad con los mismos archivos: malla por defecto de 78.0° a 66.1°; TMR 449×129 de 89.4° a 52.3°.
+
+**Control con la malla anterior y antes de ese arreglo (M):** 8 de 8 compuertas a α=0 (Cd 0.00775, −3.8 %) y α=8 (Cl 0.9421, +9.6 %; Cd 0.01052, +7.5 %), con md5 de fuerzas igual entre servidores. No se ha repetido con la malla nueva.
+
+**Malla C propia, nivel 449×129, α=10, Re=6e6, SST (M).** No ortogonalidad máxima de 28 a 31° según el radio. Las corridas de 50c y 500c usaron una versión anterior de la malla, también con 39°. NASA TMR con CFL3D da Cl 1.0778 y Cd 0.01236.
+
+| Radio | Cl | Cd | Rango de Cd | Estado |
+|---|---|---|---|---|
+| 50c | 1.0652 | 0.01204 | 0.66 % | Fuerzas estables; la descarga falló, con la media tomada del servidor |
+| 200c | 1.0763 | 0.01138 | 0.35 % | Fuerzas estables en la iteración 11 831; la corrida sigue |
+| 500c | 1.0914 | 0.01143 | 3.5 % | NO CONVERGIDO: oscila |
+
+A 500c, Cp frente a CFL3D: RMS 0.036 en extradós y 0.058 en intradós, pico −5.45 en ambos. Cf se aleja cerca del borde de salida: 0.55e-3 frente a 0.26e-3 en x/c=0.99. Cd queda 7 a 8 % por debajo de TMR a 200c y 500c: fuera de la tolerancia de ±5 % del banco, a falta del nivel 897×257.
+
+**Abierto**
+- Correr el banco (`python3 -m core.cli banco`) y fijar sus tolerancias con resultados reales; falta el botón en la ventana.
+- Repetir el control: `core/control.py` pide 6000 iteraciones, quizá pocas para la malla nueva.
+- La malla oficial TMR 449×129 ya no revienta en 38 iteraciones, pero diverge hacia la iteración 1400.
+- El contorno libre (`bc_type=libre`) no convergió en 8000 a 14 000 iteraciones (Cd≈0.02); sigue por defecto entrada y salida fijas.
+- `k-Epsilon` en malla de subcapa da Cd=0.119; ahora se avisa y el panel sube el y+ objetivo, pero k-ε con y+=60 no se ha corrido.
+- E6: polar, GCI con los niveles anidados y URANS donde RANS no converja.
+- `core/openfoam_setup.py` sigue con un cambio ajeno sin subir (PIMPLE: `nOuterCorrectors`, `outerCorrectorResidualControl`).

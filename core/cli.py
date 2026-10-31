@@ -2,6 +2,7 @@
 
     python3 -m core.cli correr --host usuario@host --procesos 8 aoa=8 reynolds=6e6
     python3 -m core.cli control --hosts usuario@a,usuario@b --procesos 8
+    python3 -m core.cli banco --maquinas usuario@a:10:1,usuario@b:8:1 --salida carpeta
 
 Cada simulacion sale de aqui o de la ventana; no hay otra forma de escribir un caso.
 """
@@ -89,6 +90,32 @@ def cmd_control(args: argparse.Namespace) -> int:
     return 1 if falla else 0
 
 
+def _maquinas(texto: str) -> List[Machine]:
+    """usuario@host:procesos:simultaneos, separadas por comas."""
+    maquinas = []
+    for m in texto.split(","):
+        host, _, resto = m.partition(":")
+        procesos, _, simultaneos = resto.partition(":")
+        maquinas.append(Machine(host, int(procesos or 8), int(simultaneos or 1)))
+    return maquinas
+
+
+def cmd_banco(args: argparse.Namespace) -> int:
+    from core.bench import run_bench, write_report
+
+    r = run_bench(_maquinas(args.maquinas), events=_Consola())
+    ruta = write_report(r, args.salida)
+    print(f"\nComprobaciones cumplidas: {r['cumplidas']} de {r['total']}. Informe: {ruta}")
+    for f in r["filas"]:
+        for x in f["comprobaciones"]:
+            print(f"  {'cumple' if x['cumple'] else 'NO    '} {f['caso']['etiqueta']:22s} {x['nombre']:26s} "
+                  f"{x['error']:+.3f} (tope {x['tope']:.3f}) {x['detalle']}")
+    for x in r["dominio"]:
+        print(f"  {'cumple' if x['cumple'] else 'NO    '} {'dominio':22s} {x['nombre']:26s} "
+              f"{x['error']:+.3f} (tope {x['tope']:.3f}) {x['detalle']}")
+    return 0 if r["cumplidas"] == r["total"] and not r["sin_converger"] else 1
+
+
 def main(argv: List[str] = None) -> int:
     p = argparse.ArgumentParser(prog="core.cli", description=__doc__)
     sub = p.add_subparsers(dest="orden", required=True)
@@ -106,6 +133,11 @@ def main(argv: List[str] = None) -> int:
     control.add_argument("--angulos", default="0,8")
     control.add_argument("--salida", default="", help="JSON con el resultado")
     control.set_defaults(fn=cmd_control)
+
+    banco = sub.add_parser("banco", help="banco de validacion frente a NASA TMR y Ladson")
+    banco.add_argument("--maquinas", required=True, help="usuario@host:procesos:simultaneos,...")
+    banco.add_argument("--salida", default="banco_validacion", help="carpeta del informe")
+    banco.set_defaults(fn=cmd_banco)
 
     args = p.parse_args(argv)
     return args.fn(args)

@@ -23,6 +23,8 @@ SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
             "-o", "ControlPath=~/.ssh/openblade-%C",
             "-o", "ControlPersist=120"]
 JOBS_DIR = "openblade_jobs"
+INTENTOS_RSYNC = 5
+ESPERA_RSYNC = 5.0
 EXCLUIR_BAJADA = ["processor*", "mesh.msh", "remote_job.py", "job.json",
                   "status.json", "job.log"]
 
@@ -131,6 +133,24 @@ def configurar_acceso(host: str, contrasena: str) -> None:
                           "si tiene frase de contrasena, cargala en ssh-agent")
 
 
+def interpret_status(estado_txt: str, vivo: str, log: str) -> Dict[str, Any]:
+    """Estado a partir de status.json, si su proceso sigue vivo y job.log."""
+    try:
+        est = json.loads(estado_txt)
+    except ValueError:
+        if estado_txt.strip():
+            return {"state": "failed", "rc": 1, "step": "inicio",
+                    "error": "status.json no se puede leer"}
+        if log:
+            return {"state": "failed", "rc": 1, "step": "inicio",
+                    "error": f"El trabajo no arrancó: {log[-300:]}"}
+        return {"state": "running", "step": "inicio"}
+    if est.get("state") == "running" and vivo == "muerto":
+        return dict(est, state="failed", rc=1,
+                    error=f"El proceso del trabajo desapareció en el paso {est.get('step')}. {log[-200:]}".strip())
+    return est
+
+
 class RemoteJob:
     def __init__(self, host: str, job_dir: Optional[str] = None,
                  etiqueta: str = "caso") -> None:
@@ -151,12 +171,16 @@ class RemoteJob:
         return r.stdout
 
     def _rsync(self, origen: str, destino: str, excluir: List[str]) -> None:
+        """Copia con reintentos: un corte no debe perder un calculo ya hecho."""
         cmd = ["rsync", "-az", "-e", "ssh " + " ".join(SSH_OPTS)]
         cmd += [f"--exclude={e}" for e in excluir] + [origen, destino]
-        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                           stdin=subprocess.DEVNULL)
-        if r.returncode != 0:
-            raise RemoteError("rsync: " + r.stderr.strip()[-300:])
+        for intento in range(INTENTOS_RSYNC):
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                               stdin=subprocess.DEVNULL)
+            if r.returncode == 0:
+                return
+            time.sleep(ESPERA_RSYNC * (intento + 1))
+        raise RemoteError("rsync: " + r.stderr.strip()[-300:])
 
     def subir(self, case_dir: str, msh_file: str, nproc: int, transient: bool,
               params: Dict[str, Any]) -> None:
@@ -205,22 +229,20 @@ class RemoteJob:
             raise RemoteError("La ficha del servidor no es la que se envió")
 
     def estado(self) -> Dict[str, Any]:
-        """Estado del trabajo. Sin status.json aun no ha arrancado o no arrancara.
+        """Estado del trabajo, comprobando que su proceso siga vivo.
 
-        Si python3 falla antes de escribir nada, job.log lo cuenta y el trabajo se
-        da por fallido: antes quedaba como "running" para siempre.
+        Si el servidor se reinicia o el proceso muere de golpe, status.json se queda
+        en "running" para siempre y seguir el trabajo no terminaria nunca. Tampoco
+        queda como "running" el que no llego a arrancar: job.log cuenta por que.
         """
-        salida = self._run('cat status.json 2>/dev/null || { echo; echo "--"; '
-                           'tail -c 400 job.log 2>/dev/null; }', timeout=30)
-        try:
-            return json.loads(salida)
-        except ValueError:
-            pass
-        _, _, log = salida.partition("--\n")
-        if log.strip():
-            return {"state": "failed", "rc": 1, "step": "inicio",
-                    "error": f"El trabajo no arrancó: {log.strip()[-300:]}"}
-        return {"state": "running", "step": "inicio"}
+        salida = self._run(
+            'cat status.json 2>/dev/null; echo; echo ---P; '
+            'p=$(grep -o \'"pid": [0-9]*\' status.json 2>/dev/null | grep -o "[0-9]*$"); '
+            'if [ -n "$p" ]; then kill -0 "$p" 2>/dev/null && echo vivo || echo muerto; fi; '
+            'echo ---L; tail -c 400 job.log 2>/dev/null; true', timeout=30)
+        estado_txt, _, resto = salida.partition("---P\n")
+        vivo, _, log = resto.partition("---L\n")
+        return interpret_status(estado_txt, vivo.strip(), log.strip())
 
     def leer_log(self, maximo: int = 2_000_000) -> str:
         """Texto nuevo de run.log desde la ultima lectura."""

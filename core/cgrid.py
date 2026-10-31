@@ -37,7 +37,13 @@ ASPECTO_ESTELA = 3000.0 # celda mas alargada que se admite en la estela
 
 def naca4(codigo: str, n: int = 40001) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Contorno denso de un NACA de 4 digitos con borde de salida cerrado: xu, yu, xl, yl."""
+    if len(codigo) != 4 or not codigo.isdigit():
+        raise ValueError(f"Código NACA no válido: {codigo}")
     m, p, t = int(codigo[0]) / 100.0, int(codigo[1]) / 10.0, int(codigo[2:]) / 100.0
+    if not 0.01 <= t <= 0.40:
+        raise ValueError(f"Espesor del {100 * t:.0f} %: la serie admite de 1 a 40 %")
+    if m > 0 and p == 0:
+        raise ValueError(f"NACA {codigo}: con curvatura, la posición no puede ser 0")
     beta = np.linspace(0.0, math.pi, n)
     x = 0.5 * (1.0 - np.cos(beta))
     yt = 5 * t * (0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x ** 2 + 0.2843 * x ** 3 - 0.1036 * x ** 4)
@@ -168,6 +174,10 @@ def generate_cgrid(contorno: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarra
     """
     if nivel not in NIVELES:
         raise ValueError(f"Nivel {nivel}: los hay de 0 a 4")
+    if radio < 5.0:
+        raise ValueError(f"Radio del dominio de {radio:g} cuerdas: el mínimo es 5")
+    if not 1e-8 <= primera_celda <= 0.01:
+        raise ValueError(f"Primera celda de {primera_celda:g} cuerdas fuera de rango")
     # Se construye siempre el nivel mas fino y se toma uno de cada 2^k puntos: las
     # normales y el contorno exterior son exactamente los mismos en todos los niveles.
     factor = 2.0 ** (NIVEL_MAX - NIVEL_BASE)
@@ -307,7 +317,7 @@ def first_cell_at_level(params: Dict) -> float:
 def build_mesh(params: Dict, salida: str) -> Dict:
     """Genera la malla de estos parametros y la escribe como .msh."""
     import json
-    from core.structured_mesh import write_cgrid_msh
+    from core.structured_mesh import write_cgrid_msh, write_preview_vtk
 
     nivel = int(params.get("grid_level", NIVEL_BASE))
     cuerda = float(params.get("chord", 1.0))
@@ -317,4 +327,5 @@ def build_mesh(params: Dict, salida: str) -> Dict:
     info["mallador"] = f"C propia, nivel {nivel} ({NIVELES[nivel]})"
     with open(salida + ".info.json", "w") as f:
         json.dump(info, f, ensure_ascii=False)
+    write_preview_vtk(salida.replace(".msh", ".vtk"), x * cuerda, y * cuerda)
     return info

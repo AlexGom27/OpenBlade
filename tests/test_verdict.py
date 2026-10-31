@@ -266,6 +266,14 @@ def test_mesh_regime_notice(media, pared, nivel):
     assert regime_notice(_yp(media, pared))[0] == nivel
 
 
+def test_k_epsilon_on_a_wall_resolved_mesh_is_flagged():
+    """Medido: k-e con y+ = 2 da Cd = 0.119 y el veredicto es CONVERGIDO."""
+    yp = YPlusResult(2.0, 1.0, 3.0, 290, "6000", 2.5e-6, 1e-5, "nutLowReWallFunction", 0.5, "kEpsilon")
+    assert regime_notice(yp)[0] == "mal"
+    yp = YPlusResult(60.0, 30.0, 90.0, 290, "6000", 2.5e-6, 1e-4, "nutkWallFunction", 0.5, "kEpsilon")
+    assert regime_notice(yp)[0] == "ok"
+
+
 def test_first_cell_counts_the_centre_at_half_height():
     h = first_cell_for_yplus(1.0, 6e6)
     # y_P = h/2; u_tau/U = sqrt(cf/2) con cf = 0.026/Re^(1/7)

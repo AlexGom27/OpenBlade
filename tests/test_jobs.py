@@ -29,9 +29,18 @@ def test_job_survives_a_restart_of_the_program():
 
 
 def test_same_mesh_parameters_give_the_same_key_and_others_do_not():
-    assert mesh_key(case_params(aoa=2.0)) == mesh_key(case_params(aoa=2.0, reynolds=6e6))
-    assert mesh_key(case_params(aoa=2.0)) != mesh_key(case_params(aoa=4.0))
+    gmsh = dict(mesher="gmsh")
+    assert mesh_key(case_params(aoa=2.0, **gmsh)) == mesh_key(case_params(aoa=2.0, reynolds=6e6, **gmsh))
+    assert mesh_key(case_params(aoa=2.0, **gmsh)) != mesh_key(case_params(aoa=4.0, **gmsh))
     assert mesh_key(case_params()) != mesh_key(case_params(farfield=100.0))
+
+
+def test_cgrid_mesh_is_not_reused_for_another_reynolds():
+    """La primera celda depende del Reynolds: reutilizarla dio y+ = 30 en lugar de 1."""
+    base = dict(mesher="cgrid", grid_level=1, farfield=50.0)
+    assert mesh_key(case_params(reynolds=1e5, **base)) != mesh_key(case_params(reynolds=6e6, **base))
+    assert mesh_key(case_params(reynolds=6e6, aoa=2.0, **base)) == mesh_key(case_params(reynolds=6e6, aoa=8.0, **base))
+    assert mesh_key(case_params(reynolds=6e6, yplus_target=1.0, **base)) != mesh_key(case_params(reynolds=6e6, **base))
 
 
 def test_unknown_parameter_is_an_error():
@@ -198,6 +207,19 @@ def test_failed_mesh_fails_the_job_and_frees_the_machine(monkeypatch):
     d.submit(uno)
     assert d.wait(5)
     assert uno.state == FALLIDO and "malla" in uno.error
+
+
+def test_unexpected_error_also_fails_the_job(monkeypatch):
+    def malla_rara(params, log=lambda _: None):
+        raise ValueError("La rejilla tiene 3 celdas invertidas")
+    monkeypatch.setattr(J, "ensure_mesh", malla_rara)
+    d = Dispatcher(poll_s=0)
+    d.set_machines([Machine("a@h", 4, 1)])
+    uno = new_job(case_params())
+    d.submit(uno)
+    assert d.wait(5)
+    assert uno.state == FALLIDO and "invertidas" in uno.error
+    assert next(j for j in load_jobs() if j.id == uno.id).state == FALLIDO
 
 
 def test_local_job_refuses_without_docker_image(monkeypatch, tmp_path):

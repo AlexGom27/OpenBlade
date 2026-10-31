@@ -43,6 +43,7 @@ class YPlusResult:
     first_cell_mean: float
     wall_condition: str
     u_tau_mean: float
+    model: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -204,6 +205,15 @@ def wall_condition(case_dir: str, parche: str = PARCHE) -> str:
     return m.group(1) if m else ""
 
 
+def turbulence_model(case_dir: str) -> str:
+    """Modelo de turbulencia del caso; '' si es laminar o no se sabe."""
+    ruta = os.path.join(case_dir, "constant", "turbulenceProperties")
+    if not os.path.exists(ruta):
+        return ""
+    m = re.search(r"RASModel\s+(\w+)\s*;", _leer(ruta))
+    return m.group(1) if m and "laminar" not in _leer(ruta) else ""
+
+
 def compute_yplus(case_dir: str, nu: Optional[float] = None,
                   parche: str = PARCHE) -> YPlusResult:
     """y+ medio, minimo y maximo sobre el perfil en el ultimo tiempo escrito."""
@@ -218,7 +228,7 @@ def compute_yplus(case_dir: str, nu: Optional[float] = None,
     yp = y * u_tau / nu
     return YPlusResult(float(yp.mean()), float(yp.min()), float(yp.max()), len(yp),
                        tiempo, nu, float(y.mean()), wall_condition(case_dir, parche),
-                       float(u_tau.mean()))
+                       float(u_tau.mean()), turbulence_model(case_dir))
 
 
 def first_cell_for_yplus(yplus: float, reynolds: float) -> float:
@@ -240,6 +250,10 @@ def estimate_yplus(first_cell: float, reynolds: float) -> float:
 def regime_notice(yp: YPlusResult) -> Tuple[str, str]:
     """(nivel, texto): 'ok', 'aviso' o 'mal' segun la malla y la condicion de pared."""
     datos = f"y+ medio {yp.mean:.2f}, máximo {yp.max:.2f}"
+    if yp.model == "kEpsilon" and yp.mean < YP_LOG_MIN:
+        # Medido a alfa=4 con y+ = 2: Cd = 0.119, quince veces el real.
+        return "mal", (f"{datos}: k-ε necesita ley de pared, con y+ entre {YP_LOG_MIN:.0f} y "
+                       f"{YP_LOG_MAX:.0f}. Estos coeficientes no valen: sube el y+ objetivo o usa SST.")
     if yp.mean >= YP_LOG_MIN:
         if yp.wall_condition not in PARED_LOG:
             return "mal", (f"{datos}: la primera celda cae en la zona logarítmica, pero "

@@ -140,6 +140,16 @@ def write_cgrid_msh(ruta: str, x: np.ndarray, y: np.ndarray, profundidad: float 
     return info
 
 
+def write_preview_vtk(ruta: str, x: np.ndarray, y: np.ndarray) -> None:
+    """La rejilla para la vista previa, en VTK de texto."""
+    ni, nj = x.shape
+    with open(ruta, "w") as f:
+        f.write(f"# vtk DataFile Version 3.0\nmalla C\nASCII\nDATASET STRUCTURED_GRID\n"
+                f"DIMENSIONS {ni} {nj} 1\nPOINTS {ni * nj} double\n")
+        for xx, yy in zip(x.flatten(order="F"), y.flatten(order="F")):
+            f.write(f"{xx:.10g} {yy:.10g} 0\n")
+
+
 def import_plot3d(entrada: str, salida: str, profundidad: float = PROFUNDIDAD) -> dict:
     """Convierte una malla PLOT3D 2D (p. ej. las de NASA TMR) a .msh."""
     x, y = read_plot3d_2d(entrada)

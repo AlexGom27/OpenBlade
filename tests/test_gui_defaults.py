@@ -50,6 +50,27 @@ def test_inflow_defaults_are_the_tmr_values(params):
     assert params["viscosity_ratio"] == pytest.approx(0.009)
 
 
+def test_gamma_retheta_is_not_offered_because_openfoam_12_does_not_have_it():
+    """El modelo no existe: el solver abortaba al leer turbulenceProperties."""
+    from gui.input_panel import InputPanel
+    panel = InputPanel()
+    opciones = [panel.turbulence_model.itemText(i) for i in range(panel.turbulence_model.count())]
+    assert not any("gamma-ReTheta" in o for o in opciones)
+    panel.deleteLater()
+
+
+def test_choosing_k_epsilon_moves_the_mesh_to_wall_functions():
+    from gui.input_panel import InputPanel
+    panel = InputPanel()
+    panel.reynolds_input.setValue(6e6)
+    panel.turbulence_model.setCurrentText("k-Epsilon (RAS)")
+    assert panel.yplus_target.value() == 60.0
+    assert "logarítmica" in panel.yplus_estimate.text()
+    panel.turbulence_model.setCurrentText("k-Omega SST (RAS)")
+    assert panel.yplus_target.value() == 0.5
+    panel.deleteLater()
+
+
 def test_first_cell_for_yplus_one_is_reachable():
     """Con 5 decimales 8.9e-6 se redondeaba a 1e-5: y+ = 1 a Re=6e6 no se podia pedir."""
     from gui.input_panel import InputPanel
@@ -59,11 +80,15 @@ def test_first_cell_for_yplus_one_is_reachable():
     panel.deleteLater()
 
 
-def test_yplus_estimate_follows_reynolds():
+def test_yplus_estimate_follows_the_panel():
     from gui.input_panel import InputPanel
     panel = InputPanel()
     panel.reynolds_input.setValue(6e6)
-    assert "2.24" in panel.yplus_estimate.text()
+    assert "≈ 0.50" in panel.yplus_estimate.text()
+    panel.grid_level.setCurrentIndex(1)
+    assert "≈ 1.00" in panel.yplus_estimate.text()
+    panel.set_params({"mesher": "gmsh"})
+    assert "≈ 2.24" in panel.yplus_estimate.text()
     panel.bl_dist_min.setValue(1e-3)
     assert "logarítmica" in panel.yplus_estimate.text()
     panel.deleteLater()
@@ -102,6 +127,22 @@ def test_domain_is_large_enough(params):
     """Sin control de dominio el mesh_script usa 10c: dominio 5x menor."""
     assert "farfield" in params, "falta el control de dominio exterior"
     assert params["farfield"] >= 30.0
+
+
+def test_default_mesh_is_the_nested_one_at_the_medium_level(params):
+    assert params["mesher"] == "cgrid" and params["grid_level"] == 2
+
+
+def test_each_mesher_shows_only_the_controls_that_change_it():
+    from gui.input_panel import InputPanel
+    panel = InputPanel()
+    assert panel.mesh_layout.isRowVisible(panel.grid_level)
+    assert not panel.mesh_layout.isRowVisible(panel.mesh_size_min)
+    panel.set_params({"mesher": "gmsh"})
+    assert not panel.mesh_layout.isRowVisible(panel.grid_level)
+    assert panel.mesh_layout.isRowVisible(panel.mesh_size_min)
+    assert "2.24" in panel.yplus_estimate.text() or "Primera celda" in panel.yplus_estimate.text()
+    panel.deleteLater()
 
 
 def test_decimals_precede_value():

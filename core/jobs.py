@@ -139,6 +139,10 @@ def mesh_key(params: Dict[str, Any]) -> str:
     datos = {k: params[k] for k in CLAVES_MALLA if k in params}
     if angle_by_flow(params):
         datos.pop("aoa", None)  # el mismo archivo sirve para todos los angulos
+    if params.get("mesher") == "cgrid":
+        # La primera celda sale del Reynolds: otro Reynolds es otra malla.
+        from core.cgrid import first_cell_of
+        datos["primera_celda"] = first_cell_of(params)
     if "Custom" in params.get("profile_type", "") and params.get("file_path"):
         datos["perfil"] = sha256_file(params["file_path"])
     if params.get("mesh_file"):
@@ -389,10 +393,12 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
         job.finished = time.time()
         runner.limpiar()
         cambia(DETENIDO if job.rc == RC_DETENIDA else FALLIDO if job.rc else TERMINADO)
-    except (RemoteError, JobError, subprocess.SubprocessError, OSError) as e:
-        job.error = str(e)
+    except Exception as e:  # noqa: BLE001
+        # Cualquier fallo termina el trabajo: sin esto, un error inesperado lo dejaba
+        # en "mallando" para siempre y ocupando su maquina.
+        job.error = str(e) or type(e).__name__
         job.finished = time.time()
-        ev.log(job, f"❌ {e}")
+        ev.log(job, f"❌ {job.error}")
         cambia(FALLIDO)
 
 

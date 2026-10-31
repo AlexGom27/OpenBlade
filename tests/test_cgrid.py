@@ -157,3 +157,18 @@ def test_selig_and_lednicer_files_give_the_same_profile(tmp_path):
         assert np.allclose(a, b, atol=1e-5)
     # Extrados arriba, cuerda 1
     assert s[1].max() > s[3].max() and s[0][-1] == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("codigo", ["9999", "00", "abcd", "2012x", "2000"])
+def test_impossible_naca_codes_are_refused(codigo):
+    with pytest.raises(ValueError):
+        naca4(codigo)
+
+
+def test_impossible_grid_parameters_are_refused():
+    with pytest.raises(ValueError):
+        generate_cgrid(naca4("0012"), H, 7, 500.0)
+    with pytest.raises(ValueError):
+        generate_cgrid(naca4("0012"), H, 2, 1.0)
+    with pytest.raises(ValueError):
+        generate_cgrid(naca4("0012"), 1.0, 2, 500.0)

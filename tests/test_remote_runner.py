@@ -68,3 +68,27 @@ def test_configurar_acceso_reports_wrong_password(tmp_path, monkeypatch):
     _ssh_falso(tmp_path, monkeypatch)
     with pytest.raises(RemoteError, match="incorrectos"):
         configurar_acceso("u@h", "otra")
+
+
+def test_rsync_is_retried_before_giving_up(monkeypatch):
+    """Un corte al descargar marcaba como fallido un calculo terminado."""
+    from core import remote_runner as rr
+
+    class R:
+        def __init__(self, rc):
+            self.returncode, self.stderr = rc, "unexpected end of file"
+
+    llamadas = []
+
+    def falso(cmd, **_k):
+        llamadas.append(cmd)
+        return R(0 if len(llamadas) == 3 else 12)
+
+    monkeypatch.setattr(rr.subprocess, "run", falso)
+    monkeypatch.setattr(rr, "ESPERA_RSYNC", 0.0)
+    RemoteJob("u@h", job_dir="jobs/x").descargar("/tmp/x")
+    assert len(llamadas) == 3
+    llamadas.clear()
+    monkeypatch.setattr(rr.subprocess, "run", lambda cmd, **_k: R(12))
+    with pytest.raises(RemoteError, match="rsync"):
+        RemoteJob("u@h", job_dir="jobs/x").descargar("/tmp/x")
