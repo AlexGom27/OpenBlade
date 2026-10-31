@@ -17,7 +17,7 @@ import numpy as np
 
 from core.defaults import DEFAULT_PARAMS, case_params
 from core.gci import study_from_levels
-from core.jobs import Dispatcher, Events, Job, Machine, new_job
+from core.jobs import DETENIDO, Dispatcher, Events, FALLIDO, FINALES, Job, Machine, load_jobs, new_job
 
 NIVELES_GCI = (1, 2, 3)
 NIVEL_BASE = 2
@@ -152,16 +152,31 @@ def write_polar_csv(filas: Iterable[Dict[str, Any]], ruta: str) -> None:
 
 def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[float],
               angulos_gci: Sequence[float], events: Optional[Events] = None,
-              urans_si_no_converge: bool = False, urans: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Lanza la polar y los estudios de malla, y repite en transitorio lo que no converja."""
+              urans_si_no_converge: bool = False, urans: Optional[Dict[str, Any]] = None,
+              continuar: bool = False) -> Dict[str, Any]:
+    """Lanza la polar y los estudios de malla, y repite en transitorio lo que no converja.
+
+    Con continuar, aprovecha los trabajos de una campana interrumpida que tengan la misma
+    etiqueta y los mismos parametros: los terminados no se repiten y los que siguen en su
+    maquina se retoman. La campana vive en la Mac: si esta se apaga, lo que corre sigue en
+    los servidores, pero lo pendiente no se envia hasta que se relance.
+    """
     d = Dispatcher(events, poll_s=8.0)
     d.set_machines(machines)
     params = case_params(**base)
+    previos = load_jobs() if continuar else []
+
+    def trabajo(q: Dict[str, Any], etiqueta: str) -> Job:
+        for j in reversed(previos):
+            if j.label == etiqueta and j.params == q and j.state not in (FALLIDO, DETENIDO):
+                return j
+        return new_job(q, label=etiqueta)
+
     puntos = {}
     estudios_trabajos: Dict[float, List[Job]] = {}
     pendientes: List[Job] = []
     for a in angulos_gci:
-        grupo = [new_job(q, label=f"gci_a{a:g}_n{q['grid_level']}")
+        grupo = [trabajo(q, f"gci_a{a:g}_n{q['grid_level']}")
                  for q in grid_study_cases(dict(params, aoa=float(a)))]
         pendientes += grupo
         estudios_trabajos[float(a)] = grupo
@@ -172,12 +187,17 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
         if ya is not None:
             puntos[float(a)] = ya
             continue
-        j = new_job(dict(params, aoa=float(a)), label=f"polar_a{a:g}")
+        j = trabajo(dict(params, aoa=float(a)), f"polar_a{a:g}")
         puntos[float(a)] = j
         pendientes.append(j)
+    # Lo que sigue en su maquina ocupa su sitio antes de repartir lo demas.
+    for j in pendientes:
+        if j.remote_dir and j.state not in FINALES:
+            d.attach(j)
     # Primero lo rapido: la polar queda lista aunque las mallas finas tarden horas.
     for j in sorted(pendientes, key=lambda j: int(j.params.get("grid_level", 2))):
-        d.submit(j)
+        if not j.remote_dir and j.state not in FINALES:
+            d.submit(j)
     d.wait()
 
     transitorios = {}

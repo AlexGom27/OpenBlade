@@ -136,3 +136,47 @@ def test_polar_sends_the_fine_meshes_last(monkeypatch):
     r = C.run_polar([], {"reynolds": 6e6}, [0.0, 4.0], [0.0])
     assert enviados == ["gci_a0_n1", "gci_a0_n2", "polar_a4", "gci_a0_n3"]
     assert [f["aoa"] for f in r["filas"]] == [0.0, 4.0]
+
+
+def test_an_interrupted_polar_goes_on_without_repeating_anything(monkeypatch):
+    import core.campaign as C
+    from core.jobs import CORRIENDO, FALLIDO, PENDIENTE, load_jobs
+
+    enviados, retomados = [], []
+
+    class Falso:
+        def __init__(self, *a, **k):
+            pass
+
+        def set_machines(self, m):
+            pass
+
+        def submit(self, j):
+            enviados.append(j.label)
+
+        def attach(self, j):
+            retomados.append(j.label)
+
+        def wait(self):
+            pass
+
+    monkeypatch.setattr(C, "Dispatcher", Falso)
+    C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0, 6.0, 8.0], [])
+    assert enviados == ["polar_a2", "polar_a4", "polar_a6", "polar_a8"]
+    por_etiqueta = {j.label: j for j in load_jobs()}
+    a2, a4, a6 = por_etiqueta["polar_a2"], por_etiqueta["polar_a4"], por_etiqueta["polar_a6"]
+    a2.state = TERMINADO
+    a2.save()
+    a4.state, a4.remote_dir = CORRIENDO, "openblade_jobs/x"
+    a4.save()
+    a6.state = FALLIDO
+    a6.save()
+    assert por_etiqueta["polar_a8"].state == PENDIENTE
+    enviados.clear()
+    total = len(load_jobs())
+    r = C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0, 6.0, 8.0], [], continuar=True)
+    assert retomados == ["polar_a4"]
+    assert enviados == ["polar_a6", "polar_a8"]
+    # Solo el que fallo tiene carpeta nueva
+    assert len(load_jobs()) == total + 1
+    assert [f["aoa"] for f in r["filas"]] == [2.0, 4.0, 6.0, 8.0]

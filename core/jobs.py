@@ -41,7 +41,7 @@ FINALES = (TERMINADO, FALLIDO, DETENIDO)
 
 LOCAL = "local"
 RC_DETENIDA = 143
-MAX_FALLOS = 180        # intentos sin respuesta antes de dar por perdido el seguimiento
+MAX_FALLOS = 2000       # intentos sin respuesta antes de dar por perdido el seguimiento: horas
 # Lo que define la malla. Con los mismos valores se reutiliza el mismo archivo:
 # dos paquetes del mismo caso llevan exactamente la misma malla.
 CLAVES_MALLA = ("profile_type", "naca", "chord", "aoa", "mesh_size_min", "mesh_size_max",

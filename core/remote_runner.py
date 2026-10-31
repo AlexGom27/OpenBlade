@@ -18,6 +18,9 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+            # Si la Mac se duerme o cambia de red, la conexion muere sin avisar: sin esto
+            # una descarga se queda colgada para siempre.
+            "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
             # Reutilizar la conexion: el avance se consulta cada pocos segundos.
             "-o", "ControlMaster=auto",
             "-o", "ControlPath=~/.ssh/openblade-%C",
@@ -25,6 +28,10 @@ SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
 JOBS_DIR = "openblade_jobs"
 INTENTOS_RSYNC = 5
 ESPERA_RSYNC = 5.0
+# Un calculo terminado no se pierde por un corte: la descarga insiste durante horas.
+INTENTOS_DESCARGA = 240
+ESPERA_MAX_RSYNC = 60.0
+TIEMPO_RSYNC = 120      # segundos sin transferir nada antes de dar la conexion por muerta
 EXCLUIR_BAJADA = ["processor*", "mesh.msh", "remote_job.py", "job.json",
                   "status.json", "job.log"]
 
@@ -189,16 +196,17 @@ class RemoteJob:
             raise RemoteError(r.stderr.strip()[-300:] or f"rc={r.returncode}")
         return r.stdout
 
-    def _rsync(self, origen: str, destino: str, excluir: List[str]) -> None:
+    def _rsync(self, origen: str, destino: str, excluir: List[str],
+               intentos: int = INTENTOS_RSYNC) -> None:
         """Copia con reintentos: un corte no debe perder un calculo ya hecho."""
-        cmd = ["rsync", "-az", "-e", "ssh " + " ".join(SSH_OPTS)]
+        cmd = ["rsync", "-az", f"--timeout={TIEMPO_RSYNC}", "-e", "ssh " + " ".join(SSH_OPTS)]
         cmd += [f"--exclude={e}" for e in excluir] + [origen, destino]
-        for intento in range(INTENTOS_RSYNC):
+        for intento in range(intentos):
             r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                                stdin=subprocess.DEVNULL)
             if r.returncode == 0:
                 return
-            time.sleep(ESPERA_RSYNC * (intento + 1))
+            time.sleep(min(ESPERA_RSYNC * (intento + 1), ESPERA_MAX_RSYNC))
         raise RemoteError("rsync: " + r.stderr.strip()[-300:])
 
     def subir(self, case_dir: str, msh_file: str, nproc: int, transient: bool,
@@ -307,7 +315,7 @@ class RemoteJob:
     def descargar(self, case_dir: str) -> None:
         """Trae los resultados al caso local, donde los lee 'Ver Resultados'."""
         self._rsync(f"{self.host}:{self.job_dir}/", case_dir.rstrip("/") + "/",
-                    EXCLUIR_BAJADA)
+                    EXCLUIR_BAJADA, INTENTOS_DESCARGA)
 
 
     def limpiar(self) -> None:

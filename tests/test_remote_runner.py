@@ -101,3 +101,25 @@ def test_tailscale_check_is_reported_with_its_link():
     assert _aviso_tailscale(salida) == "Tailscale pide autenticarse: abre https://login.tailscale.com/a/abc"
     assert _aviso_tailscale(salida.encode()) .endswith("/a/abc")
     assert _aviso_tailscale("otra cosa") == "" and _aviso_tailscale(None) == ""
+
+
+def test_a_dead_connection_cannot_hang_a_transfer_and_a_download_insists(monkeypatch):
+    """Con la Mac dormida o en otra red, rsync se quedaba colgado para siempre."""
+    from core import remote_runner as R
+    assert "ServerAliveInterval=15" in R.SSH_OPTS
+    llamadas = []
+
+    class Resultado:
+        returncode = 1
+        stderr = "sin red"
+
+    def falso(cmd, **k):
+        llamadas.append(cmd)
+        return Resultado()
+
+    monkeypatch.setattr(R.subprocess, "run", falso)
+    monkeypatch.setattr(R.time, "sleep", lambda s: None)
+    with pytest.raises(R.RemoteError):
+        R.RemoteJob("u@h", job_dir="jobs/x").descargar("/tmp/x")
+    assert len(llamadas) == R.INTENTOS_DESCARGA
+    assert any(a.startswith("--timeout=") for a in llamadas[0])

@@ -122,7 +122,8 @@ def cmd_polar(args: argparse.Namespace) -> int:
 
     angulos = [float(a) for a in args.angulos.split(",")]
     gci = [float(a) for a in args.gci.split(",")] if args.gci else []
-    r = run_polar(_maquinas(args.maquinas), _ajustes(args.ajustes), angulos, gci, _Consola(), args.urans)
+    r = run_polar(_maquinas(args.maquinas), _ajustes(args.ajustes), angulos, gci, _Consola(), args.urans,
+                  continuar=args.continuar)
     print("\nFigura:", write_polar_report(r, args.salida))
     for f in r["filas"]:
         cl = "" if f["cl"] is None else f"Cl {f['cl']:.4f} ± {f['banda_cl'] or 0:.4f}  Cd {f['cd']:.5f} ± {f['banda_cd'] or 0:.5f}"
@@ -158,6 +159,8 @@ def main(argv: List[str] = None) -> int:
     polar.add_argument("--angulos", required=True, help="angulos separados por comas")
     polar.add_argument("--gci", default="", help="angulos con estudio de malla")
     polar.add_argument("--urans", action="store_true", help="repite en transitorio lo que no converja")
+    polar.add_argument("--continuar", action="store_true",
+                       help="aprovecha lo terminado de una campana interrumpida y retoma lo que sigue corriendo")
     polar.add_argument("--salida", default="polar", help="carpeta de resultados")
     polar.add_argument("ajustes", nargs="*", help="clave=valor sobre los valores por defecto")
     polar.set_defaults(fn=cmd_polar)
