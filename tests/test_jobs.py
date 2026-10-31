@@ -328,3 +328,50 @@ def test_local_job_runs_the_same_script_natively(tmp_path):
         time.sleep(0.1)
     assert est["state"] == "failed"
     assert est["ficha_sha256"] == job.ficha_sha256
+
+
+def test_without_network_a_job_waits_instead_of_failing(monkeypatch):
+    """Un corte de red dejo nueve paquetes de la cola como fallidos en pocos minutos."""
+    from core.remote_runner import RemoteError
+
+    intentos = []
+
+    def subir():
+        intentos.append(1)
+        if len(intentos) < 4:
+            raise RemoteError("No se pudo crear el trabajo: ssh: connect to host h port 22: Operation timed out")
+
+    avisos = []
+    assert J.insiste(subir, avisos.append, lambda: False, poll_s=0)
+    assert len(intentos) == 4 and len(avisos) == 1 and "reintenta" in avisos[0]
+
+    # Sin permiso no sirve esperar
+    def sin_permiso():
+        raise RemoteError("No se pudo crear el trabajo: Permission denied (publickey)")
+
+    with pytest.raises(RemoteError, match="Permission denied"):
+        J.insiste(sin_permiso, avisos.append, lambda: False, poll_s=0)
+
+    # Cerrar la ventana mientras espera no lo da por fallido
+    assert J.insiste(subir, avisos.append, lambda: True, poll_s=0) is False
+
+
+def test_retrying_the_upload_does_not_trip_on_its_own_folder(monkeypatch, tmp_path):
+    from core import remote_runner as R
+
+    class Salida:
+        def __init__(self, rc, err=""):
+            self.returncode, self.stderr, self.stdout = rc, err, ""
+
+    respuestas = [Salida(255, "Connection closed"), Salida(1, "mkdir: cannot create: File exists")]
+    monkeypatch.setattr(R, "_ssh", lambda *a, **k: respuestas.pop(0))
+    trabajo = R.RemoteJob("u@h", job_dir="jobs/x")
+    with pytest.raises(R.RemoteError, match="Connection closed"):
+        trabajo.subir(str(tmp_path), "/no/existe", 2, False, {})
+    # El segundo intento pasa de crear la carpeta y llega hasta copiar la malla
+    with pytest.raises(FileNotFoundError):
+        trabajo.subir(str(tmp_path), "/no/existe", 2, False, {})
+    # Una carpeta que ya existia antes de este trabajo no es suya
+    respuestas.append(Salida(1, "mkdir: cannot create: File exists"))
+    with pytest.raises(R.RemoteError, match="File exists"):
+        R.RemoteJob("u@h", job_dir="jobs/y").subir(str(tmp_path), "/no/existe", 2, False, {})

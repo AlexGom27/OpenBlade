@@ -305,6 +305,42 @@ class _Vigilancia:
         return abs(reciente - previo) < self.TOL_DERIVA_CL * max(abs(media_cl), 0.1)
 
 
+# Lo que dice ssh o rsync cuando falla la conexion, no el trabajo
+CORTES = ("timed out", "connection refused", "connection closed", "connection reset", "no route to host",
+          "network is", "could not resolve", "unexpected end of file", "broken pipe", "mux_client",
+          "tailscale pide")
+
+
+def es_corte(e: Exception) -> bool:
+    """¿El fallo es de la conexion? Sin contrasena o sin espacio no sirve reintentar."""
+    if isinstance(e, subprocess.TimeoutExpired):
+        return True
+    return isinstance(e, RemoteError) and any(c in str(e).lower() for c in CORTES)
+
+
+def insiste(accion: Callable[[], None], avisar: Callable[[str], None], soltar: Callable[[], bool],
+            poll_s: float = 4.0) -> bool:
+    """Repite una accion hasta que haya conexion: sin red, un trabajo espera, no falla.
+
+    Devuelve False si se pidio dejar de seguirlo antes de conseguirlo.
+    """
+    avisado = ""
+    for _ in range(MAX_FALLOS):
+        if soltar():
+            return False
+        try:
+            accion()
+            return True
+        except (RemoteError, subprocess.TimeoutExpired) as e:
+            if not es_corte(e):
+                raise
+            if str(e) != avisado:
+                avisado = str(e)
+                avisar(f"⚠️ Sin respuesta de la máquina; se reintenta. {e}")
+        time.sleep(poll_s)
+    raise RemoteError("Sin conexión con la máquina")
+
+
 def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], None],
            should_stop: Callable[[], bool], poll_s: float = 4.0,
            on_notice: Callable[[str], None] = lambda _: None) -> Optional[Dict[str, Any]]:
@@ -374,8 +410,12 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
             registrar(runner)
             if job.host != LOCAL:
                 ev.log(job, f"📤 Subiendo a {job.host} ({job.nproc} procesos)...")
-            runner.subir(job.case_dir, msh, job.nproc, transient, job.params)
-            runner.lanzar()
+            aviso = lambda t: ev.log(job, t)
+            if not insiste(lambda: runner.subir(job.case_dir, msh, job.nproc, transient, job.params),
+                           aviso, should_detach, poll_s):
+                return
+            if not insiste(runner.lanzar, aviso, should_detach, poll_s):
+                return
             job.remote_dir = runner.job_dir
         else:
             runner = make_runner(job)

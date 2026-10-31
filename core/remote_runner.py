@@ -214,10 +214,13 @@ class RemoteJob:
         """Sube el paquete con su ficha, sin lanzarlo."""
         from core.package import FICHA, build_ficha, sha256_file
 
-        # mkdir sin -p: si la carpeta ya existe es de otro trabajo y no se toca.
+        # mkdir sin -p: si la carpeta ya existe es de otro trabajo y no se toca. Salvo que
+        # sea de este intento anterior, que pudo crearla antes de cortarse la conexion.
         padre = os.path.dirname(self.job_dir)
+        reintento = getattr(self, "_carpeta_pedida", False)
+        self._carpeta_pedida = True
         r = _ssh(self.host, f"mkdir -p ~/{padre} && mkdir ~/{self.job_dir}")
-        if r.returncode != 0:
+        if r.returncode != 0 and not (reintento and "File exists" in r.stderr):
             raise RemoteError(f"No se pudo crear el trabajo: {r.stderr.strip()[-200:]}")
 
         malla = os.path.join(case_dir, "mesh.msh")
@@ -241,7 +244,10 @@ class RemoteJob:
     def lanzar(self) -> None:
         # Los parentesis importan: un "cd && x &" dejaria un subshell con la
         # salida conectada al canal y ssh no volveria hasta que acabe el trabajo.
-        self._run("(setsid nohup python3 remote_job.py > job.log 2>&1 < /dev/null &)",
+        # set -C crea job.log solo si no existe: si la conexion se corta justo aqui y se
+        # reintenta, el calculo no se lanza dos veces.
+        self._run("if (set -C; : > job.log) 2>/dev/null; then "
+                  "(setsid nohup python3 remote_job.py >> job.log 2>&1 < /dev/null &); fi",
                   timeout=30)
 
     def subir_y_lanzar(self, case_dir: str, msh_file: str, nproc: int, transient: bool,

@@ -123,3 +123,23 @@ def test_a_dead_connection_cannot_hang_a_transfer_and_a_download_insists(monkeyp
         R.RemoteJob("u@h", job_dir="jobs/x").descargar("/tmp/x")
     assert len(llamadas) == R.INTENTOS_DESCARGA
     assert any(a.startswith("--timeout=") for a in llamadas[0])
+
+
+def test_launching_twice_after_a_cut_starts_one_calculation_only(tmp_path):
+    """El mismo comando que se envia al servidor, ejecutado aqui con otro programa."""
+    import subprocess
+    (tmp_path / "remote_job.py").write_text("print('calculo')\n")
+    llamadas = []
+
+    class Probe(RemoteJob):
+        def _run(self, comando, timeout=30):
+            llamadas.append(comando)
+            subprocess.run(["sh", "-c", comando.replace("setsid nohup python3 remote_job.py", "echo lanzado")],
+                           cwd=tmp_path, check=True)
+
+    t = Probe("u@h", job_dir="jobs/x")
+    t.lanzar()
+    t.lanzar()
+    import time
+    time.sleep(0.3)
+    assert (tmp_path / "job.log").read_text().count("lanzado") == 1
