@@ -461,3 +461,38 @@ def test_a_finished_job_does_not_wait_for_a_log_that_cannot_arrive():
 
     est = follow(Lento([{"state": "done", "rc": 0}]), lambda e: None, lambda p: None, lambda: False, poll_s=0)
     assert est["state"] == "done"
+
+
+def test_a_failed_cleanup_does_not_fail_a_finished_job(monkeypatch):
+    import subprocess
+
+    class Trabajo(_RunnerFalso):
+        job_dir = "openblade_jobs/x"
+        offset = 0
+
+        def subir(self, *a):
+            pass
+
+        def lanzar(self):
+            pass
+
+        def descargar(self, carpeta):
+            pass
+
+        def limpiar(self):
+            raise subprocess.TimeoutExpired("ssh", 120)
+
+    monkeypatch.setattr(J, "make_runner", lambda job: Trabajo([{"state": "done", "rc": 0, "step": "fin"}]))
+    monkeypatch.setattr(J, "ensure_mesh", lambda *a: "/no/importa")
+    monkeypatch.setattr("core.solve_script.configure_case", lambda *a: False)
+    monkeypatch.setattr("core.verdict.analyze_case", lambda *a: {"verdict": {"state": "CONVERGIDO"}})
+    trabajo = new_job(case_params(), "a@h", 2)
+    avisos = []
+
+    class Registro(Events):
+        def log(self, job, texto):
+            avisos.append(texto)
+
+    J.run_job(trabajo, Registro(), poll_s=0)
+    assert trabajo.state == TERMINADO and trabajo.analysis["verdict"]["state"] == "CONVERGIDO"
+    assert any("temporales" in a for a in avisos)

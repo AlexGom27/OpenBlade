@@ -484,7 +484,11 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
         job.analysis = analyze_case(job.case_dir, job.transient, job.rc, job.host,
                                     job.remote_dir, job.error)
         job.finished = time.time()
-        runner.limpiar()
+        # Solo ahorra disco en el servidor: si falla, el resultado ya esta aqui y vale.
+        try:
+            runner.limpiar()
+        except (RemoteError, subprocess.TimeoutExpired, OSError) as e:
+            ev.log(job, f"⚠️ No se borraron los temporales en la máquina: {str(e)[:120]}")
         cambia(DETENIDO if job.rc == RC_DETENIDA else FALLIDO if job.rc else TERMINADO)
     except Exception as e:  # noqa: BLE001
         # Cualquier fallo termina el trabajo: sin esto, un error inesperado lo dejaba
