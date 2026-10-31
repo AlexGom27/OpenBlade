@@ -163,6 +163,16 @@ def test_bench_asks_first_and_then_sends_its_packages(window):
     assert enviar.call_args_list[0].args[0].group.startswith("banco_")
 
 
+def test_project_file_restores_the_panel(window, tmp_path):
+    import json
+    ruta = tmp_path / "p.obp"
+    ruta.write_text(json.dumps({"version": "2.0", "params": {"aoa": 7.0, "grid_level": 1}}))
+    window.load_project_file(str(ruta))
+    p = window.input_panel.get_params()
+    assert p["aoa"] == 7.0 and p["grid_level"] == 1
+    window.input_panel.set_params({"aoa": 0.0, "grid_level": 2})
+
+
 def test_closing_keeps_the_results_of_the_case(window, tmp_path):
     """Cerrar la ventana vaciaba postProcessing y los tiempos del caso."""
     caso = tmp_path / "caso"

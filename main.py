@@ -11,6 +11,9 @@ def main():
         apply_theme(app)
         
         window = MainWindow()
+        # python3 main.py proyecto.obp abre ese proyecto
+        if len(sys.argv) > 1 and sys.argv[1].endswith(".obp"):
+            window.load_project_file(sys.argv[1])
         window.show()
         window.raise_()
         window.activateWindow()

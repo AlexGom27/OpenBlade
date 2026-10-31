@@ -1156,8 +1156,10 @@ class MainWindow(QMainWindow):
 
     def load_project(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(self, "Abrir Proyecto", "", "OpenBlade (*.obp)")
-        if not filename:
-            return
+        if filename:
+            self.load_project_file(filename)
+
+    def load_project_file(self, filename: str) -> None:
         try:
             with open(filename, 'r', encoding='utf-8') as f:
                 project_data = json.load(f)
