@@ -59,6 +59,16 @@ def test_polar_applies_interpolated_band_and_hides_what_did_not_converge():
     assert fuera[0]["cl"] == 1.2 and fuera[0]["banda_cl"] is None and fuera[0]["banda_cd"] is None
 
 
+def test_a_point_that_barely_oscillates_gives_its_mean_marked_and_without_band():
+    estudio = [{"aoa": 0.0, "cl": {"gci_media": 0.01}, "cd": {"gci_media": 0.02}},
+               {"aoa": 20.0, "cl": {"gci_media": 0.03}, "cd": {"gci_media": 0.06}}]
+    oscila = trabajo(aoa=16.0, estado="NO CONVERGIDO", cl=1.558, cd=0.0233)
+    oscila.analysis["verdict"]["oscila"] = True
+    fila = polar_table([oscila], estudio)[0]
+    assert fila["cl"] == 1.558 and fila["oscila"] and fila["banda_cl"] is None
+    assert not usable(oscila)
+
+
 def test_results_are_saved(tmp_path):
     filas = polar_table([trabajo(aoa=0.0, cl=0.0), trabajo(aoa=4.0)])
     write_polar_csv(filas, str(tmp_path / "p.csv"))

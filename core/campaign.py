@@ -122,6 +122,8 @@ def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = (),
     """Una fila por angulo, con el veredicto y la banda de malla de cada coeficiente.
 
     La polar se calcula en la malla media, asi que por defecto lleva la banda de la media.
+    Un punto que oscila poco con media estable da su media, marcada: sigue sin convergir,
+    pero cerca de la perdida es lo que hay. Lo que no convergio de otro modo no da numeros.
     """
     filas = []
     for j in sorted(puntos, key=lambda x: float(x.params.get("aoa", 0.0))):
@@ -130,10 +132,12 @@ def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = (),
         fila = {"aoa": a, "veredicto": v.get("state"), "razon": v.get("reason"), "transitorio": j.transient,
                 "cl": None, "cl_amp": None, "cd": None, "cd_amp": None, "cm": None,
                 "banda_cl": None, "banda_cd": None, "periodo": v.get("period"), "trabajo": j.id,
+                "oscila": bool(v.get("oscila")),
                 "maquina": j.host, "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean")}
+        if usable(j) or fila["oscila"]:
+            fila.update(cl=v["cl"], cl_amp=v["cl_amp"], cd=v["cd"], cd_amp=v["cd_amp"], cm=v["cm"])
         if usable(j):
             rel_cl, rel_cd = _bandas(estudios, "cl", a, nivel_gci), _bandas(estudios, "cd", a, nivel_gci)
-            fila.update(cl=v["cl"], cl_amp=v["cl_amp"], cd=v["cd"], cd_amp=v["cd_amp"], cm=v["cm"])
             if rel_cl is not None:
                 fila["banda_cl"] = rel_cl * abs(v["cl"])
             if rel_cd is not None:
@@ -143,7 +147,7 @@ def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = (),
 
 
 def write_polar_csv(filas: Iterable[Dict[str, Any]], ruta: str) -> None:
-    columnas = ["aoa", "veredicto", "transitorio", "cl", "banda_cl", "cl_amp", "cd", "banda_cd", "cd_amp", "cm",
+    columnas = ["aoa", "veredicto", "oscila", "transitorio", "cl", "banda_cl", "cl_amp", "cd", "banda_cd", "cd_amp", "cm",
                 "yplus", "maquina", "trabajo", "razon"]
     with open(ruta, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=columnas, extrasaction="ignore")
@@ -247,6 +251,10 @@ def write_polar_report(resultado: Dict[str, Any], carpeta: str) -> str:
                     label="OpenBlade (SST)")
         a2.errorbar([f["cd"] for f in filas], [f["cl"] for f in filas], xerr=[f["banda_cd"] or 0 for f in filas],
                     yerr=[f["banda_cl"] or 0 for f in filas], fmt="o-", capsize=3, label="OpenBlade (SST)")
+        # Hueco: oscila con media estable, no ha convergido.
+        huecos = [f for f in filas if f.get("oscila")]
+        a1.plot([f["aoa"] for f in huecos], [f["cl"] for f in huecos], "o", mfc="white", mec="tab:blue", zorder=5)
+        a2.plot([f["cd"] for f in huecos], [f["cl"] for f in huecos], "o", mfc="white", mec="tab:blue", zorder=5)
     base = resultado.get("base", {})
     if str(base.get("naca", "0012")) == "0012" and abs(float(base.get("reynolds", 0)) - 6e6) < 1:
         ref = np.array([ladson(a) for a in np.arange(0.0, 17.1, 1.0)])

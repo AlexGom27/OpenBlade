@@ -133,6 +133,7 @@ def cmd_polar(args: argparse.Namespace) -> int:
     print("\nFigura:", write_polar_report(r, args.salida))
     for f in r["filas"]:
         cl = "" if f["cl"] is None else f"Cl {f['cl']:.4f} ± {f['banda_cl'] or 0:.4f}  Cd {f['cd']:.5f} ± {f['banda_cd'] or 0:.5f}"
+        cl += "  (oscila con media estable)" if f.get("oscila") else ""
         print(f"  α={f['aoa']:6.2f}  {str(f['veredicto']):14s} {cl}")
     return 0
 
