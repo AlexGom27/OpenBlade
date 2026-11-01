@@ -27,6 +27,7 @@ NIVEL_BASE = 2
 NIVEL_MAX = 4
 NIVELES = {0: "113 x 33", 1: "225 x 65", 2: "449 x 129", 3: "897 x 257", 4: "1793 x 513"}
 # Separacion en el nivel 2, en cuerdas: como en la malla oficial 449 x 129.
+PRIMERA_CELDA_MAX = 0.005
 DS_MORRO = 2.0e-4
 DS_SALIDA = 2.0e-3
 ALTURA_NORMAL = 0.15    # hasta aqui la linea sale recta y normal a la pared
@@ -303,9 +304,14 @@ def contour_from_params(params: Dict) -> Tuple[np.ndarray, np.ndarray, np.ndarra
 
 
 def first_cell_of(params: Dict) -> float:
-    """Primera celda del nivel 2, en cuerdas, para el y+ pedido a este Reynolds."""
+    """Primera celda del nivel 2, en cuerdas, para el y+ pedido a este Reynolds.
+
+    A Reynolds bajos la formula, que es turbulenta, pide una celda tan alta como la capa
+    limite: a Re = 1000 da 0.014 cuerdas. Se acota, y el y+ medido dira lo que salio.
+    """
     from core.yplus import first_cell_for_yplus
-    return first_cell_for_yplus(float(params.get("yplus_target", 0.5)), float(params.get("reynolds", 1e6)))
+    altura = first_cell_for_yplus(float(params.get("yplus_target", 0.5)), float(params.get("reynolds", 1e6)))
+    return min(altura, PRIMERA_CELDA_MAX)
 
 
 def first_cell_at_level(params: Dict) -> float:

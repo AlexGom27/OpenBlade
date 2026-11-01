@@ -180,3 +180,15 @@ def test_transient_notice_warns_when_the_run_would_never_end():
     p = case_params(reynolds=6e6, regime="Transitorio (pimpleFoam)", end_time="0.5")
     assert "Es muy largo" in transient_notice(dict(p, max_co=2.0))
     assert "Es muy largo" not in transient_notice(p)
+
+
+@pytest.mark.parametrize("reynolds, yplus, nivel", [(1000.0, 0.5, 1), (1000.0, 0.5, 2), (2000.0, 0.5, 0), (1e5, 60.0, 2)])
+def test_low_reynolds_gives_a_valid_mesh_instead_of_an_error(reynolds, yplus, nivel):
+    """A Re = 1000 la malla por defecto fallaba: la formula pedia una celda fuera de rango."""
+    from core.cgrid import PRIMERA_CELDA_MAX, contour_from_params, generate_cgrid
+    from core.defaults import case_params
+    p = case_params(reynolds=reynolds, yplus_target=yplus, grid_level=nivel)
+    assert first_cell_of(p) <= PRIMERA_CELDA_MAX
+    x, y = generate_cgrid(contour_from_params(p), first_cell_of(p), nivel, 200.0, 0.0)
+    a = (x[1:, :-1] - x[:-1, :-1]) * (y[:-1, 1:] - y[:-1, :-1]) - (y[1:, :-1] - y[:-1, :-1]) * (x[:-1, 1:] - x[:-1, :-1])
+    assert (a > 0).all() or (a < 0).all()

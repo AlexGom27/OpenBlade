@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from typing import Optional
 
 from core.package import read_ficha, sha256_file
@@ -54,4 +55,8 @@ def start_from(origen: str, case_dir: str, msh_file: str) -> str:
             raise ValueError(f"No se encontró internalField en {campo}")
         with open(ruta, "w") as f:
             f.write(_INTERIOR.sub(lambda _: hallado.group(0), texto, count=1))
+    # Sin el flujo de esa corrida, OpenFOAM lo interpola de U y no conserva masa de partida.
+    flujo = os.path.join(tiempo, "phi")
+    if os.path.exists(flujo):
+        shutil.copy2(flujo, os.path.join(destino, "phi"))
     return os.path.basename(tiempo)
