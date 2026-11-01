@@ -500,3 +500,36 @@ def test_a_failed_cleanup_does_not_fail_a_finished_job(monkeypatch):
     J.run_job(trabajo, Registro(), poll_s=0)
     assert trabajo.state == TERMINADO and trabajo.analysis["verdict"]["state"] == "CONVERGIDO"
     assert any("temporales" in a for a in avisos)
+
+
+def test_a_job_waits_for_the_one_it_starts_from(corrida_falsa, monkeypatch):
+    monkeypatch.setattr(J, "has_start_field", lambda job: True)
+    d = Dispatcher(poll_s=0)
+    d.set_machines([Machine("a@h", 4, 2)])
+    grueso, fino = new_job(case_params(aoa=1.0), "a@h", 4), new_job(case_params(aoa=2.0), "a@h", 4)
+    fino.despues = grueso.id
+    d.submit(grueso)
+    d.submit(fino)
+    time.sleep(0.2)
+    # Hay sitio para los dos, pero el fino espera
+    assert grueso.state == CORRIENDO and fino.state == PENDIENTE
+    corrida_falsa["soltar"].set()
+    assert d.wait(5)
+    assert fino.params["campo_inicial"] == grueso.case_dir
+    # Si el anterior no deja un campo util, arranca en frio
+    monkeypatch.setattr(J, "has_start_field", lambda job: False)
+    otro = new_job(case_params(aoa=3.0), "a@h", 4)
+    otro.despues = grueso.id
+    d.submit(otro)
+    assert d.wait(5)
+    assert "campo_inicial" not in otro.params
+    # Un anterior ya terminado en otra sesion tambien cuenta
+    monkeypatch.setattr(J, "has_start_field", lambda job: True)
+    nuevo = Dispatcher(poll_s=0)
+    nuevo.set_machines([Machine("a@h", 4, 1)])
+    nuevo.register(grueso)
+    siguiente = new_job(case_params(aoa=4.0), "a@h", 4)
+    siguiente.despues = grueso.id
+    nuevo.submit(siguiente)
+    assert nuevo.wait(5)
+    assert siguiente.params["campo_inicial"] == grueso.case_dir

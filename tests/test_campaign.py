@@ -146,10 +146,17 @@ def test_polar_sends_the_fine_meshes_last(monkeypatch):
         def wait(self):
             pass
 
+        def register(self, j):
+            pass
+
     monkeypatch.setattr(C, "Dispatcher", Falso)
     r = C.run_polar([], {"reynolds": 6e6}, [0.0, 4.0], [0.0])
     assert enviados == ["gci_a0_n1", "gci_a0_n2", "polar_a4", "gci_a0_n3"]
     assert [f["aoa"] for f in r["filas"]] == [0.0, 4.0]
+    # Cada nivel de un estudio arranca del anterior
+    trabajos = {j.label: j for j in C.load_jobs()}
+    assert trabajos["gci_a0_n3"].despues == trabajos["gci_a0_n2"].id
+    assert trabajos["gci_a0_n2"].despues == trabajos["gci_a0_n1"].id
 
 
 def test_an_interrupted_polar_goes_on_without_repeating_anything(monkeypatch):
@@ -172,6 +179,9 @@ def test_an_interrupted_polar_goes_on_without_repeating_anything(monkeypatch):
             retomados.append(j.label)
 
         def wait(self):
+            pass
+
+        def register(self, j):
             pass
 
     monkeypatch.setattr(C, "Dispatcher", Falso)
@@ -225,11 +235,19 @@ def test_a_point_that_blows_up_at_the_start_is_rescued_from_its_nearest_neighbor
         def wait(self):
             pass
 
+        def register(self, j):
+            pass
+
     monkeypatch.setattr(C, "Dispatcher", Falso)
-    r = C.run_polar([], {"reynolds": 6e6}, [4.0, 12.0, 15.0], [])
+    r = C.run_polar([], {"reynolds": 6e6}, [4.0, 14.0, 15.0], [])
     rescate = enviados[-1]
     assert rescate.label == "polar_a15_vecino"
-    a12 = next(j for j in enviados if j.label == "polar_a12")
-    assert rescate.params["campo_inicial"] == a12.case_dir
+    a14 = next(j for j in enviados if j.label == "polar_a14")
+    assert rescate.params["campo_inicial"] == a14.case_dir
     fila = next(f for f in r["filas"] if f["aoa"] == 15.0)
     assert fila["veredicto"] == "CONVERGIDO" and fila["trabajo"] == rescate.id
+    # Un vecino lejano no sirve: a 5 grados quedo atrapada en un ciclo
+    enviados.clear()
+    r = C.run_polar([], {"reynolds": 6e6}, [4.0, 15.0], [])
+    assert [j.label for j in enviados] == ["polar_a4", "polar_a15"]
+    assert next(f for f in r["filas"] if f["aoa"] == 15.0)["veredicto"] == "DIVERGIDO"

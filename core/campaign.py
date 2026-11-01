@@ -47,6 +47,17 @@ def usable(job: Job) -> bool:
     return verdict_of(job).get("state") == "CONVERGIDO" and verdict_of(job).get("cl") is not None
 
 
+def chain_levels(grupo: Sequence[Job]) -> None:
+    """Cada nivel arranca de la solucion del anterior, en lugar del flujo potencial.
+
+    Medido a 10 grados en 897 x 257: Cl 1.0628 y Cd 0.01197 en 7000 iteraciones, frente a
+    1.0619 y 0.01200 en 34 000. A 15 grados, en frio revienta; asi da 1.4969 y 0.02076.
+    """
+    for grueso, fino in zip(grupo, grupo[1:]):
+        fino.despues = grueso.id
+        fino.save()
+
+
 def grid_study_cases(params: Dict[str, Any], niveles: Sequence[int] = NIVELES_GCI) -> List[Dict[str, Any]]:
     """Los paquetes de un estudio de malla, del nivel mas grueso al mas fino.
 
@@ -162,11 +173,18 @@ def write_polar_csv(filas: Iterable[Dict[str, Any]], ruta: str) -> None:
             w.writerow(fila)
 
 
+# Medido a 15 grados en 897 x 257: desde 10 grados queda atrapada en un ciclo grande
+# (Cl de 1.28 a 1.43); en 449 x 129, desde 14 grados da lo mismo que en frio.
+SALTO_MAX = 2.0
+
+
 def _neighbor(trabajos: Sequence[Job], j: Job) -> Optional[Job]:
-    """El trabajo convergido de angulo mas cercano en la misma malla."""
+    """El trabajo convergido de angulo mas cercano en la misma malla, si esta cerca."""
     malla = mesh_key(j.params)
-    candidatos = [k for k in trabajos if k is not j and usable(k) and mesh_key(k.params) == malla]
-    return min(candidatos, key=lambda k: abs(float(k.params["aoa"]) - float(j.params["aoa"])), default=None)
+    a = float(j.params["aoa"])
+    candidatos = [k for k in trabajos if k is not j and usable(k) and mesh_key(k.params) == malla
+                  and abs(float(k.params["aoa"]) - a) <= SALTO_MAX]
+    return min(candidatos, key=lambda k: abs(float(k.params["aoa"]) - a), default=None)
 
 
 def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[float],
@@ -187,7 +205,8 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
 
     def trabajo(q: Dict[str, Any], etiqueta: str) -> Job:
         for j in reversed(previos):
-            if j.label != etiqueta or j.params != q:
+            # De que campo arranco no cambia que caso es.
+            if j.label != etiqueta or {**j.params, "campo_inicial": None} != {**q, "campo_inicial": None}:
                 continue
             # El calculo termino bien y solo fallo traerlo: no hay que repetirlo.
             if j.state == FALLIDO and j.remote_dir and j.rc == 0 and not j.analysis:
@@ -203,6 +222,8 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
         for j in trabajos:
             if j.remote_dir and j.state not in FINALES:
                 d.attach(j)
+            elif j.state in FINALES:
+                d.register(j)
         # Primero lo rapido: la polar queda lista aunque las mallas finas tarden horas.
         for j in sorted(trabajos, key=lambda j: int(j.params.get("grid_level", 2))):
             if not j.remote_dir and j.state not in FINALES:
@@ -214,6 +235,7 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
     for a in angulos_gci:
         grupo = [trabajo(q, f"gci_a{a:g}_n{q['grid_level']}")
                  for q in grid_study_cases(dict(params, aoa=float(a)))]
+        chain_levels(grupo)
         pendientes += grupo
         estudios_trabajos[float(a)] = grupo
     nivel_polar = int(params.get("grid_level", 2))

@@ -80,6 +80,7 @@ class Job:
     created: float = field(default_factory=time.time)
     started: Optional[float] = None
     finished: Optional[float] = None
+    despues: str = ""       # trabajo que debe terminar antes: este arranca de su campo si se puede
 
     @property
     def folder(self) -> str:
@@ -504,6 +505,14 @@ class Machine:
     reparto: bool = True    # recibe paquetes sin maquina fija
 
 
+def has_start_field(job: Job) -> bool:
+    """¿Su resultado sirve para que otro arranque de el? Una corrida reventada no."""
+    from core.initial_field import latest_fields
+
+    estado = ((job.analysis or {}).get("verdict") or {}).get("state")
+    return estado in ("CONVERGIDO", "NO CONVERGIDO") and latest_fields(job.case_dir) is not None
+
+
 class Dispatcher:
     """Reparte los trabajos pendientes entre las maquinas."""
 
@@ -525,6 +534,11 @@ class Dispatcher:
         with self._candado:
             self.machines = {m.host: m for m in machines}
         self._tick()
+
+    def register(self, job: Job) -> None:
+        """Da a conocer un trabajo ya terminado, del que otro puede arrancar."""
+        with self._candado:
+            self.jobs[job.id] = job
 
     def submit(self, job: Job) -> None:
         with self._candado:
@@ -555,9 +569,14 @@ class Dispatcher:
         with self._candado:
             for identificador in list(self._cola):
                 job = self.jobs[identificador]
+                previo = self.jobs.get(job.despues)
+                if previo is not None and previo.state not in FINALES:
+                    continue
                 host = self._maquina_libre(job)
                 if host is None:
                     continue
+                if previo is not None and has_start_field(previo):
+                    job.params["campo_inicial"] = previo.case_dir
                 job.host = host
                 if not job.nproc:
                     m = self.machines.get(host)

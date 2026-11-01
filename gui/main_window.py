@@ -586,11 +586,15 @@ class MainWindow(QMainWindow):
     def _run_grid_study(self, p: Dict[str, Any], destino) -> None:
         """Tres niveles anidados del mismo caso; al terminar, el GCI de Cl y Cd."""
         import secrets
-        from core.campaign import grid_study_cases
+        from core.campaign import chain_levels, grid_study_cases
         grupo = f"malla_{secrets.token_hex(3)}"
-        self.log(f"📐 Estudio de malla a α = {p.get('aoa', 0)}°: 225×65, 449×129 y 897×257")
-        for q in grid_study_cases(dict(p, analysis_mode="Punto Único")):
-            self._lanzar(new_job(q, *destino, group=grupo, label=f"malla_n{q['grid_level']}"))
+        self.log(f"📐 Estudio de malla a α = {p.get('aoa', 0)}°: 225×65, 449×129 y 897×257, "
+                 "cada una desde la solución de la anterior")
+        trabajos = [new_job(q, *destino, group=grupo, label=f"malla_n{q['grid_level']}")
+                    for q in grid_study_cases(dict(p, analysis_mode="Punto Único"))]
+        chain_levels(trabajos)
+        for trabajo in trabajos:
+            self._lanzar(trabajo)
 
     def on_run_bench(self) -> None:
         """Lanza el banco de validacion con las maquinas marcadas."""
