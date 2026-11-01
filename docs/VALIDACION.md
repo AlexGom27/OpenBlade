@@ -6,11 +6,11 @@ Todo lo de este documento salió del programa: malla y caso generados en la Mac,
 
 | Qué | Estado |
 |---|---|
-| Cl del NACA 0012, Re=6e6, de 4° a 17° | A menos de 1.7 % de Ladson, y de 1.2 % de 6° a 17° |
-| Cd del NACA 0012 en la malla por defecto | De −4.1 a +4.0 % frente a Ladson hasta 12°; de +10 a +15 % de 14° a 17° |
-| Cd frente a NASA TMR, malla extrapolada | −1.0 % a 10° y +2.1 % a 15° |
+| Cl del NACA 0012, Re=6e6, de 4° a 17° | A menos de 1.7 % de Ladson, y de 1.2 % de 6° a 17°. A 2° difiere 0.010 (+4.9 %) |
+| Cd del NACA 0012 en la malla por defecto | De −4.1 a +4.0 % frente a Ladson hasta 12°, dentro de su banda de malla (de ±7 a ±13 %); de +10 a +15 % de 14° a 17° |
+| Cd frente a NASA TMR, malla extrapolada | −1.0 % a 10°. A 15°, +2.1 %, con un orden bajo que lo hace poco firme (§5) |
 | Pérdida | **No la predice.** Ladson cae a Cl≈1.0 a 18°; SST da 1.60 |
-| Reproducibilidad entre máquinas | Mismo paquete y procesos, fuerzas idénticas byte a byte en Local (Docker) y en un servidor |
+| Reproducibilidad entre máquinas | Mismo paquete y procesos, fuerzas idénticas byte a byte en Local (Docker) y en un servidor, en una prueba corta de 300 iteraciones |
 | Perfil con curvatura (NACA 4412) | Comprobado el signo de Cm y Cp frente a experimento; sin tolerancias |
 | Transitorio | Estable en un caso laminar. A Re alto con y+<1 **no está validado** (§6) |
 | Mallas oficiales de TMR | 449×129 no es practicable; 225×65 corre pero Cd oscila (§5) |
@@ -78,7 +78,7 @@ Cada coeficiente con tres niveles anidados, r=2 y factor de seguridad 1.25; si e
 | 15 | Cl | 1.4794 | 1.5010 | 1.4969 | oscilatoria | | ±4.3 % | 1.5092 |
 | 15 | Cd | 0.01864 | 0.01989 | 0.02076 | orden 0.53 | 0.02274 | ±11.9 % | 0.02227 |
 
-**El Cd bajo frente a TMR era de la malla.** En el nivel 2 está 8.4 % por debajo a 10° y 10.7 % a 15°. Extrapolado queda a −1.0 % y +2.1 %, sin invocar el modelo ni la compresibilidad. Para Cd a menos de 5 % de TMR hace falta el nivel 3; para Cl basta el nivel 2.
+**El Cd bajo frente a TMR es sobre todo de la malla.** En el nivel 2 está 8.4 % por debajo a 10° y 10.7 % a 15°. En el nivel 3, 4.0 % y 6.8 %. Extrapolado queda a −1.0 % y +2.1 %. A 15° el orden medido, 0.53, está justo sobre el mínimo aceptado, así que ese +2.1 % es poco firme: con orden 1 el extrapolado sería 0.02163 (−2.9 %), y con orden 2, 0.02105 (−5.5 %). Para Cl basta el nivel 2; para Cd a menos de 5 % de TMR a 10° hace falta el nivel 3.
 
 **Arranque desde la malla anterior.** Los estudios de malla arrancan cada nivel de la solución del anterior:
 
@@ -86,6 +86,8 @@ Cada coeficiente con tres niveles anidados, r=2 y factor de seguridad 1.25; si e
 |---|---|---|---|
 | Desde el flujo potencial | 34 001 | 1.0619 | 0.01200 |
 | Desde el nivel 2 | 7 001 | 1.0628 | 0.01197 |
+
+Cambiar el arranque mueve el extrapolado de Cd a 10° de 0.01242 a 0.01234 (0.6 %), menos que su banda de ±3.9 %.
 
 A α=15 en 897×257, desde el flujo potencial el cálculo revienta hacia la iteración 1400. Desde α=10 en la misma malla queda atrapado en un ciclo grande (Cl de 1.28 a 1.43). Desde el nivel 2 converge en 8000 iteraciones. En 449×129, α=15 desde α=14 da lo mismo que en frío (Cd 0.019875 y 0.019893), en menos iteraciones. El rescate por ángulo vecino se limita a 2°.
 
@@ -126,7 +128,7 @@ El ruido con la capa límite desarrollada indica que el acoplamiento presión-ve
 
 **Parada y veredicto.** La deriva se mide entre los dos últimos quintos de la corrida. Reproducido sobre historias reales, la parada temprana queda a menos de 0.02 % de corridas mucho más largas a 10° y 15°, y a 0.1 % a 0°. Con ventanas fijas de 500 iteraciones, 897×257 parecía convergida con Cd aún 1 % alto.
 
-**Reproducibilidad.** Local (Docker emulado) y `openblade2`, 2 procesos y 300 iteraciones: fuerzas idénticas, md5 `6086045a3719`. Un clon nuevo con un entorno nuevo da la misma malla: sha256 `c2ed1a996956` en el nivel 2, con numpy 2.4.0 y 2.4.6.
+**Reproducibilidad.** Local (Docker emulado) y `openblade2`, 2 procesos y 300 iteraciones: fuerzas idénticas, md5 `6086045a3719`. Es una prueba corta, y el resultado vale para el mismo número de procesos. Un clon nuevo con un entorno nuevo da la misma malla: sha256 `c2ed1a996956` en el nivel 2, con numpy 2.4.0 y 2.4.6.
 
 ## 7. Por qué lo anterior no sirve
 
