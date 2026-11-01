@@ -119,8 +119,8 @@ def grid_study_text(r: Dict[str, Any]) -> str:
         g = r[nombre]
         orden = f"orden {g['orden']:.2f}" if g["orden"] is not None else g["convergencia"]
         ext = f", extrapolado {g['extrapolado']:.5f}" if g["extrapolado"] is not None else ""
-        partes.append(f"{nombre.capitalize()} = {g['fina']:.5f} ± {g['banda']:.5f} "
-                      f"(GCI {100 * g['gci_fina']:.2f} %, {orden}{ext})")
+        gci = f"GCI {100 * g['gci_fina']:.2f} %, " if abs(g["fina"]) > CL_MINIMO / 100 else ""
+        partes.append(f"{nombre.capitalize()} = {g['fina']:.5f} ± {g['banda']:.5f} ({gci}{orden}{ext})")
     if r.get("oscilan"):
         partes.append(f"El nivel {r['oscilan'][0]} oscila poco con media estable: se usa su media.")
     return "   ".join(partes)
@@ -134,8 +134,7 @@ def _bandas(estudios: Sequence[Dict[str, Any]], nombre: str, aoa: float, clave: 
     return float(np.interp(aoa, [p[0] for p in puntos], [p[1] for p in puntos]))
 
 
-def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = (),
-                nivel_gci: str = "gci_media") -> List[Dict[str, Any]]:
+def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = ()) -> List[Dict[str, Any]]:
     """Una fila por angulo, con el veredicto y la banda de malla de cada coeficiente.
 
     La polar se calcula en la malla media, asi que por defecto lleva la banda de la media.
@@ -154,9 +153,10 @@ def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = (),
         if usable(j) or fila["oscila"]:
             fila.update(cl=v["cl"], cl_amp=v["cl_amp"], cd=v["cd"], cd_amp=v["cd_amp"], cm=v["cm"])
         if usable(j):
-            rel_cl, rel_cd = _bandas(estudios, "cl", a, nivel_gci), _bandas(estudios, "cd", a, nivel_gci)
-            if rel_cl is not None:
-                fila["banda_cl"] = rel_cl * abs(v["cl"])
+            # La banda de Cl se interpola en absoluto: a 0 grados Cl es casi nulo y su banda
+            # relativa no significa nada. Cd nunca es nulo y crece mucho con el angulo.
+            fila["banda_cl"] = _bandas(estudios, "cl", a, "banda_media")
+            rel_cd = _bandas(estudios, "cd", a, "gci_media")
             if rel_cd is not None:
                 fila["banda_cd"] = rel_cd * abs(v["cd"])
         filas.append(fila)

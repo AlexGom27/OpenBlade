@@ -44,12 +44,13 @@ def test_gci_comes_from_the_three_levels_in_any_order():
 
 
 def test_polar_applies_interpolated_band_and_hides_what_did_not_converge():
-    estudio = [{"aoa": 0.0, "cl": {"gci_media": 0.01}, "cd": {"gci_media": 0.02}},
-               {"aoa": 10.0, "cl": {"gci_media": 0.03}, "cd": {"gci_media": 0.06}}]
+    estudio = [{"aoa": 0.0, "cl": {"banda_media": 1e-5}, "cd": {"gci_media": 0.02}},
+               {"aoa": 10.0, "cl": {"banda_media": 0.02}, "cd": {"gci_media": 0.06}}]
     t = [trabajo(aoa=5.0, cl=0.5, cd=0.01), trabajo(aoa=18.0, estado="NO CONVERGIDO", cl=1.2, cd=0.1),
          trabajo(aoa=19.0, estado="DIVERGIDO", cl=9.0)]
     filas = polar_table(t, estudio)
-    assert filas[0]["banda_cl"] == pytest.approx(0.02 * 0.5)
+    # Cl en absoluto: a 0 grados su banda relativa no significa nada
+    assert filas[0]["banda_cl"] == pytest.approx(0.5 * (1e-5 + 0.02))
     assert filas[0]["banda_cd"] == pytest.approx(0.04 * 0.01)
     assert filas[1]["cl"] is None and filas[1]["veredicto"] == "NO CONVERGIDO"
     assert filas[2]["cl"] is None
@@ -60,8 +61,8 @@ def test_polar_applies_interpolated_band_and_hides_what_did_not_converge():
 
 
 def test_a_point_that_barely_oscillates_gives_its_mean_marked_and_without_band():
-    estudio = [{"aoa": 0.0, "cl": {"gci_media": 0.01}, "cd": {"gci_media": 0.02}},
-               {"aoa": 20.0, "cl": {"gci_media": 0.03}, "cd": {"gci_media": 0.06}}]
+    estudio = [{"aoa": 0.0, "cl": {"banda_media": 0.01}, "cd": {"gci_media": 0.02}},
+               {"aoa": 20.0, "cl": {"banda_media": 0.03}, "cd": {"gci_media": 0.06}}]
     oscila = trabajo(aoa=16.0, estado="NO CONVERGIDO", cl=1.558, cd=0.0233)
     oscila.analysis["verdict"]["oscila"] = True
     fila = polar_table([oscila], estudio)[0]
@@ -251,3 +252,9 @@ def test_a_point_that_blows_up_at_the_start_is_rescued_from_its_nearest_neighbor
     r = C.run_polar([], {"reynolds": 6e6}, [4.0, 15.0], [])
     assert [j.label for j in enviados] == ["polar_a4", "polar_a15"]
     assert next(f for f in r["filas"] if f["aoa"] == 15.0)["veredicto"] == "DIVERGIDO"
+
+
+def test_zero_lift_does_not_show_a_percentage_of_nothing():
+    t = [trabajo(nivel=1, cl=1e-6, cd=0.0076), trabajo(nivel=2, cl=-1e-6, cd=0.0078), trabajo(nivel=3, cl=1e-6, cd=0.0080)]
+    texto = grid_study_text(grid_study_result(t))
+    assert texto.startswith("Cl = 0.00000") and texto.split("   ")[0].count("%") == 0 and "GCI" in texto
