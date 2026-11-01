@@ -34,6 +34,11 @@ ALTURA_NORMAL = 0.15    # hasta aqui la linea sale recta y normal a la pared
 ALTURA_CURVA = 0.45     # punto de control de la curva con la que gira hacia el exterior
 MEZCLA_EXTERIOR = 0.7   # cuanto se reparten las lineas por igual en el contorno exterior
 ASPECTO_ESTELA = 3000.0 # celda mas alargada que se admite en la estela
+# Abertura del borde de salida, en cuerdas: la malla C la cierra. Medido en un perfil de 30 %:
+# 0.2 % de abertura adelgaza x/c=0.8 un 1.2 %, y 2 % un 11 %. Con 2 % faltaria ademas una
+# resistencia de base del 27 % de Cd (Hoerner), mas que cualquier banda que da el programa.
+ABERTURA_AVISO = 0.002
+ABERTURA_MAX = 0.02
 
 
 def naca4(codigo: str, n: int = 40001) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -59,12 +64,8 @@ def naca4(codigo: str, n: int = 40001) -> Tuple[np.ndarray, np.ndarray, np.ndarr
     return x - yt * np.sin(th), yc + yt * np.cos(th), x + yt * np.sin(th), yc - yt * np.cos(th)
 
 
-def read_contour(ruta: str, n: int = 40001) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Perfil de un archivo x y, normalizado a cuerda 1 y densificado.
-
-    Si el borde de salida esta abierto se cierra repartiendo la abertura de forma
-    lineal con la cuerda: la malla C necesita un punto unico de salida.
-    """
+def _contour_sides(ruta: str, n: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Extrados e intrados de un archivo x y, del morro a la salida, con cuerda 1."""
     filas = []
     with open(ruta) as f:
         for linea in f:
@@ -94,7 +95,35 @@ def read_contour(ruta: str, n: int = 40001) -> Tuple[np.ndarray, np.ndarray, np.
         a, b = b, a
     x0, y0 = x[k], y[k]
     c = max(a[-1, 0], b[-1, 0]) - x0
-    a, b = (a - [x0, y0]) / c, (b - [x0, y0]) / c
+    return (a - [x0, y0]) / c, (b - [x0, y0]) / c
+
+
+def trailing_edge_gap(ruta: str, n: int = 2001) -> float:
+    """Abertura del borde de salida del archivo, en cuerdas."""
+    a, b = _contour_sides(ruta, n)
+    return float(np.hypot(*(a[-1] - b[-1])))
+
+
+def opening_notice(abertura: float, cd: float = 0.012) -> str:
+    """Lo que cambia al cerrar el borde. El arrastre que falta es la formula de Hoerner."""
+    falta = 0.135 * abertura ** (4.0 / 3.0) / cd ** (1.0 / 3.0)
+    return (f"⚠️ Borde de salida abierto {100 * abertura:.2f} % de la cuerda: la malla C lo cierra, así que se "
+            f"calcula un perfil algo más delgado atrás y sin resistencia de base (Hoerner: ΔCd≈{falta:.4f} "
+            f"con Cd={cd:g}). Esa diferencia no entra en la banda de malla.")
+
+
+def read_contour(ruta: str, n: int = 40001) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Perfil de un archivo x y, normalizado a cuerda 1 y densificado.
+
+    Si el borde de salida esta abierto se cierra repartiendo la abertura de forma
+    lineal con la cuerda: la malla C necesita un punto unico de salida. Con una abertura
+    grande eso ya seria otro perfil, y se rechaza.
+    """
+    a, b = _contour_sides(ruta, n)
+    abertura = float(np.hypot(*(a[-1] - b[-1])))
+    if abertura > ABERTURA_MAX:
+        raise ValueError(f"{ruta}: el borde de salida está abierto {100 * abertura:.1f} % de la cuerda. La malla C "
+                         f"lo cierra y admite hasta {100 * ABERTURA_MAX:g} %: con más calcularía otro perfil.")
     medio = 0.5 * (a[-1, 1] + b[-1, 1])
     a[:, 1] -= a[:, 0] * (a[-1, 1] - medio)
     b[:, 1] -= b[:, 0] * (b[-1, 1] - medio)
@@ -353,6 +382,11 @@ def build_mesh(params: Dict, salida: str) -> Dict:
                           float(params.get("farfield", 500.0)), float(params.get("wake_length", 0.0)))
     info = write_cgrid_msh(salida, x * cuerda, y * cuerda, float(params.get("depth", 0.1)) * cuerda)
     info["mallador"] = f"C propia, nivel {nivel} ({NIVELES[nivel]})"
+    if "Custom" in params.get("profile_type", ""):
+        abertura = trailing_edge_gap(params["file_path"])
+        info["abertura_borde_salida"] = round(abertura, 5)
+        if abertura > ABERTURA_AVISO:
+            info["aviso"] = opening_notice(abertura)
     with open(salida + ".info.json", "w") as f:
         json.dump(info, f, ensure_ascii=False)
     write_preview_vtk(salida.replace(".msh", ".vtk"), x * cuerda, y * cuerda)

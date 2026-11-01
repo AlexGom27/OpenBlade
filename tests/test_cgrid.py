@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from core.cgrid import (CELDAS_ESTELA, CARAS_POR_LADO, build_mesh, first_cell_at_level, first_cell_of,
-                        generate_cgrid, naca4, read_contour, vinokur)
+                        generate_cgrid, naca4, read_contour, trailing_edge_gap, vinokur)
 from core.yplus import first_cell_for_yplus
 
 
@@ -130,6 +130,41 @@ def test_custom_profile_file_is_meshed_and_a_blunt_edge_is_closed(tmp_path):
     assert (np.all(area > 0) or np.all(area < 0)) and maximo < 55.0
 
 
+def _malla_propia(ruta, salida):
+    return build_mesh({"profile_type": "Custom", "file_path": str(ruta), "grid_level": 0,
+                       "farfield": 50.0, "reynolds": 6e6}, str(salida))
+
+
+def test_a_barely_open_edge_is_recorded_without_a_notice(tmp_path):
+    ruta = tmp_path / "perfil.dat"
+    _archivo_selig(ruta, abrir=0.0005)
+    assert trailing_edge_gap(str(ruta)) == pytest.approx(0.001, abs=1e-5)
+    info = _malla_propia(ruta, tmp_path / "m.msh")
+    assert info["abertura_borde_salida"] == pytest.approx(0.001, abs=1e-5)
+    assert "aviso" not in info
+
+
+def test_an_open_edge_warns_of_the_missing_drag_and_reaches_the_ficha(tmp_path):
+    ruta = tmp_path / "perfil.dat"
+    _archivo_selig(ruta, abrir=0.005)
+    info = _malla_propia(ruta, tmp_path / "m.msh")
+    assert "1.00 %" in info["aviso"] and "ΔCd≈0.0013" in info["aviso"]
+    assert json.load(open(tmp_path / "m.msh.info.json"))["abertura_borde_salida"] == pytest.approx(0.01, abs=1e-5)
+
+
+def test_a_wide_open_edge_is_refused_instead_of_computing_another_profile(tmp_path):
+    ruta = tmp_path / "romo.dat"
+    _archivo_selig(ruta, abrir=0.025)
+    with pytest.raises(ValueError, match="5.0 % de la cuerda"):
+        _malla_propia(ruta, tmp_path / "m.msh")
+    assert not (tmp_path / "m.msh").exists()
+
+
+def test_a_naca_profile_has_no_opening_in_its_mesh_info(tmp_path):
+    info = build_mesh({"naca": "0012", "grid_level": 0, "farfield": 50.0, "reynolds": 6e6}, str(tmp_path / "m.msh"))
+    assert "abertura_borde_salida" not in info and "aviso" not in info
+
+
 def test_mesh_file_scales_with_chord_and_keeps_depth_ratio(tmp_path):
     p = {"naca": "0012", "chord": 2.0, "grid_level": 0, "farfield": 50.0, "reynolds": 6e6, "depth": 0.1}
     salida = str(tmp_path / "m.msh")
@@ -192,3 +227,17 @@ def test_low_reynolds_gives_a_valid_mesh_instead_of_an_error(reynolds, yplus, ni
     x, y = generate_cgrid(contour_from_params(p), first_cell_of(p), nivel, 200.0, 0.0)
     a = (x[1:, :-1] - x[:-1, :-1]) * (y[:-1, 1:] - y[:-1, :-1]) - (y[1:, :-1] - y[:-1, :-1]) * (x[:-1, 1:] - x[:-1, :-1])
     assert (a > 0).all() or (a < 0).all()
+
+
+def test_the_job_log_shows_the_opening_also_when_the_mesh_is_reused(tmp_path, monkeypatch):
+    from core.jobs import ensure_mesh
+
+    monkeypatch.setenv("OPENBLADE_DATA_DIR", str(tmp_path / "datos"))
+    ruta = tmp_path / "perfil.dat"
+    _archivo_selig(ruta, abrir=0.005)
+    p = {"mesher": "cgrid", "profile_type": "Custom", "file_path": str(ruta), "grid_level": 0,
+         "farfield": 50.0, "reynolds": 6e6}
+    for _ in range(2):
+        lineas = []
+        ensure_mesh(p, lineas.append)
+        assert any("1.00 %" in l for l in lineas)

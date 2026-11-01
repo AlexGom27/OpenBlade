@@ -22,6 +22,10 @@ def _tabla_ficha(ficha):
               or f"gmsh {versiones.get('gmsh')} / gmshairfoil2d {versiones.get('gmshairfoil2d')}"],
              ["OpenFOAM", ejecucion.get("openfoam_build") or "desconocido"],
              ["Máquina / procesos", f"{ejecucion.get('maquina')} / {ejecucion.get('procesos')}"]]
+    abertura = (ficha.get("malla") or {}).get("abertura_borde_salida")
+    if abertura is not None:
+        filas.append(["Abertura del borde de salida",
+                      f"{100 * abertura:.2f} % de la cuerda, cerrada en la malla"])
     if malla:
         filas += [["Celdas", str(malla.get("celdas"))],
                   ["No ortogonalidad máx", _cifra(malla.get("no_ortogonalidad_max"), ".1f", "°")],

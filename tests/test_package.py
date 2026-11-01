@@ -172,3 +172,11 @@ def test_report_shows_verdict_sheet_and_warns_when_not_valid(tmp_path):
     divergido = dict(analisis, verdict=dict(analisis["verdict"], state="DIVERGIDO", cl=None))
     generate_pdf_report(str(tmp_path / "d.pdf"), {"naca": "0012"}, divergido, {}, None)
     assert (tmp_path / "d.pdf").stat().st_size > 1000
+
+
+def test_the_sheet_states_the_opening_of_the_trailing_edge():
+    from core.report_generator import _tabla_ficha
+
+    filas = dict(map(tuple, _tabla_ficha({"malla": {"abertura_borde_salida": 0.01}})))
+    assert filas["Abertura del borde de salida"].startswith("1.00 %")
+    assert "Abertura del borde de salida" not in dict(map(tuple, _tabla_ficha({"malla": {}})))

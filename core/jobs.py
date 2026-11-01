@@ -160,6 +160,15 @@ _candados: Dict[str, threading.Lock] = {}
 _candado_global = threading.Lock()
 
 
+def _mesh_notice(msh: str, log: Callable[[str], None]) -> None:
+    """El aviso de la malla sale en cada trabajo que la usa, tambien si ya estaba hecha."""
+    from core.package import read_mesh_info
+
+    aviso = (read_mesh_info(msh) or {}).get("aviso")
+    if aviso:
+        log(aviso)
+
+
 def ensure_mesh(params: Dict[str, Any], log: Callable[[str], None] = lambda _: None) -> str:
     """La malla de estos parametros: la genera una vez y la reutiliza."""
     clave = mesh_key(params)
@@ -171,6 +180,7 @@ def ensure_mesh(params: Dict[str, Any], log: Callable[[str], None] = lambda _: N
     with candado:
         if os.path.exists(msh):
             log(f"📐 Malla {clave[:8]} reutilizada")
+            _mesh_notice(msh, log)
             return msh
         log(f"📐 Generando malla {clave[:8]}...")
         entrada = os.path.join(carpeta, f"{clave}.json")
@@ -206,6 +216,7 @@ def ensure_mesh(params: Dict[str, Any], log: Callable[[str], None] = lambda _: N
         vtk = temporal.replace(".msh", ".vtk")
         if os.path.exists(vtk):
             os.replace(vtk, msh.replace(".msh", ".vtk"))
+        _mesh_notice(msh, log)
         return msh
 
 

@@ -74,8 +74,13 @@ def main():
 
     if p.get("mesher") == "cgrid":
         from core.cgrid import build_mesh
-        info = build_mesh(p, output_msh)
+        try:
+            info = build_mesh(p, output_msh)
+        except ValueError as e:
+            sys.exit(f"❌ {e}")
         print(f"✅ Malla {info['mallador']}: {info['celdas']} celdas, {output_msh}")
+        if info.get("aviso"):
+            print(info["aviso"])
         return
     
     try:
