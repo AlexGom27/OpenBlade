@@ -79,3 +79,38 @@ def test_the_package_records_that_it_skips_the_potential_flow(tmp_path):
     assert p["campo_inicial"] == "/algo"
     fuente = open(os.path.join(os.path.dirname(__file__), "..", "core", "remote_job.py")).read()
     assert 'job.get("sin_potencial")' in fuente
+
+
+def test_a_coarser_field_is_expanded_cell_by_cell_on_the_nested_mesh():
+    import numpy as np
+    from core.cgrid import cells_of_level, generate_cgrid, naca4
+    from core.initial_field import _expand
+
+    assert cells_of_level(2) == (448, 128) and cells_of_level(1) == (224, 64)
+
+    def rejilla(nivel):
+        x, y = generate_cgrid(naca4("0012"), 5e-6, nivel, 50.0)
+        def centro(v):
+            return 0.25 * (v[:-1, :-1] + v[1:, :-1] + v[:-1, 1:] + v[1:, 1:])
+        diagonal = np.hypot(x[1:, 1:] - x[:-1, :-1], y[1:, 1:] - y[:-1, :-1])
+        return centro(x).flatten(order="F"), centro(y).flatten(order="F"), diagonal.flatten(order="F")
+
+    def expandida(valores):
+        interior = ("internalField   nonuniform List<scalar> \n%d\n(\n" % valores.size
+                    + "\n".join(repr(float(v)) for v in valores) + "\n)\n;")
+        salida = _expand(interior, 2).split("\n")
+        assert salida[1] == str(4 * valores.size) and salida[2] == "(" and salida[-2:] == [")", ";"]
+        return np.array([float(v) for v in salida[3:-2]])
+
+    xg, yg, dg = rejilla(1)
+    xf, yf, _ = rejilla(2)
+    # El centro de cada celda fina cae dentro de la gruesa de la que toma el valor
+    distancia = np.hypot(expandida(xg) - xf, expandida(yg) - yf)
+    assert (distancia <= expandida(dg)).all()
+
+
+def test_expand_refuses_a_field_of_another_size():
+    from core.initial_field import _expand
+    with pytest.raises(ValueError, match="celdas"):
+        _expand("internalField   nonuniform List<scalar> \n2\n(\n1\n2\n)\n;", 2)
+    assert _expand("internalField   uniform 0;", 2) == "internalField   uniform 0;"

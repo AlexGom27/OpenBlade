@@ -32,11 +32,46 @@ def latest_fields(case_dir: str) -> Optional[str]:
     return os.path.join(case_dir, max(tiempos)[1]) if tiempos else None
 
 
-def start_from(origen: str, case_dir: str, msh_file: str) -> str:
-    """Pasa a 0/ el interior de los campos de otra corrida. Devuelve de que tiempo salieron."""
+def _expand(interior: str, nivel: int) -> str:
+    """El interior de un campo de la malla inmediatamente mas gruesa, en la de este nivel.
+
+    Las mallas son anidadas y sus celdas van por la rejilla, con i como indice rapido: cada
+    celda fina (i, j) cae dentro de la gruesa (i // 2, j // 2).
+    """
+    from core.cgrid import cells_of_level
+
+    if "nonuniform" not in interior:
+        return interior
+    lineas = interior.split("\n")
+    inicio = lineas.index("(")
+    fin = len(lineas) - 1 - lineas[::-1].index(")")
+    valores = lineas[inicio + 1:fin]
+    ni, nj = cells_of_level(nivel)
+    ni_g, nj_g = ni // 2, nj // 2
+    if len(valores) != ni_g * nj_g:
+        raise ValueError(f"El campo tiene {len(valores)} celdas y la malla gruesa {ni_g * nj_g}")
+    finos = [valores[(i // 2) + (j // 2) * ni_g] for j in range(nj) for i in range(ni)]
+    cabecera = lineas[:inicio]
+    cabecera[-1] = str(len(finos))
+    return "\n".join(cabecera + ["("] + finos + lineas[fin:])
+
+
+def start_from(origen: str, case_dir: str, msh_file: str, params: Optional[dict] = None) -> str:
+    """Pasa a 0/ el interior de los campos de otra corrida. Devuelve de que tiempo salieron.
+
+    La otra corrida tiene la misma malla, o la del nivel inmediatamente mas grueso de la
+    misma familia.
+    """
     ficha = read_ficha(origen) or {}
+    nivel = None
     if ficha.get("archivos", {}).get("mesh.msh") != sha256_file(msh_file):
-        raise ValueError(f"El campo inicial de {origen} es de otra malla")
+        from core.jobs import mesh_key
+        previos = ficha.get("parametros") or {}
+        n = int((params or {}).get("grid_level", 0))
+        if not params or int(previos.get("grid_level", -9)) != n - 1 or (
+                mesh_key(dict(previos, grid_level=n)) != mesh_key(params)):
+            raise ValueError(f"El campo inicial de {origen} es de otra malla")
+        nivel = n
     tiempo = latest_fields(origen)
     if tiempo is None:
         raise ValueError(f"{origen} no tiene campos de los que arrancar")
@@ -55,5 +90,6 @@ def start_from(origen: str, case_dir: str, msh_file: str) -> str:
         if hallado is None or _INTERIOR.search(texto) is None:
             raise ValueError(f"No se encontró internalField en {campo}")
         with open(ruta, "w") as f:
-            f.write(_INTERIOR.sub(lambda _: hallado.group(0), texto, count=1))
+            interior = hallado.group(0) if nivel is None else _expand(hallado.group(0), nivel)
+            f.write(_INTERIOR.sub(lambda _: interior, texto, count=1))
     return os.path.basename(tiempo)

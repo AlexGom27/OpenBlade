@@ -303,6 +303,12 @@ def contour_from_params(params: Dict) -> Tuple[np.ndarray, np.ndarray, np.ndarra
     return naca4(str(params.get("naca", "0012")))
 
 
+def cells_of_level(nivel: int) -> Tuple[int, int]:
+    """Celdas de la rejilla de un nivel, a lo largo del contorno y normales a la pared."""
+    factor = 2.0 ** (nivel - NIVEL_BASE)
+    return int(2 * (CARAS_POR_LADO + CELDAS_ESTELA) * factor), int(CELDAS_NORMAL * factor)
+
+
 def first_cell_of(params: Dict) -> float:
     """Primera celda del nivel 2, en cuerdas, para el y+ pedido a este Reynolds.
 
