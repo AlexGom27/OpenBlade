@@ -98,11 +98,11 @@ NACA 0012, cuerda 1, Re=6e6, α=0, valores por defecto de la GUI, 6000 iteracion
 | 3 | `Cl` y `Cd` leídos por nombre | si faltan, falla |
 | 4 | Rango de Cd en las últimas 500 iteraciones | < 1 % |
 | 5 | \|Cl\| > 2 en toda la corrida, o algún Cd < 0 en esa misma ventana | falla |
-| 6 | Cd frente a Ladson 0.00806 | ±5 % |
+| 6 | Cd frente a Ladson 80 grit | ±5 % |
 | 7 | \|Cl\| a α=0 | < 0.01 |
 | 8 | y+ con u_τ, calculado por el programa, igual entre servidores | ±1 % |
 
-Si fallan 1 o 2, se arregla el flujo antes de discutir física. Cuando α=0 pase, se añade α=8: Cl 0.8593 ±10 %, Cd 0.00979 ±10 %, rango < 1 %. Esas tolerancias detectan errores gruesos; no certifican precisión.
+Si fallan 1 o 2, se arregla el flujo antes de discutir física. Cuando α=0 pase, se añade α=8: Cl y Cd frente a Ladson 80 grit ±10 %, rango < 1 %. Esas tolerancias detectan errores gruesos; no certifican precisión.
 
 Hoy el control pasa 1-5 y 7, y falla 6 (+49 %). La compuerta 8 no se puede evaluar hasta E3.
 

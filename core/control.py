@@ -9,12 +9,12 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Dict, List, Tuple
 
+from core.bench import ladson
 from core.defaults import case_params
 from core.forces import read_forces
 from core.jobs import Dispatcher, Events, Job, Machine, ensure_mesh, new_job
 from core.package import read_ficha, sha256_file
 
-LADSON = {0.0: (0.0, 0.00806), 8.0: (0.8593, 0.00979)}
 TOL_CD_A0 = 0.05
 TOL_A8 = 0.10
 TOL_RANGO = 1.0         # %
@@ -90,7 +90,7 @@ def evaluate_gates(angulo: float, trabajos: List[Job]) -> List[Dict[str, Any]]:
         negativos = sum(1 for x in cola if x < 0)
         compuerta(5, f"sin divergencia ({destino})", pico <= 2.0 and not negativos,
                   f"|Cl| máx {pico:.3f}, Cd<0 en {negativos} filas")
-        ref_cl, ref_cd = LADSON[angulo]
+        ref_cl, ref_cd = ladson(angulo)
         m_cl, m_cd = v.get("cl"), v.get("cd")
         if m_cd is None:
             compuerta(6, f"fuerzas frente a Ladson ({destino})", False, f"veredicto {v.get('state')}")
