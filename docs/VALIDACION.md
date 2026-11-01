@@ -1,6 +1,6 @@
 # Validación de OpenBlade
 
-Todo lo de este documento salió del programa: malla y caso generados en la Mac, cálculo con OpenFOAM 12 en los servidores, y veredicto y ficha de cada paquete. Las campañas anteriores al 2026-10-31 no sirven como validación (§7).
+Todo lo de este documento salió del programa: malla y caso generados en la Mac, cálculo con OpenFOAM 12 en los servidores, y veredicto y ficha de cada paquete. Las campañas anteriores al 2026-10-31 no sirven como validación (§8).
 
 ## 1. Resumen
 
@@ -8,12 +8,13 @@ Todo lo de este documento salió del programa: malla y caso generados en la Mac,
 |---|---|
 | Cl del NACA 0012, Re=6e6, de 4° a 17° | A menos de 1.7 % de Ladson, y de 1.2 % de 6° a 17°. A 2° difiere 0.010 (+4.9 %) |
 | Cd del NACA 0012 en la malla por defecto | De −4.1 a +4.0 % frente a Ladson hasta 12°, dentro de su banda de malla (de ±7 a ±13 %); de +10 a +15 % de 14° a 17° |
-| Cd frente a NASA TMR, malla extrapolada | −1.0 % a 10°. A 15°, +2.1 %, con un orden bajo que lo hace poco firme (§5) |
+| Cd frente a NASA TMR, malla extrapolada | −1.0 % a 10°. A 15°, +2.1 %, con un orden bajo que lo hace poco firme (§6) |
 | Pérdida | **No la predice.** Ladson cae a Cl≈1.0 a 18°; SST da 1.60 |
 | Reproducibilidad entre máquinas | Mismo paquete y procesos, fuerzas idénticas byte a byte en Local (Docker) y en un servidor, en una prueba corta de 300 iteraciones |
 | Perfil con curvatura (NACA 4412) | Comprobado el signo de Cm y Cp frente a experimento; sin tolerancias |
-| Transitorio | Estable en un caso laminar. A Re alto con y+<1 **no está validado** (§6) |
-| Mallas oficiales de TMR | 449×129 no es practicable; 225×65 corre pero Cd oscila (§5) |
+| Transitorio | Estable en un caso laminar. A Re alto con y+<1 **no está validado** (§7) |
+| Mallas oficiales de TMR | 449×129 no es practicable; 225×65 corre pero Cd oscila (§6) |
+| Banco de validación | 35 de 40 comprobaciones; las 5 restantes declaradas (§5) |
 
 ## 2. Cómo repetirlo
 
@@ -66,7 +67,21 @@ La banda es la de malla, calculada con GCI a 0°, 10° y 15° e interpolada entr
 
 Ladson está interpolado entre sus ángulos medidos. «Oscila» es NO CONVERGIDO con media estable: Cd varía 1.1–1.5 % en las últimas 500 iteraciones, y se da su media. α=18 arrancó de α=17; los demás, del flujo potencial.
 
-## 5. Estudio de malla
+## 5. Banco de validación
+
+Ocho paquetes en el nivel 2, todos CONVERGIDOS: **35 de 40 comprobaciones cumplidas**. Tolerancias en `core/bench.py`; informe en `validation/resultados/banco_validacion.pdf`. Lo que no cumple:
+
+| Caso | Comprobación | Medido | Tope | Causa |
+|---|---|---|---|---|
+| SST, α=10 | Cd frente a TMR | −8.4 % | ±5 % | Malla: −4.0 % en el nivel 3 y −1.0 % extrapolado |
+| SST, α=15 | Cd frente a TMR | −10.7 % | ±10 % | Malla: −6.8 % en el nivel 3 |
+| SA, α=15 | Cp frente a CFL3D, RMS | 0.110 | 0.10 | Sin estudiar; pico −10.80 frente a −11.16 |
+| SA, α=15 | Cf frente a CFL3D, RMS | 0.0020 | 0.0015 | Sin estudiar |
+| Dominio 40c, α=10 | Cd frente a 200c | +5.8 % | ±2 % | El dominio de 40c es pequeño; 500c cambia −1.3 % |
+
+Todas las comparaciones con Ladson cumplen. SST frente a TMR, Cl: −1.3 % a 10° y −0.5 % a 15°. SA: Cl −1.6 y −1.5 %, Cd −3.2 y −3.9 %.
+
+## 6. Estudio de malla
 
 Cada coeficiente con tres niveles anidados, r=2 y factor de seguridad 1.25; si el orden no es creíble, tres veces el mayor salto, sin extrapolar. El nivel 1 oscila poco a 10° y 15°, con media estable, y se usa su media.
 
@@ -95,7 +110,7 @@ A α=15 en 897×257, desde el flujo potencial el cálculo revienta hacia la iter
 - 449×129: 60 s por iteración con la máquina cargada, por celdas de aspecto 3×10⁷ que hacen que GAMG tarde 170 iteraciones; a la iteración 742 las fuerzas seguían lejos de su valor. No es practicable.
 - 225×65: llega a 20 000 iteraciones con Cl 1.0797 y Cd 0.00965, oscilando 1.6 %. La malla propia del mismo tamaño da 1.0671 y 0.01008.
 
-## 6. Otras comprobaciones
+## 7. Otras comprobaciones
 
 **Simetría (M).** α=±4, nivel 1: Cl +0.43752 y −0.43751, Cd 0.00787 en ambos, Cm ±0.0026.
 
@@ -130,14 +145,17 @@ El ruido con la capa límite desarrollada indica que el acoplamiento presión-ve
 
 **Reproducibilidad.** Local (Docker emulado) y `openblade2`, 2 procesos y 300 iteraciones: fuerzas idénticas, md5 `6086045a3719`. Es una prueba corta, y el resultado vale para el mismo número de procesos. Un clon nuevo con un entorno nuevo da la misma malla: sha256 `c2ed1a996956` en el nivel 2, con numpy 2.4.0 y 2.4.6.
 
-## 7. Por qué lo anterior no sirve
+## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
 1. `writePrecision 6` redondeaba los puntos de la malla a 6 cifras al convertirla: no ortogonalidad de 85.9° en una malla de 39°.
 2. La tolerancia 1e-6 del solver lineal congelaba k y ω: «No Iterations 0» y fuerzas estables falsas, con veredicto CONVERGIDO.
 3. Muchas salían de scripts que escribían sus propios casos: lo validado no era lo que corre la ventana. Cada servidor generaba su propia malla, y de ahí la discrepancia entre servidores.
 
-## 8. Límites declarados
+## 9. Límites declarados
+
+Pendiente: repetir el caso de control con esta malla en los dos servidores.
+
 
 - No predice la pérdida: SST sigue a Cl 1.60 a 18°, donde el experimento cae a 1.0.
 - A partir de 14° Cd está 10–15 % por encima de Ladson.

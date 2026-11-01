@@ -1,0 +1,523 @@
+{
+ "filas": [
+  {
+   "caso": {
+    "etiqueta": "banco_sst_a0",
+    "aoa": 0.0,
+    "turbulencia": "k-Omega SST (RAS)",
+    "nivel": 2,
+    "radio": 200.0,
+    "ajustes": {}
+   },
+   "trabajo": "20261101_084938_banco_sst_a0_02b7",
+   "maquina": "alejandro@100.85.66.123",
+   "estado": "terminado",
+   "error": "",
+   "veredicto": "CONVERGIDO",
+   "razon": "Cd varía 0.09 % en las últimas 500 iteraciones",
+   "cl": -4.25422189267616e-07,
+   "cl_amp": 5.6306887995688984e-05,
+   "cd": 0.007836292607466384,
+   "cd_amp": 3.6484090584331524e-06,
+   "cm": 7.025674616623078e-08,
+   "filas": 20805,
+   "yplus": 0.5232475598194607,
+   "comprobaciones": [
+    {
+     "nombre": "Cl frente a TMR",
+     "error": -4.25422189267616e-07,
+     "tope": 0.01,
+     "cumple": true,
+     "detalle": "-0.0000 frente a 0.0000"
+    },
+    {
+     "nombre": "Cd frente a TMR",
+     "error": -0.030961342852466975,
+     "tope": 0.05,
+     "cumple": true,
+     "detalle": "0.00784 frente a 0.00809"
+    },
+    {
+     "nombre": "Cl frente a Ladson",
+     "error": 0.0072400507682869215,
+     "tope": 0.02,
+     "cumple": true,
+     "detalle": "-0.0000 frente a -0.0072"
+    },
+    {
+     "nombre": "Cd frente a Ladson",
+     "error": -0.03156013090013793,
+     "tope": 0.05,
+     "cumple": true,
+     "detalle": "0.00784 frente a 0.00809"
+    },
+    {
+     "nombre": "Cp frente a CFL3D (RMS)",
+     "error": 0.0034987164877700308,
+     "tope": 0.1,
+     "cumple": true,
+     "detalle": "pico -0.408 frente a -0.413"
+    },
+    {
+     "nombre": "Cf frente a CFL3D (RMS)",
+     "error": 0.00016747492583022168,
+     "tope": 0.0015,
+     "cumple": true,
+     "detalle": "extradós, sin el 2 % final"
+    }
+   ]
+  },
+  {
+   "caso": {
+    "etiqueta": "banco_sst_a10",
+    "aoa": 10.0,
+    "turbulencia": "k-Omega SST (RAS)",
+    "nivel": 2,
+    "radio": 200.0,
+    "ajustes": {}
+   },
+   "trabajo": "20261101_084938_banco_sst_a10_7d09",
+   "maquina": "alejandro@100.85.66.123",
+   "estado": "terminado",
+   "error": "",
+   "veredicto": "CONVERGIDO",
+   "razon": "Cd varía 0.26 % en las últimas 500 iteraciones",
+   "cl": 1.065614898743279,
+   "cl_amp": 7.988841676298541e-05,
+   "cd": 0.011422601693295608,
+   "cd_amp": 1.4579320037215286e-05,
+   "cm": 0.008499730574983084,
+   "filas": 15001,
+   "yplus": 0.6865338268357253,
+   "comprobaciones": [
+    {
+     "nombre": "Cl frente a TMR",
+     "error": -0.012801563712492197,
+     "tope": 0.02,
+     "cumple": true,
+     "detalle": "1.0656 frente a 1.0794"
+    },
+    {
+     "nombre": "Cd frente a TMR",
+     "error": -0.08374852727575346,
+     "tope": 0.05,
+     "cumple": false,
+     "detalle": "0.01142 frente a 0.01247"
+    },
+    {
+     "nombre": "Cl frente a Ladson",
+     "error": 0.006619266501182681,
+     "tope": 0.03,
+     "cumple": true,
+     "detalle": "1.0656 frente a 1.0586"
+    },
+    {
+     "nombre": "Cd frente a Ladson",
+     "error": -0.040958846620934415,
+     "tope": 0.1,
+     "cumple": true,
+     "detalle": "0.01142 frente a 0.01191"
+    },
+    {
+     "nombre": "Cp frente a CFL3D (RMS)",
+     "error": 0.03499605401515793,
+     "tope": 0.1,
+     "cumple": true,
+     "detalle": "pico -5.496 frente a -5.604"
+    },
+    {
+     "nombre": "Cf frente a CFL3D (RMS)",
+     "error": 0.00029568769817824475,
+     "tope": 0.0015,
+     "cumple": true,
+     "detalle": "extradós, sin el 2 % final"
+    }
+   ]
+  },
+  {
+   "caso": {
+    "etiqueta": "banco_sst_a15",
+    "aoa": 15.0,
+    "turbulencia": "k-Omega SST (RAS)",
+    "nivel": 2,
+    "radio": 200.0,
+    "ajustes": {}
+   },
+   "trabajo": "20261101_084938_banco_sst_a15_65f3",
+   "maquina": "alejandro@100.85.66.123",
+   "estado": "terminado",
+   "error": "",
+   "veredicto": "CONVERGIDO",
+   "razon": "Cd varía 0.53 % en las últimas 500 iteraciones",
+   "cl": 1.5010257248929293,
+   "cl_amp": 0.00017657641594404083,
+   "cd": 0.01988847813264837,
+   "cd_amp": 5.245311962459934e-05,
+   "cm": 0.018920690834542234,
+   "filas": 38287,
+   "yplus": 0.780109433283513,
+   "comprobaciones": [
+    {
+     "nombre": "Cl frente a TMR",
+     "error": -0.005438263427614847,
+     "tope": 0.03,
+     "cumple": true,
+     "detalle": "1.5010 frente a 1.5092"
+    },
+    {
+     "nombre": "Cd frente a TMR",
+     "error": -0.10693856611367905,
+     "tope": 0.1,
+     "cumple": false,
+     "detalle": "0.01989 frente a 0.02227"
+    },
+    {
+     "nombre": "Cl frente a Ladson",
+     "error": 0.001183257438652272,
+     "tope": 0.05,
+     "cumple": true,
+     "detalle": "1.5010 frente a 1.4993"
+    },
+    {
+     "nombre": "Cd frente a Ladson",
+     "error": 0.10474614206022574,
+     "tope": 0.2,
+     "cumple": true,
+     "detalle": "0.01989 frente a 0.01800"
+    },
+    {
+     "nombre": "Cp frente a CFL3D (RMS)",
+     "error": 0.07915331314039568,
+     "tope": 0.1,
+     "cumple": true,
+     "detalle": "pico -10.656 frente a -10.877"
+    },
+    {
+     "nombre": "Cf frente a CFL3D (RMS)",
+     "error": 0.001077175768161247,
+     "tope": 0.0015,
+     "cumple": true,
+     "detalle": "extradós, sin el 2 % final"
+    }
+   ]
+  },
+  {
+   "caso": {
+    "etiqueta": "banco_sa_a0",
+    "aoa": 0.0,
+    "turbulencia": "Spalart-Allmaras (RAS)",
+    "nivel": 2,
+    "radio": 200.0,
+    "ajustes": {}
+   },
+   "trabajo": "20261101_084938_banco_sa_a0_7612",
+   "maquina": "alejandro@100.85.66.123",
+   "estado": "terminado",
+   "error": "",
+   "veredicto": "CONVERGIDO",
+   "razon": "Cd varía 0.11 % en las últimas 500 iteraciones",
+   "cl": -1.1260236969236395e-06,
+   "cl_amp": 5.844752034633631e-05,
+   "cd": 0.008235473652126544,
+   "cd_amp": 4.429316967488953e-06,
+   "cm": 2.8030499886009913e-07,
+   "filas": 21001,
+   "yplus": 0.5343587043371645,
+   "comprobaciones": [
+    {
+     "nombre": "Cl frente a TMR",
+     "error": -1.1260236969236395e-06,
+     "tope": 0.01,
+     "cumple": true,
+     "detalle": "-0.0000 frente a 0.0000"
+    },
+    {
+     "nombre": "Cd frente a TMR",
+     "error": 0.010901021128463046,
+     "tope": 0.05,
+     "cumple": true,
+     "detalle": "0.00824 frente a 0.00815"
+    },
+    {
+     "nombre": "Cl frente a Ladson",
+     "error": 0.007239350166779266,
+     "tope": 0.02,
+     "cumple": true,
+     "detalle": "-0.0000 frente a -0.0072"
+    },
+    {
+     "nombre": "Cd frente a Ladson",
+     "error": 0.017772233012549127,
+     "tope": 0.05,
+     "cumple": true,
+     "detalle": "0.00824 frente a 0.00809"
+    },
+    {
+     "nombre": "Cp frente a CFL3D (RMS)",
+     "error": 0.0036810225246572807,
+     "tope": 0.1,
+     "cumple": true,
+     "detalle": "pico -0.408 frente a -0.413"
+    },
+    {
+     "nombre": "Cf frente a CFL3D (RMS)",
+     "error": 2.6470145004790072e-05,
+     "tope": 0.0015,
+     "cumple": true,
+     "detalle": "extradós, sin el 2 % final"
+    }
+   ]
+  },
+  {
+   "caso": {
+    "etiqueta": "banco_sa_a10",
+    "aoa": 10.0,
+    "turbulencia": "Spalart-Allmaras (RAS)",
+    "nivel": 2,
+    "radio": 200.0,
+    "ajustes": {}
+   },
+   "trabajo": "20261101_084938_banco_sa_a10_8e39",
+   "maquina": "alejandro@100.85.66.123",
+   "estado": "terminado",
+   "error": "",
+   "veredicto": "CONVERGIDO",
+   "razon": "Cd varía 0.25 % en las últimas 500 iteraciones",
+   "cl": 1.0749650542719347,
+   "cl_amp": 8.117493170001211e-05,
+   "cd": 0.011994682938572735,
+   "cd_amp": 1.481334552603554e-05,
+   "cm": 0.006381271653295708,
+   "filas": 35515,
+   "yplus": 0.7139339437449759,
+   "comprobaciones": [
+    {
+     "nombre": "Cl frente a TMR",
+     "error": -0.016290405754261654,
+     "tope": 0.02,
+     "cumple": true,
+     "detalle": "1.0750 frente a 1.0928"
+    },
+    {
+     "nombre": "Cd frente a TMR",
+     "error": -0.031645618522114984,
+     "tope": 0.05,
+     "cumple": true,
+     "detalle": "0.01199 frente a 0.01239"
+    },
+    {
+     "nombre": "Cl frente a Ladson",
+     "error": 0.01545176941666122,
+     "tope": 0.03,
+     "cumple": true,
+     "detalle": "1.0750 frente a 1.0586"
+    },
+    {
+     "nombre": "Cd frente a Ladson",
+     "error": 0.007073070452663,
+     "tope": 0.1,
+     "cumple": true,
+     "detalle": "0.01199 frente a 0.01191"
+    },
+    {
+     "nombre": "Cp frente a CFL3D (RMS)",
+     "error": 0.04229922468401396,
+     "tope": 0.1,
+     "cumple": true,
+     "detalle": "pico -5.528 frente a -5.664"
+    },
+    {
+     "nombre": "Cf frente a CFL3D (RMS)",
+     "error": 0.0005838567647269797,
+     "tope": 0.0015,
+     "cumple": true,
+     "detalle": "extradós, sin el 2 % final"
+    }
+   ]
+  },
+  {
+   "caso": {
+    "etiqueta": "banco_sa_a15",
+    "aoa": 15.0,
+    "turbulencia": "Spalart-Allmaras (RAS)",
+    "nivel": 2,
+    "radio": 200.0,
+    "ajustes": {}
+   },
+   "trabajo": "20261101_084938_banco_sa_a15_4290",
+   "maquina": "alejandro@100.85.66.123",
+   "estado": "terminado",
+   "error": "",
+   "veredicto": "CONVERGIDO",
+   "razon": "Cd varía 0.75 % en las últimas 500 iteraciones",
+   "cl": 1.525594644004949,
+   "cl_amp": 0.00017957672216495357,
+   "cd": 0.020466216858422214,
+   "cd_amp": 7.66972875554002e-05,
+   "cm": 0.014460226973228307,
+   "filas": 36001,
+   "yplus": 0.8056958578472457,
+   "comprobaciones": [
+    {
+     "nombre": "Cl frente a TMR",
+     "error": -0.015088783486873689,
+     "tope": 0.03,
+     "cumple": true,
+     "detalle": "1.5256 frente a 1.5490"
+    },
+    {
+     "nombre": "Cd frente a TMR",
+     "error": -0.03884391710603241,
+     "tope": 0.1,
+     "cumple": true,
+     "detalle": "0.02047 frente a 0.02129"
+    },
+    {
+     "nombre": "Cl frente a Ladson",
+     "error": 0.017570711737660578,
+     "tope": 0.05,
+     "cumple": true,
+     "detalle": "1.5256 frente a 1.4993"
+    },
+    {
+     "nombre": "Cd frente a Ladson",
+     "error": 0.1368378196717824,
+     "tope": 0.2,
+     "cumple": true,
+     "detalle": "0.02047 frente a 0.01800"
+    },
+    {
+     "nombre": "Cp frente a CFL3D (RMS)",
+     "error": 0.11006613695046033,
+     "tope": 0.1,
+     "cumple": false,
+     "detalle": "pico -10.798 frente a -11.160"
+    },
+    {
+     "nombre": "Cf frente a CFL3D (RMS)",
+     "error": 0.002017078805113643,
+     "tope": 0.0015,
+     "cumple": false,
+     "detalle": "extradós, sin el 2 % final"
+    }
+   ]
+  },
+  {
+   "caso": {
+    "etiqueta": "banco_dominio_R40_a10",
+    "aoa": 10.0,
+    "turbulencia": "k-Omega SST (RAS)",
+    "nivel": 2,
+    "radio": 40.0,
+    "ajustes": {}
+   },
+   "trabajo": "20261101_084938_banco_dominio_R40_a10_aa60",
+   "maquina": "alejandro@100.85.66.123",
+   "estado": "terminado",
+   "error": "",
+   "veredicto": "CONVERGIDO",
+   "razon": "Cd varía 0.27 % en las últimas 500 iteraciones",
+   "cl": 1.0621624356968087,
+   "cl_amp": 6.862499365545283e-05,
+   "cd": 0.012082487006389682,
+   "cd_amp": 1.60995168199847e-05,
+   "cm": 0.008495126145108594,
+   "filas": 15001,
+   "yplus": 0.6880265318280978,
+   "comprobaciones": []
+  },
+  {
+   "caso": {
+    "etiqueta": "banco_dominio_R500_a10",
+    "aoa": 10.0,
+    "turbulencia": "k-Omega SST (RAS)",
+    "nivel": 2,
+    "radio": 500.0,
+    "ajustes": {}
+   },
+   "trabajo": "20261101_084938_banco_dominio_R500_a10_9744",
+   "maquina": "alejandro@100.85.66.123",
+   "estado": "terminado",
+   "error": "",
+   "veredicto": "CONVERGIDO",
+   "razon": "Cd varía 0.55 % en las últimas 500 iteraciones",
+   "cl": 1.0666784799465823,
+   "cl_amp": 0.00013457132884853173,
+   "cd": 0.011276216532785458,
+   "cd_amp": 3.082644130694007e-05,
+   "cm": 0.008477503487634803,
+   "filas": 32585,
+   "yplus": 0.6859875291099041,
+   "comprobaciones": []
+  }
+ ],
+ "dominio": [
+  {
+   "nombre": "Dominio 40c en Cl",
+   "error": -0.00323987873155857,
+   "tope": 0.01,
+   "cumple": true,
+   "detalle": "1.0622 y 1.0656, 40c frente a 200c"
+  },
+  {
+   "nombre": "Dominio 40c en Cd",
+   "error": 0.05777014123510825,
+   "tope": 0.02,
+   "cumple": false,
+   "detalle": "0.01208 y 0.01142, 40c frente a 200c"
+  },
+  {
+   "nombre": "Dominio 500c en Cl",
+   "error": 0.0009980915287104387,
+   "tope": 0.01,
+   "cumple": true,
+   "detalle": "1.0667 y 1.0656, 500c frente a 200c"
+  },
+  {
+   "nombre": "Dominio 500c en Cd",
+   "error": -0.01281539569011398,
+   "tope": 0.02,
+   "cumple": true,
+   "detalle": "0.01128 y 0.01142, 500c frente a 200c"
+  }
+ ],
+ "cumplidas": 35,
+ "total": 40,
+ "sin_converger": [],
+ "tolerancias": {
+  "tmr": {
+   "0.0": [
+    0.01,
+    0.05
+   ],
+   "10.0": [
+    0.02,
+    0.05
+   ],
+   "15.0": [
+    0.03,
+    0.1
+   ]
+  },
+  "ladson": {
+   "0.0": [
+    0.02,
+    0.05
+   ],
+   "10.0": [
+    0.03,
+    0.1
+   ],
+   "15.0": [
+    0.05,
+    0.2
+   ]
+  },
+  "cp_rms": 0.1,
+  "cf_rms": 0.0015,
+  "dominio": [
+   0.01,
+   0.02
+  ]
+ }
+}

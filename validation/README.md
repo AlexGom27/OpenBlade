@@ -14,4 +14,6 @@ python3 -m core.cli polar --maquinas usuario@a:10:1 --angulos 0,4,8 --gci 0,8 re
 
 En la ventana: botón **Banco de Validación**, y **Análisis: Estudio de Malla**.
 
+`resultados/` tiene el banco y la polar vigentes.
+
 `refs/` sí está vigente: son los datos de referencia, de NASA TMR (`tmr_*`) y Ladson (NASA TM 4074).
