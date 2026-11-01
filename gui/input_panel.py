@@ -670,7 +670,7 @@ class InputPanel(QWidget):
             return
         self.remember_server(d["host"])
         self.server_status.setText(
-            f"✅ {d['nucleos']} hilos, carga {d['carga']:.1f}, "
+            f"✅ {d.get('fisicos', d['nucleos'])} núcleos ({d['nucleos']} hilos), carga {d['carga']:.1f}, "
             f"≈{d['libres']} libres\n{d['openfoam']}")
         if self.server_nproc.value() > d["libres"] > 0:
             self.server_nproc.setValue(d["libres"])

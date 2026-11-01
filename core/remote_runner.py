@@ -82,7 +82,8 @@ def probar_servidor(host: str) -> Dict[str, Any]:
            "command -v rsync >/dev/null && echo rsync || echo sin-rsync; "
            "command -v python3 >/dev/null && echo python3 || echo sin-python3; "
            "ls -d /opt/openfoam*/etc/bashrc /usr/lib/openfoam/openfoam*/etc/bashrc "
-           "/opt/OpenFOAM/OpenFOAM-*/etc/bashrc 2>/dev/null | tail -1; echo fin")
+           "/opt/OpenFOAM/OpenFOAM-*/etc/bashrc 2>/dev/null | tail -1; echo fin; "
+           "lscpu -b -p=Core,Socket 2>/dev/null | grep -v '^#' | sort -u | wc -l")
     try:
         r = _ssh(host, cmd, timeout=25)
     except subprocess.TimeoutExpired:
@@ -91,8 +92,11 @@ def probar_servidor(host: str) -> Dict[str, Any]:
         raise RemoteError(f"No se pudo conectar a {host}: {r.stderr.strip()[-200:]}")
     v = r.stdout.split("\n")
     nucleos, carga = int(v[0]), float(v[1])
-    return {"host": host, "nucleos": nucleos, "carga": carga,
-            "libres": max(0, int(nucleos - carga)),
+    # nproc cuenta hilos. Un i5-14500 da 20, y mpirun rechaza mas de sus 14 nucleos fisicos.
+    tras_fin = v[v.index("fin") + 1:] if "fin" in v else []
+    fisicos = int(tras_fin[0]) if tras_fin and tras_fin[0].strip().isdigit() and int(tras_fin[0]) > 0 else nucleos
+    return {"host": host, "nucleos": nucleos, "fisicos": fisicos, "carga": carga,
+            "libres": max(0, int(fisicos - carga)),
             "rsync": v[2] == "rsync", "python3": v[3] == "python3",
             "openfoam": v[4] if v[4] != "fin" else ""}
 

@@ -192,7 +192,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         linea(s["rsync"] and s["python3"], "rsync y python3")
         linea(bool(s["openfoam"]), f"OpenFOAM: {s['openfoam'] or 'no se encontró'}")
         linea(libre >= ESPACIO_MINIMO_GB, f"{libre:.0f} GB libres")
-        print(f"  ----  {s['nucleos']} núcleos, carga {s['carga']:.1f}")
+        print(f"  ----  {s.get('fisicos', s['nucleos'])} núcleos ({s['nucleos']} hilos), carga {s['carga']:.1f}")
     a_medias = [j.label for j in load_jobs() if j.state not in FINALES]
     if a_medias:
         print(f"Trabajos a medias: {len(a_medias)}. Se retoman al abrir la ventana, o con polar --continuar.")

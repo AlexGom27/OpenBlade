@@ -152,7 +152,9 @@ def main():
             correr(["decomposePar", "-force"], env, "log.decomposePar")
             # --bind-to none: puede haber otras campanas en el servidor y un
             # segundo mpirun no debe fijarse a sus mismos nucleos.
-            cmd = ["mpirun", "--bind-to", "none", "-np", str(nproc)] + cmd + ["-parallel"]
+            # --oversubscribe: sin el, mpirun rechaza mas procesos que nucleos fisicos, aunque
+            # los pida quien sabe que hay hilos libres. Ira mas lento, pero no se pierde el envio.
+            cmd = ["mpirun", "--bind-to", "none", "--oversubscribe", "-np", str(nproc)] + cmd + ["-parallel"]
 
         guardar_estado(step="solver")
         rc = correr(cmd, env, "run.log", obligatorio=False)
@@ -162,7 +164,13 @@ def main():
             guardar_estado(step="reconstructPar")
             extra = [] if job.get("transient") else ["-latestTime"]
             correr(["reconstructPar"] + extra, env, "log.reconstructPar")
-        guardar_estado(state="done" if rc == 0 else "failed", rc=rc, step="fin")
+        if rc == 0:
+            guardar_estado(state="done", rc=0, step="fin")
+        else:
+            # Lo que dijo el solver: sin esto solo se veia "SIN DATOS".
+            with open("run.log", errors="replace") as f:
+                cola = f.read()[-300:]
+            guardar_estado(state="failed", rc=rc, step="fin", error=f"El solver terminó con código {rc}: {cola}")
     except Detenido:
         # Lo calculado hasta aqui tambien se quiere ver: sin esto quedaba en processor*,
         # que no se descarga, y una corrida detenida no tenia campos.

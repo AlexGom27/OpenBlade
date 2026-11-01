@@ -170,3 +170,21 @@ def test_a_slow_link_reads_the_log_in_smaller_pieces(monkeypatch):
     assert t.leer_log() == "x" * 10 and t.offset == 10
     t.leer_log()
     assert pedidos == [2_000_000, 1_000_000, 500_000, 1_000_000]
+
+
+def test_the_server_check_tells_physical_cores_from_threads(monkeypatch):
+    from types import SimpleNamespace
+    from core import remote_runner as rr
+    salida = "20\n3.0\nrsync\npython3\n/opt/openfoam12/etc/bashrc\nfin\n14\n"
+    monkeypatch.setattr(rr, "_ssh", lambda *a, **k: SimpleNamespace(returncode=0, stdout=salida, stderr=""))
+    d = rr.probar_servidor("u@h")
+    assert (d["nucleos"], d["fisicos"], d["libres"]) == (20, 14, 11)
+    # Sin lscpu se usa lo que dijo nproc
+    salida = "8\n1.0\nrsync\npython3\nfin\n0\n"
+    d = rr.probar_servidor("u@h")
+    assert (d["fisicos"], d["openfoam"]) == (8, "")
+
+
+def test_more_processes_than_cores_are_not_refused():
+    fuente = open(os.path.join(os.path.dirname(__file__), "..", "core", "remote_job.py")).read()
+    assert '"--oversubscribe"' in fuente
