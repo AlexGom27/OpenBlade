@@ -174,6 +174,27 @@ def write_polar_csv(filas: Iterable[Dict[str, Any]], ruta: str) -> None:
             w.writerow(fila)
 
 
+def write_polar_xfoil(filas: Iterable[Dict[str, Any]], ruta: str, nombre: str, reynolds: float) -> int:
+    """La polar en el formato de texto de XFOIL, que importan QBlade y otros. Devuelve los puntos.
+
+    Solo van los puntos estacionarios CONVERGIDOS: lo demas acabaria en un calculo de turbina
+    como si fuera bueno, y SST no predice la perdida. La banda de malla no cabe en este
+    formato: esta en el CSV. El flujo es totalmente turbulento (Xtr 0); CDp no se calcula aqui.
+    """
+    buenas = sorted((f for f in filas if f["veredicto"] == "CONVERGIDO" and not f["transitorio"]),
+                    key=lambda f: f["aoa"])
+    with open(ruta, "w") as f:
+        f.write(f"       OpenBlade, polar RANS en formato XFOIL\n\n Calculated polar for: {nombre}\n\n"
+                " 1 1 Reynolds number fixed          Mach number fixed\n\n"
+                " xtrf =   0.000 (top)        0.000 (bottom)\n"
+                f" Mach =   0.000     Re = {reynolds / 1e6:9.3f} e 6     Ncrit =   9.000\n\n"
+                "   alpha    CL        CD       CDp       CM     Top_Xtr  Bot_Xtr\n"
+                "  ------ -------- --------- --------- -------- -------- --------\n")
+        for p in buenas:
+            f.write(f"  {p['aoa']:6.3f} {p['cl']:8.4f} {p['cd']:9.5f} {0.0:9.5f} {p['cm']:8.4f} {0.0:8.4f} {0.0:8.4f}\n")
+    return len(buenas)
+
+
 # Medido a 15 grados en 897 x 257: desde 10 grados queda atrapada en un ciclo grande
 # (Cl de 1.28 a 1.43); en 449 x 129, desde 14 grados da lo mismo que en frio.
 SALTO_MAX = 2.0
@@ -281,7 +302,7 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
 
 
 def write_polar_report(resultado: Dict[str, Any], carpeta: str) -> str:
-    """polar.json, polar.csv y una figura de Cl y Cd con su banda de malla."""
+    """polar.json, polar.csv, polar_xfoil.txt y una figura de Cl y Cd con su banda de malla."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -292,6 +313,9 @@ def write_polar_report(resultado: Dict[str, Any], carpeta: str) -> str:
     with open(os.path.join(carpeta, "polar.json"), "w") as f:
         json.dump(resultado, f, indent=1, ensure_ascii=False)
     write_polar_csv(resultado["filas"], os.path.join(carpeta, "polar.csv"))
+    base = resultado.get("base") or {}
+    write_polar_xfoil(resultado["filas"], os.path.join(carpeta, "polar_xfoil.txt"),
+                      f"NACA {base.get('naca')}", float(base.get("reynolds", 1e6)))
 
     filas = [f for f in resultado["filas"] if f["cl"] is not None]
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.5), constrained_layout=True)

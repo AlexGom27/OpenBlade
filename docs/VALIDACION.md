@@ -181,5 +181,6 @@ Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos lleva
 - Transitorio a Re alto con y+<1: no validado.
 - k-ε con ley de pared, k-ω y SST-LM: solo comprobados en funcionamiento.
 - Fuera del NACA 0012 no hay tolerancias.
+- `polar_xfoil.txt` lleva solo los puntos convergidos, sin banda ni CDp. Su formato no se ha probado todavía importándolo en QBlade, que además exige completar la polar a 360°.
 - Borde de salida abierto: la malla C propia lo cierra, así que no representa perfiles romos. Hasta 0.2 % de la cuerda solo lo anota en la ficha; hasta 2 %, avisa del arrastre de base que falta (Hoerner), y eso no entra en la banda de malla; con más, rechaza el perfil. Un perfil de 30 % con 2 % de abertura queda 11 % más delgado en x/c=0.8.
 - La cola de trabajos vive en la computadora que los lanza: si se duerme o pierde la conexión, lo que corre sigue en su máquina y lo pendiente espera. La parada temprana también se decide en ella: sin conexión, el cálculo sigue hasta el tope de iteraciones.

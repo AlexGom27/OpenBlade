@@ -5,7 +5,7 @@ import csv
 import pytest
 
 from core.campaign import (grid_study_cases, grid_study_result, grid_study_text, polar_table, usable,
-                           write_polar_csv, write_polar_report)
+                           write_polar_csv, write_polar_report, write_polar_xfoil)
 from core.defaults import case_params
 from core.jobs import TERMINADO, new_job
 
@@ -258,3 +258,15 @@ def test_zero_lift_does_not_show_a_percentage_of_nothing():
     t = [trabajo(nivel=1, cl=1e-6, cd=0.0076), trabajo(nivel=2, cl=-1e-6, cd=0.0078), trabajo(nivel=3, cl=1e-6, cd=0.0080)]
     texto = grid_study_text(grid_study_result(t))
     assert texto.startswith("Cl = 0.00000") and texto.split("   ")[0].count("%") == 0 and "GCI" in texto
+
+
+def test_the_xfoil_export_only_carries_converged_steady_points(tmp_path):
+    filas = polar_table([trabajo(aoa=4.0), trabajo(aoa=-2.0, cl=-0.2), trabajo(aoa=18.0, estado="NO CONVERGIDO"),
+                         trabajo(aoa=6.0, transitorio=True)])
+    ruta = tmp_path / "p.txt"
+    assert write_polar_xfoil(filas, str(ruta), "NACA 0012", 6e6) == 2
+    lineas = ruta.read_text().splitlines()
+    assert "Re =     6.000 e 6" in lineas[7]
+    datos = [l.split() for l in lineas[lineas.index(next(l for l in lineas if "------" in l)) + 1:]]
+    assert [float(d[0]) for d in datos] == [-2.0, 4.0] and all(len(d) == 7 for d in datos)
+    assert float(datos[1][1]) == 0.43 and float(datos[1][2]) == 0.0084
