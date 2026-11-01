@@ -125,7 +125,7 @@ A α=15 en 897×257, desde el flujo potencial el cálculo revienta hacia la iter
 
 **Simetría (M).** α=±4, nivel 1: Cl +0.43752 y −0.43751, Cd 0.00787 en ambos, Cm ±0.0026.
 
-**Perfil con curvatura (M).** NACA 4412, nivel 2, Re=6×10⁶: α=0 da Cl 0.455, Cd 0.00831, Cm −0.098; α=8 da Cl 1.280, Cd 0.01172, Cm −0.088. Frente a Coles y Wadcock (α=13.87, Re=1.52×10⁶): Cl 1.638 oscilando, Cp RMS 0.20 en extradós y 0.15 en intradós, pico −7.04 frente a −6.21. Sin tolerancia fijada.
+**Perfil con curvatura (M).** NACA 4412, nivel 2, Re=6×10⁶: α=0 da Cl 0.455, Cd 0.00831, Cm −0.098; α=8 da Cl 1.280, Cd 0.01172, Cm −0.088. Leído de un archivo de coordenadas con 6 decimales, la vía de cualquier perfil propio, α=8 da Cl 1.2803, Cd 0.01170, Cm −0.0875: difiere 0.004 % en Cl y 0.2 % en Cd. Frente a Coles y Wadcock (α=13.87, Re=1.52×10⁶): Cl 1.638 oscilando, Cp RMS 0.20 en extradós y 0.15 en intradós, pico −7.04 frente a −6.21. Sin tolerancia fijada.
 
 **Otros modelos a α=4 (M).** Solo comprueban que corren desde el programa. Ninguno está validado.
 
@@ -182,4 +182,4 @@ Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos lleva
 - k-ε con ley de pared, k-ω y SST-LM: solo comprobados en funcionamiento.
 - Fuera del NACA 0012 no hay tolerancias.
 - Borde de salida abierto: la malla C propia lo cierra, así que no representa perfiles romos. Hasta 0.2 % de la cuerda solo lo anota en la ficha; hasta 2 %, avisa del arrastre de base que falta (Hoerner), y eso no entra en la banda de malla; con más, rechaza el perfil. Un perfil de 30 % con 2 % de abertura queda 11 % más delgado en x/c=0.8.
-- La cola de trabajos vive en la computadora que los lanza: si se duerme, lo que corre sigue en su máquina y lo pendiente espera.
+- La cola de trabajos vive en la computadora que los lanza: si se duerme o pierde la conexión, lo que corre sigue en su máquina y lo pendiente espera. La parada temprana también se decide en ella: sin conexión, el cálculo sigue hasta el tope de iteraciones.
