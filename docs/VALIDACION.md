@@ -7,10 +7,10 @@ Todo lo de este documento salió del programa: malla y caso generados en la Mac,
 | Qué | Estado |
 |---|---|
 | Cl del NACA 0012, Re=6e6, de 4° a 17° | A menos de 1.7 % de Ladson, y de 1.2 % de 6° a 17°. A 2° difiere 0.010 (+4.9 %) |
-| Cd del NACA 0012 en la malla por defecto | De −4.1 a +4.0 % frente a Ladson hasta 12°, dentro de su banda de malla (de ±7 a ±13 %); de +10 a +15 % de 14° a 17° |
+| Cd del NACA 0012 en la malla por defecto | De −4.1 a +4.0 % frente a Ladson hasta 12°, dentro de su banda de malla (de ±7 a ±13 %), y en parte por compensación de errores (§6); de +10 a +15 % de 14° a 17° |
 | Cd frente a NASA TMR, malla extrapolada | −1.0 % a 10°. A 15°, +2.1 %, con un orden bajo que lo hace poco firme (§6) |
 | Pérdida | **No la predice.** Ladson cae a Cl≈1.0 a 18°; SST da 1.60 |
-| Reproducibilidad entre máquinas | Mismo paquete y procesos, fuerzas idénticas byte a byte en Local (Docker) y en un servidor, en una prueba corta de 300 iteraciones |
+| Reproducibilidad entre máquinas | Mismo paquete y procesos, fuerzas idénticas byte a byte en los dos servidores, en corridas completas a α=0 y α=8 (§7) |
 | Perfil con curvatura (NACA 4412) | Comprobado el signo de Cm y Cp frente a experimento; sin tolerancias |
 | Transitorio | Estable en un caso laminar. A Re alto con y+<1 **no está validado** (§7) |
 | Mallas oficiales de TMR | 449×129 no es practicable; 225×65 corre pero Cd oscila (§6) |
@@ -65,7 +65,7 @@ La banda es la de malla, calculada con GCI a 0°, 10° y 15° e interpolada entr
 | 17 | oscila | 1.5970 | | 1.6160 | −1.2 % | 0.02828 | | 0.02460 | +15.0 % |
 | 18 | oscila | 1.6047 | | ≈1.0, en pérdida | | 0.03641 | | 0.188 | |
 
-Ladson está interpolado entre sus ángulos medidos. «Oscila» es NO CONVERGIDO con media estable: Cd varía 1.1–1.5 % en las últimas 500 iteraciones, y se da su media. α=18 arrancó de α=17; los demás, del flujo potencial.
+Ladson está interpolado entre sus ángulos medidos. «Oscila» es NO CONVERGIDO con media estable: Cd varía 1.1–1.5 % en las últimas 500 iteraciones, y se da su media. α=18 arrancó de α=17; los demás, del flujo potencial. En frío, α=18 no llega a estabilizarse en 40 000 iteraciones (su media de Cd aún cambia 4.5 %), pero acaba en el mismo punto: Cl 1.6040 y Cd 0.03645, frente a 1.6047 y 0.03641. No hay señal de dos soluciones.
 
 ## 5. Banco de validación
 
@@ -95,12 +95,23 @@ Cada coeficiente con tres niveles anidados, r=2 y factor de seguridad 1.25; si e
 
 **El Cd bajo frente a TMR es sobre todo de la malla.** En el nivel 2 está 8.4 % por debajo a 10° y 10.7 % a 15°. En el nivel 3, 4.0 % y 6.8 %. Extrapolado queda a −1.0 % y +2.1 %. A 15° el orden medido, 0.53, está justo sobre el mínimo aceptado, así que ese +2.1 % es poco firme: con orden 1 el extrapolado sería 0.02163 (−2.9 %), y con orden 2, 0.02105 (−5.5 %). Para Cl basta el nivel 2; para Cd a menos de 5 % de TMR a 10° hace falta el nivel 3.
 
+**La cercanía a Ladson en el nivel 2 es en parte compensación de errores.** Cd frente a Ladson:
+
+| α | Nivel 2 | Nivel 3 | Extrapolado | TMR (media) |
+|---|---|---|---|---|
+| 10 | −4.1 % | +0.5 % | +3.6 % | +4.7 % |
+| 15 | +10.5 % | +15.3 % | poco firme | +23.7 % |
+
+Refinar aleja Cd de Ladson y lo acerca a TMR. El error de malla del nivel 2 compensa una diferencia con el experimento que los códigos de referencia de TMR también muestran, así que esa diferencia no es de malla; estos datos no dicen si viene del modelo de turbulencia o del experimento. Una diferencia pequeña con Ladson en el nivel 2 no prueba por sí sola que Cd sea exacto.
+
 **Arranque desde la malla anterior.** Los estudios de malla arrancan cada nivel de la solución del anterior:
 
-| 897×257, α=10 | Iteraciones | Cl | Cd |
+| 897×257 | Iteraciones | Cl | Cd |
 |---|---|---|---|
-| Desde el flujo potencial | 34 001 | 1.0619 | 0.01200 |
-| Desde el nivel 2 | 7 001 | 1.0628 | 0.01197 |
+| α=10, desde el flujo potencial | 34 001 | 1.0619 | 0.01200 |
+| α=10, desde el nivel 2 | 7 001 | 1.0628 | 0.01197 |
+| α=0, desde el flujo potencial | 80 001 | 0.0000 | 0.007989 |
+| α=0, desde el nivel 2 | 5 001 | 0.0000 | 0.007995 |
 
 Cambiar el arranque mueve el extrapolado de Cd a 10° de 0.01242 a 0.01234 (0.6 %), menos que su banda de ±3.9 %.
 
@@ -143,6 +154,15 @@ El ruido con la capa límite desarrollada indica que el acoplamiento presión-ve
 
 **Parada y veredicto.** La deriva se mide entre los dos últimos quintos de la corrida. Reproducido sobre historias reales, la parada temprana queda a menos de 0.02 % de corridas mucho más largas a 10° y 15°, y a 0.1 % a 0°. Con ventanas fijas de 500 iteraciones, 897×257 parecía convergida con Cd aún 1 % alto.
 
+**Caso de control (M).** Mismo paquete en los dos servidores, 8 procesos, lanzado desde el programa. Pasa todas las compuertas:
+
+| α | Iteraciones | Cl | Cd | md5 de las fuerzas | Diferencia máxima entre servidores |
+|---|---|---|---|---|---|
+| 0 | 16 001 | 0.0000 | 0.00784 | `42c7aa517468` en ambos | 0 en todas las filas |
+| 8 | 13 001 | 0.8615 | 0.00987 | `8bd26dd455ac` en ambos | 0 en todas las filas |
+
+Las fichas coinciden en archivos, parámetros y versiones; la malla es `c2ed1a996956` en los dos. Cada corrida, con otra simultánea en la misma máquina, tardó de 16 a 24 minutos con subida y descarga. Los dos servidores tienen el mismo procesador y la misma compilación de OpenFOAM: con otro procesador no está medido.
+
 **Reproducibilidad.** Local (Docker emulado) y `openblade2`, 2 procesos y 300 iteraciones: fuerzas idénticas, md5 `6086045a3719`. Es una prueba corta, y el resultado vale para el mismo número de procesos. Un clon nuevo con un entorno nuevo da la misma malla: sha256 `c2ed1a996956` en el nivel 2, con numpy 2.4.0 y 2.4.6.
 
 ## 8. Por qué lo anterior no sirve
@@ -154,14 +174,12 @@ Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos lleva
 
 ## 9. Límites declarados
 
-Pendiente: repetir el caso de control con esta malla en los dos servidores.
-
-
 - No predice la pérdida: SST sigue a Cl 1.60 a 18°, donde el experimento cae a 1.0.
-- A partir de 14° Cd está 10–15 % por encima de Ladson.
+- A partir de 14° Cd está 10–15 % por encima de Ladson, y refinar la malla aumenta la diferencia.
 - Nivel 2 sirve para Cl. Para Cd a menos de 5 % de TMR, nivel 3.
 - La banda de malla de Cl a 15° es grande (±4.3 %) porque el nivel 1 es pobre ahí.
 - Transitorio a Re alto con y+<1: no validado.
 - k-ε con ley de pared, k-ω y SST-LM: solo comprobados en funcionamiento.
 - Fuera del NACA 0012 no hay tolerancias.
+- Borde de salida abierto: la malla C propia lo cierra, así que no representa perfiles romos. Hasta 0.2 % de la cuerda solo lo anota en la ficha; hasta 2 %, avisa del arrastre de base que falta (Hoerner), y eso no entra en la banda de malla; con más, rechaza el perfil. Un perfil de 30 % con 2 % de abertura queda 11 % más delgado en x/c=0.8.
 - La cola de trabajos vive en la computadora que los lanza: si se duerme, lo que corre sigue en su máquina y lo pendiente espera.

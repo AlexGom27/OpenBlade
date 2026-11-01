@@ -118,10 +118,9 @@ Hoy el control pasa 1-5 y 7, y falla 6 (+49 %). La compuerta 8 no se puede evalu
 | E5 | Hecha: banco, malla propia, tolerancias declaradas | `c7ff71c` en adelante |
 | E6 | Hecha en estacionario: polar con banda de malla. URANS no validado a Re alto | `04cf1b3` en adelante |
 
-Los resultados, con sus tolerancias y lo que no cumplen, están en [VALIDACION.md](VALIDACION.md). Las tablas de §2 y §3 son de antes de corregir `writePrecision` y la tolerancia del solver lineal: solo explican cómo se llegó aquí.
+Los resultados, con sus tolerancias y lo que no cumplen, están en [VALIDACION.md](VALIDACION.md). El caso de control con la malla nueva pasa: fuerzas idénticas byte a byte en los dos servidores. Las tablas de §2 y §3 son de antes de corregir `writePrecision` y la tolerancia del solver lineal: solo explican cómo se llegó aquí.
 
 **Abierto**
 - Transitorio a Re alto con y+<1: Courant 30 revienta y Courant 10 da fuerzas ruidosas con la capa límite desarrollada. Falta probar relajación y más correctores externos.
 - `core/openfoam_setup.py` sigue con un cambio ajeno sin subir (PIMPLE: `nOuterCorrectors 2`, `outerCorrectorResidualControl`). Las pruebas de transitorio se hicieron con él. Decide Alejandro.
-- Caso de control con la malla nueva: pendiente de repetir en los dos servidores.
 - La cola vive en la Mac. Con la tapa cerrada no se envía lo pendiente; se retoma con `polar --continuar` o al abrir la ventana.

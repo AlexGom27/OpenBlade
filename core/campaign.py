@@ -2,8 +2,9 @@
 
 Cada punto es un paquete normal, con su carpeta, ficha y veredicto. La incertidumbre
 sale de un GCI con tres niveles anidados en los angulos que se indiquen; entre esos
-angulos se interpola la banda relativa. Un punto que no converge no se presenta como
-resultado: se indica, y si se pide se repite en transitorio.
+angulos se interpola la banda relativa. Un punto que no converge se indica: si oscila
+poco con media estable da su media, marcada y sin banda; si no, no da numeros. Si se
+pide, se repite en transitorio.
 """
 
 from __future__ import annotations
