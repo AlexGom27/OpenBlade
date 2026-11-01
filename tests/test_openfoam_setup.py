@@ -238,14 +238,10 @@ def test_bounded_convection_is_only_for_steady_runs(tmp_path):
     assert "bounded" not in transitorio and "default Euler" in transitorio
 
 
-def test_the_outlet_stops_backflow_only_in_a_transient(tmp_path):
+def test_the_outlet_stops_backflow(tmp_path):
     from core.openfoam_setup import OpenFoamSetup
 
-    def salida(transitorio):
-        carpeta = tmp_path / ("t" if transitorio else "e")
-        OpenFoamSetup(str(carpeta)).create_case(transient=transitorio)
-        texto = (carpeta / "0" / "U").read_text()
-        return texto[texto.index("outlet"):texto.index("}", texto.index("outlet"))]
-
-    assert "inletOutlet" in salida(True)
-    assert "zeroGradient" in salida(False)
+    OpenFoamSetup(str(tmp_path)).create_case(transient=False)
+    for campo in ("U", "k", "omega"):
+        texto = (tmp_path / "0" / campo).read_text()
+        assert "inletOutlet" in texto[texto.index("outlet"):texto.index("}", texto.index("outlet"))], campo
