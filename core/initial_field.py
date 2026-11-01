@@ -1,9 +1,9 @@
 """Arrancar un caso desde el resultado de otro con la misma malla.
 
-Un transitorio que arranca del flujo potencial sufre un arranque impulsivo: a 18 grados
-Cl pasa de 7 y el calculo revienta con Courant 30 antes de una cuerda de recorrido. Si
-arranca del campo estacionario, ese transitorio no existe. Solo se copia el interior de
-los campos: las condiciones de contorno son las que escribio el programa para este caso.
+Un transitorio que arranca del flujo potencial tarda varias cuerdas de recorrido en dejar
+atras el arranque impulsivo: a 18 grados, Cl pasa de 0.6 a 1.04 en 1.5 cuerdas. Desde el
+campo estacionario ese tramo no existe. Solo se copia el interior de los campos: las
+condiciones de contorno son las que escribio el programa para este caso.
 """
 
 from __future__ import annotations
