@@ -17,7 +17,6 @@ import numpy as np
 
 from core.defaults import DEFAULT_PARAMS, case_params
 from core.gci import study_from_levels
-from core.initial_field import latest_fields
 from core.jobs import (DESCARGANDO, DETENIDO, Dispatcher, Events, FALLIDO, FINALES, Job, Machine, load_jobs,
                        new_job)
 
@@ -31,6 +30,13 @@ DERIVA_MAX = 0.1        # cambio de la media entre tramos frente al salto entre 
 CL_MINIMO = 0.1         # con Cl casi nulo la amplitud relativa no sirve
 CM_AMP_MAX = 0.005      # Cm es casi nulo: su amplitud se mide en absoluto
 PARAM_TRANSITORIO = {"regime": "Transitorio (pimpleFoam)"}
+
+
+def _oscilacion_pequena(v: Dict[str, Any]) -> bool:
+    """Oscila, pero poco frente a su media: esa media dice algo."""
+    return (bool(v.get("oscila")) and v.get("cl") is not None and v.get("cd") is not None
+            and (v.get("cl_amp") or 0.0) <= OSCILACION_MAX * max(abs(v["cl"]), CL_MINIMO)
+            and (v.get("cd_amp") or 0.0) <= OSCILACION_MAX * abs(v["cd"]))
 
 
 def verdict_of(job: Job) -> Dict[str, Any]:
@@ -132,7 +138,7 @@ def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = (),
         fila = {"aoa": a, "veredicto": v.get("state"), "razon": v.get("reason"), "transitorio": j.transient,
                 "cl": None, "cl_amp": None, "cd": None, "cd_amp": None, "cm": None,
                 "banda_cl": None, "banda_cd": None, "periodo": v.get("period"), "trabajo": j.id,
-                "oscila": bool(v.get("oscila")),
+                "oscila": _oscilacion_pequena(v),
                 "maquina": j.host, "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean")}
         if usable(j) or fila["oscila"]:
             fila.update(cl=v["cl"], cl_amp=v["cl_amp"], cd=v["cd"], cd_amp=v["cd_amp"], cm=v["cm"])
@@ -217,9 +223,6 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
         for a, j in puntos.items():
             if not usable(j):
                 q = dict(params, aoa=a, **PARAM_TRANSITORIO, **(urans or {}))
-                # Del campo estacionario, si lo hay: se ahorra el arranque impulsivo.
-                if verdict_of(j).get("state") == "NO CONVERGIDO" and latest_fields(j.case_dir):
-                    q["campo_inicial"] = j.case_dir
                 t = new_job(q, label=f"urans_a{a:g}")
                 transitorios[a] = t
                 d.submit(t)

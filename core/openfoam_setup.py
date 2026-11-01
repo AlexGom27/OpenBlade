@@ -67,6 +67,7 @@ class OpenFoamSetup:
         self.relax_eq = relax_eq
         self.consistent = consistent
         self.ddt_scheme = ddt_scheme
+        self.transient = transient
             
         self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co, max_iters, momentum_scheme, depth)
         # Se guarda la primera celda: _write_0 la usa para elegir el modelo de
@@ -415,7 +416,10 @@ RAS {{
             p_sal = p_ent
         else:
             u_ent = f"type fixedValue; value uniform {u_vec};"
-            u_sal = "type zeroGradient;"
+            # En transitorio la estela llega a la salida y puede volver a entrar: sin frenar
+            # ese reflujo, el caudal crece solo. En estacionario no llega a haberlo.
+            u_sal = (f"type inletOutlet; inletValue uniform (0 0 0); value uniform {u_vec};"
+                     if self.transient else "type zeroGradient;")
             p_ent = "type zeroGradient;"
             p_sal = f"type fixedValue; value uniform {p_outlet};"
 
@@ -424,7 +428,9 @@ RAS {{
             if libre:
                 c = f"type inletOutlet; inletValue uniform {valor:.6e}; value uniform {valor:.6e};"
                 return c, c
-            return f"type fixedValue; value uniform {valor:.6e};", "type zeroGradient;"
+            salida = (f"type inletOutlet; inletValue uniform {valor:.6e}; value uniform {valor:.6e};"
+                      if self.transient else "type zeroGradient;")
+            return f"type fixedValue; value uniform {valor:.6e};", salida
         
         # Boundary/Initial Conditions for U and p (common)
         U_content = f"""FoamFile {{ version 2.0; format ascii; class volVectorField; object U; }}

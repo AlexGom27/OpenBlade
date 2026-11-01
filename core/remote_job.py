@@ -156,6 +156,8 @@ def main():
 
         guardar_estado(step="solver")
         rc = correr(cmd, env, "run.log", obligatorio=False)
+        # El calculo ya acabo: lo que queda no se interrumpe a medias.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if rc == 0 and nproc > 1:
             guardar_estado(step="reconstructPar")
             extra = [] if job.get("transient") else ["-latestTime"]

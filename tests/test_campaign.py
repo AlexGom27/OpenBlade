@@ -67,6 +67,10 @@ def test_a_point_that_barely_oscillates_gives_its_mean_marked_and_without_band()
     fila = polar_table([oscila], estudio)[0]
     assert fila["cl"] == 1.558 and fila["oscila"] and fila["banda_cl"] is None
     assert not usable(oscila)
+    # Con una amplitud grande, esa media no es un resultado
+    oscila.analysis["verdict"]["cl_amp"] = 0.4
+    fila = polar_table([oscila], estudio)[0]
+    assert fila["cl"] is None and not fila["oscila"]
 
 
 def test_results_are_saved(tmp_path):

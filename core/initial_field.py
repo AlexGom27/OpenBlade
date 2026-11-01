@@ -1,16 +1,17 @@
 """Arrancar un caso desde el resultado de otro con la misma malla.
 
-Un transitorio que arranca del flujo potencial tarda varias cuerdas de recorrido en dejar
-atras el arranque impulsivo: a 18 grados, Cl pasa de 0.6 a 1.04 en 1.5 cuerdas. Desde el
-campo estacionario ese tramo no existe. Solo se copia el interior de los campos: las
-condiciones de contorno son las que escribio el programa para este caso.
+Solo se copia el interior de los campos: las condiciones de contorno son las que escribio
+el programa para este caso. El flujo no se copia: OpenFOAM lo interpola de U.
+
+No arregla un transitorio inestable: a 18 grados y Re = 6e6, desde el campo estacionario
+las fuerzas salen mas ruidosas que desde el flujo potencial, con Courant 10 y tambien
+copiando el flujo.
 """
 
 from __future__ import annotations
 
 import os
 import re
-import shutil
 from typing import Optional
 
 from core.package import read_ficha, sha256_file
@@ -55,8 +56,4 @@ def start_from(origen: str, case_dir: str, msh_file: str) -> str:
             raise ValueError(f"No se encontró internalField en {campo}")
         with open(ruta, "w") as f:
             f.write(_INTERIOR.sub(lambda _: hallado.group(0), texto, count=1))
-    # Sin el flujo de esa corrida, OpenFOAM lo interpola de U y no conserva masa de partida.
-    flujo = os.path.join(tiempo, "phi")
-    if os.path.exists(flujo):
-        shutil.copy2(flujo, os.path.join(destino, "phi"))
     return os.path.basename(tiempo)
