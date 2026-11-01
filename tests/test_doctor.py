@@ -43,3 +43,13 @@ def test_a_server_without_openfoam_is_a_problem(monkeypatch, capsys):
 def test_versions_are_compared_with_requirements():
     distintos = cli._versiones_distintas()
     assert isinstance(distintos, list)
+
+
+def test_what_the_program_imports_on_demand_is_in_the_requirements():
+    """Guardar Video fallaba en una instalacion limpia: imageio no estaba en la lista."""
+    import os
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(raiz, "requirements.txt")) as f:
+        lista = f.read()
+    for paquete in ("imageio", "imageio-ffmpeg", "reportlab", "pyvistaqt", "gmsh"):
+        assert f"{paquete}==" in lista
