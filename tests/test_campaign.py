@@ -198,3 +198,38 @@ def test_an_interrupted_polar_goes_on_without_repeating_anything(monkeypatch):
     # Solo el que fallo de verdad tiene carpeta nueva
     assert len(load_jobs()) == total + 1
     assert [f["aoa"] for f in r["filas"]] == [2.0, 4.0, 6.0, 8.0, 10.0]
+
+
+def test_a_point_that_blows_up_at_the_start_is_rescued_from_its_nearest_neighbor(monkeypatch):
+    import core.campaign as C
+
+    enviados = []
+
+    class Falso:
+        def __init__(self, *a, **k):
+            pass
+
+        def set_machines(self, m):
+            pass
+
+        def submit(self, j):
+            enviados.append(j)
+            j.state = TERMINADO
+            estado = "DIVERGIDO" if j.params["aoa"] == 15.0 and not j.params.get("campo_inicial") else "CONVERGIDO"
+            j.analysis = {"verdict": {"state": estado, "reason": "r", "cl": 1.0, "cl_amp": 0.0, "cd": 0.01,
+                                      "cd_amp": 0.0, "cm": 0.0}, "yplus": {"mean": 0.7}}
+
+        def attach(self, j):
+            pass
+
+        def wait(self):
+            pass
+
+    monkeypatch.setattr(C, "Dispatcher", Falso)
+    r = C.run_polar([], {"reynolds": 6e6}, [4.0, 12.0, 15.0], [])
+    rescate = enviados[-1]
+    assert rescate.label == "polar_a15_vecino"
+    a12 = next(j for j in enviados if j.label == "polar_a12")
+    assert rescate.params["campo_inicial"] == a12.case_dir
+    fila = next(f for f in r["filas"] if f["aoa"] == 15.0)
+    assert fila["veredicto"] == "CONVERGIDO" and fila["trabajo"] == rescate.id

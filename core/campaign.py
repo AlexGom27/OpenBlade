@@ -18,7 +18,7 @@ import numpy as np
 from core.defaults import DEFAULT_PARAMS, case_params
 from core.gci import study_from_levels
 from core.jobs import (DESCARGANDO, DETENIDO, Dispatcher, Events, FALLIDO, FINALES, Job, Machine, load_jobs,
-                       new_job)
+                       mesh_key, new_job)
 
 NIVELES_GCI = (1, 2, 3)
 NIVEL_BASE = 2
@@ -162,6 +162,13 @@ def write_polar_csv(filas: Iterable[Dict[str, Any]], ruta: str) -> None:
             w.writerow(fila)
 
 
+def _neighbor(trabajos: Sequence[Job], j: Job) -> Optional[Job]:
+    """El trabajo convergido de angulo mas cercano en la misma malla."""
+    malla = mesh_key(j.params)
+    candidatos = [k for k in trabajos if k is not j and usable(k) and mesh_key(k.params) == malla]
+    return min(candidatos, key=lambda k: abs(float(k.params["aoa"]) - float(j.params["aoa"])), default=None)
+
+
 def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[float],
               angulos_gci: Sequence[float], events: Optional[Events] = None,
               urans_si_no_converge: bool = False, urans: Optional[Dict[str, Any]] = None,
@@ -186,9 +193,20 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
             if j.state == FALLIDO and j.remote_dir and j.rc == 0 and not j.analysis:
                 j.state, j.error, j.finished = DESCARGANDO, "", None
                 return j
-            if j.state not in (FALLIDO, DETENIDO):
+            # Reventado al arrancar: repetirlo igual reventaria otra vez; se rescata abajo.
+            if j.state not in (FALLIDO, DETENIDO) or verdict_of(j).get("state") == "DIVERGIDO":
                 return j
         return new_job(q, label=etiqueta)
+
+    def enviar(trabajos: Iterable[Job]) -> None:
+        # Lo que sigue en su maquina ocupa su sitio antes de repartir lo demas.
+        for j in trabajos:
+            if j.remote_dir and j.state not in FINALES:
+                d.attach(j)
+        # Primero lo rapido: la polar queda lista aunque las mallas finas tarden horas.
+        for j in sorted(trabajos, key=lambda j: int(j.params.get("grid_level", 2))):
+            if not j.remote_dir and j.state not in FINALES:
+                d.submit(j)
 
     puntos = {}
     estudios_trabajos: Dict[float, List[Job]] = {}
@@ -208,15 +226,21 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
         j = trabajo(dict(params, aoa=float(a)), f"polar_a{a:g}")
         puntos[float(a)] = j
         pendientes.append(j)
-    # Lo que sigue en su maquina ocupa su sitio antes de repartir lo demas.
-    for j in pendientes:
-        if j.remote_dir and j.state not in FINALES:
-            d.attach(j)
-    # Primero lo rapido: la polar queda lista aunque las mallas finas tarden horas.
-    for j in sorted(pendientes, key=lambda j: int(j.params.get("grid_level", 2))):
-        if not j.remote_dir and j.state not in FINALES:
-            d.submit(j)
+    enviar(pendientes)
     d.wait()
+
+    # Un punto que revienta al arrancar suele salir desde el angulo vecino: la malla es la
+    # misma. Medido a 15 grados en el nivel 2: el resultado no cambia (Cd 0.019875 y 0.019893)
+    # y Cd llega a 0.5 % de su valor en 2100 iteraciones en lugar de 16 700.
+    rescates: Dict[str, Job] = {}
+    for j in pendientes:
+        vecino = _neighbor(pendientes, j) if verdict_of(j).get("state") == "DIVERGIDO" else None
+        if vecino is not None:
+            rescates[j.id] = trabajo(dict(j.params, campo_inicial=vecino.case_dir), f"{j.label}_vecino")
+    enviar(list(rescates.values()))
+    d.wait()
+    puntos = {a: rescates.get(j.id, j) for a, j in puntos.items()}
+    estudios_trabajos = {a: [rescates.get(j.id, j) for j in g] for a, g in estudios_trabajos.items()}
 
     transitorios = {}
     if urans_si_no_converge:
