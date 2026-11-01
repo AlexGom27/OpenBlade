@@ -6,7 +6,7 @@ class OpenFoamSetup:
     def __init__(self, case_dir: str = "openfoam_case") -> None:
         self.case_dir = case_dir
         
-    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4, turb_intensity: float = 0.00052, viscosity_ratio: float = 0.009, aoa_flow: float = 0.0, bc_type: str = "entrada_salida", turb_scheme: str = "upwind", grad_scheme: str = "cellMDLimited Gauss linear 1", lap_correction: str = "limited corrected 0.5", relax_p: float = 0.2, relax_eq: float = 0.5, consistent: bool = False) -> None:
+    def create_case(self, u_inlet: float = 15.0, p_outlet: float = 0.0, chord: float = 1.0, transient: bool = False, tolerance: str = "1e-4", turbulence: str = "k-Omega SST (RAS)", reynolds: float = 1000000.0, delta_t: str = "1e-3", end_time: str = "0.5", write_interval: str = "0.01", max_co: float = 2.0, max_iters: int = 500, momentum_scheme: str = "limitedLinearV", depth: float = 0.1, bl_dist_min: float = 1e-4, turb_intensity: float = 0.00052, viscosity_ratio: float = 0.009, aoa_flow: float = 0.0, bc_type: str = "entrada_salida", turb_scheme: str = "upwind", grad_scheme: str = "cellMDLimited Gauss linear 1", lap_correction: str = "limited corrected 0.5", relax_p: float = 0.2, relax_eq: float = 0.5, consistent: bool = False, ddt_scheme: str = "backward") -> None:
         # Create directories
         for d in ["0", "constant", "system"]:
             os.makedirs(os.path.join(self.case_dir, d), exist_ok=True)
@@ -66,6 +66,7 @@ class OpenFoamSetup:
         self.relax_p = relax_p
         self.relax_eq = relax_eq
         self.consistent = consistent
+        self.ddt_scheme = ddt_scheme
             
         self._write_system(u_inlet, chord, transient, tolerance, turbulence, delta_t, end_time, write_interval, max_co, max_iters, momentum_scheme, depth)
         # Se guarda la primera celda: _write_0 la usa para elegir el modelo de
@@ -184,6 +185,9 @@ functions
         with open(os.path.join(self.case_dir, "system", "controlDict"), "w") as f:
             f.write(controlDict)
 
+        # "bounded" es para estacionario: quita div(phi)*U, que en transitorio no es un
+        # residuo de la convergencia sino parte del paso de tiempo.
+        conv = "Gauss" if transient else "bounded Gauss"
         is_laminar = "Laminar" in turbulence_ui
         is_transition = "SST-LM" in turbulence_ui or "gamma-ReTheta" in turbulence_ui
         
@@ -191,18 +195,18 @@ functions
         if not is_laminar:
             if is_transition:
                 # Modelos de transición necesitan esquemas para gamma y ReThetat
-                div_turb = f"""\n    div(phi,k)      bounded Gauss {self.turb_scheme};
-    div(phi,omega)  bounded Gauss {self.turb_scheme};
-    div(phi,gammaInt) bounded Gauss {self.turb_scheme};
-    div(phi,ReThetat) bounded Gauss {self.turb_scheme};"""
+                div_turb = f"""\n    div(phi,k)      {conv} {self.turb_scheme};
+    div(phi,omega)  {conv} {self.turb_scheme};
+    div(phi,gammaInt) {conv} {self.turb_scheme};
+    div(phi,ReThetat) {conv} {self.turb_scheme};"""
             elif "Epsilon" in turbulence_ui:
-                div_turb = f"""\n    div(phi,k)      bounded Gauss {self.turb_scheme};
-    div(phi,epsilon) bounded Gauss {self.turb_scheme};"""
+                div_turb = f"""\n    div(phi,k)      {conv} {self.turb_scheme};
+    div(phi,epsilon) {conv} {self.turb_scheme};"""
             elif "Omega" in turbulence_ui:
-                div_turb = f"""\n    div(phi,k)      bounded Gauss {self.turb_scheme};
-    div(phi,omega)  bounded Gauss {self.turb_scheme};"""
+                div_turb = f"""\n    div(phi,k)      {conv} {self.turb_scheme};
+    div(phi,omega)  {conv} {self.turb_scheme};"""
             elif "Spalart" in turbulence_ui:
-                div_turb = f"""\n    div(phi,nuTilda) bounded Gauss {self.turb_scheme};"""
+                div_turb = f"""\n    div(phi,nuTilda) {conv} {self.turb_scheme};"""
 
         # linearUpwind necesita el esquema de gradiente como argumento;
         # con upwind (1er orden) no aplica.
@@ -234,13 +238,13 @@ functions
 
         # Euler es de primer orden: con dt ~ 1e-5 su difusion numerica
         # domina el Cd. backward es de segundo orden e implicito, estable.
-        ddt = "backward" if transient else "steadyState"
+        ddt = self.ddt_scheme if transient else "steadyState"
         fvSchemes = f"""FoamFile {{ version 2.0; format ascii; class dictionary; object fvSchemes; }}
 ddtSchemes {{ default {ddt}; }}
 gradSchemes {{ default {self.grad_scheme}; }}
 divSchemes {{
     default         none;
-    div(phi,U)      bounded Gauss {momentum_scheme}{momentum_grad};{div_turb}
+    div(phi,U)      {conv} {momentum_scheme}{momentum_grad};{div_turb}
     div((nuEff*dev2(T(grad(U))))) Gauss linear;
     div(div(phi,U)) Gauss linear;
 }}

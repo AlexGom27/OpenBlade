@@ -109,10 +109,13 @@ def comando_solver(job, env):
     return ["pimpleFoam" if job.get("transient") else "simpleFoam"]
 
 
+class Detenido(Exception):
+    pass
+
+
 def al_terminar(_sig, _frame):
     # El TERM llega a todo el grupo (mpirun incluido): basta con registrarlo.
-    guardar_estado(state="stopped", rc=143)
-    sys.exit(143)
+    raise Detenido()
 
 
 def main():
@@ -120,6 +123,7 @@ def main():
     nproc = int(job.get("nproc", 1))
     signal.signal(signal.SIGTERM, al_terminar)
     guardar_estado(pid=os.getpid(), pgid=os.getpgid(0))
+    env = None
 
     try:
         guardar_estado(step="verificando")
@@ -157,6 +161,16 @@ def main():
             extra = [] if job.get("transient") else ["-latestTime"]
             correr(["reconstructPar"] + extra, env, "log.reconstructPar")
         guardar_estado(state="done" if rc == 0 else "failed", rc=rc, step="fin")
+    except Detenido:
+        # Lo calculado hasta aqui tambien se quiere ver: sin esto quedaba en processor*,
+        # que no se descarga, y una corrida detenida no tenia campos.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if env is not None and nproc > 1 and os.path.isdir("processor0"):
+            extra = [] if job.get("transient") else ["-latestTime"]
+            guardar_estado(step="reconstructPar")
+            correr(["reconstructPar"] + extra, env, "log.reconstructPar", obligatorio=False)
+        guardar_estado(state="stopped", rc=143)
+        sys.exit(143)
     except Exception as e:  # noqa: BLE001
         guardar_estado(state="failed", rc=1, error=str(e)[:400])
         sys.exit(1)

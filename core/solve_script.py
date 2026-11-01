@@ -49,6 +49,7 @@ def configure_case(case_dir, p):
         relax_p=p.get("relax_p", 0.2),
         relax_eq=p.get("relax_eq", 0.5),
         consistent=bool(p.get("consistent", False)),
+        ddt_scheme=p.get("ddt_scheme", "backward"),
     )
     return is_transient
 

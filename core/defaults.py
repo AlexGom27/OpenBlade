@@ -54,4 +54,4 @@ OPCIONALES = {"depth", "mesh_strategy", "bl_fraction", "bl_total_height", "bl_gr
               "wake_incline", "mesh_size_max", "mesh_num_layers", "wake_points", "surface_points",
               "normal_points", "mesh_file", "bc_type", "turb_scheme",
               "grad_scheme", "lap_correction", "alpha_mode", "relax_p", "relax_eq", "consistent",
-              "campo_inicial"}
+              "campo_inicial", "ddt_scheme"}

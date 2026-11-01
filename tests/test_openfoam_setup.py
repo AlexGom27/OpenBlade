@@ -222,3 +222,17 @@ def test_turbulence_equations_are_never_frozen_by_the_absolute_tolerance(tmp_pat
     solucion = (caso / "system" / "fvSolution").read_text()
     bloque = solucion[solucion.index('"(U|k|omega)"'):]
     assert float(re.search(r"tolerance\s+([0-9e.-]+);", bloque).group(1)) <= 1e-12
+
+
+def test_bounded_convection_is_only_for_steady_runs(tmp_path):
+    """En transitorio, "bounded" quita un termino que forma parte del paso de tiempo."""
+    from core.openfoam_setup import OpenFoamSetup
+
+    def esquemas(transitorio):
+        carpeta = tmp_path / ("t" if transitorio else "e")
+        OpenFoamSetup(str(carpeta)).create_case(transient=transitorio, ddt_scheme="Euler")
+        return (carpeta / "system" / "fvSchemes").read_text()
+
+    estacionario, transitorio = esquemas(False), esquemas(True)
+    assert "bounded Gauss" in estacionario and "steadyState" in estacionario
+    assert "bounded" not in transitorio and "default Euler" in transitorio
