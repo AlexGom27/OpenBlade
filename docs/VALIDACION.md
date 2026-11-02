@@ -6,7 +6,7 @@ Todo lo de este documento salió del programa: malla y caso generados en la Mac,
 
 | Qué | Estado |
 |---|---|
-| Cl del NACA 0012, Re=6e6, de 4° a 17° | A menos de 1.7 % de Ladson, y de 1.2 % de 6° a 17°. A 2° difiere 0.010 (+4.9 %) |
+| Cl del NACA 0012, Re=6e6, de 4° a 17° (otros Reynolds en §7) | A menos de 1.7 % de Ladson, y de 1.2 % de 6° a 17°. A 2° difiere 0.010 (+4.9 %) |
 | Cd del NACA 0012 en la malla por defecto | De −4.1 a +4.0 % frente a Ladson hasta 12°, dentro de su banda de malla (de ±7 a ±13 %), y en parte por compensación de errores (§6); de +10 a +15 % de 14° a 17° |
 | Cd frente a NASA TMR, malla extrapolada | −1.0 % a 10°. A 15°, +2.1 %, con un orden bajo que lo hace poco firme (§6) |
 | Pérdida | **No la predice.** Ladson cae a Cl≈1.0 a 18°; SST da 1.60 |
@@ -185,6 +185,19 @@ Las fichas coinciden en archivos, parámetros y versiones; la malla es `c2ed1a99
 
 **Reproducibilidad.** Local (Docker emulado) y `openblade2`, 2 procesos y 300 iteraciones: fuerzas idénticas, md5 `6086045a3719`. Es una prueba corta, y el resultado vale para el mismo número de procesos. Un clon nuevo con un entorno nuevo da la misma malla: sha256 `c2ed1a996956` en el nivel 2, con numpy 2.4.0 y 2.4.6.
 
+**Otros Reynolds (M).** NACA 0012, SST, nivel 2, frente a Ladson con grano 80, interpolado. Todos CONVERGIDOS. Sin estudio de malla a estos Reynolds, y sin tolerancias fijadas de antemano:
+
+| α | Re=3.99×10⁶, Cl | Cd | Re=2×10⁶, Cl | Cd |
+|---|---|---|---|---|
+| 0 | | −3.3 % | | −6.3 % |
+| 4 | +1.7 % | +1.5 % | +1.5 % | −4.2 % |
+| 8 | +1.1 % | −4.2 % | +3.3 % | −6.7 % |
+| 10 | +1.1 % | −4.0 % | +3.7 % | −9.5 % |
+| 12 | +1.4 % | +4.9 % | +3.9 % | −5.8 % |
+| 14 | +1.4 % | +3.4 % | +4.9 % | −7.8 % |
+
+A Re=2×10⁶ Cl sale alto y Cd bajo con más diferencia. No se estudió por qué. A ese Reynolds el grano de Ladson pesa más, lo cual el modelo no representa, pero no está demostrado que esa sea la causa.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
@@ -200,7 +213,7 @@ Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos lleva
 - La banda de malla de Cl a 15° es grande (±4.3 %) porque el nivel 1 es pobre ahí.
 - Transitorio a Re alto con y+<1: no validado.
 - k-ε con ley de pared y k-ω: solo comprobados en funcionamiento.
-- SST-LM: Cd depende de la turbulencia que llega al perfil, de −32 a +19 % frente a la transición libre de Ladson. Sin Tu medida es una calibración, no una validación. La entrada por defecto se disipa antes de llegar al perfil.
+- SST-LM: el programa avisa si la turbulencia de entrada se disipa antes del perfil. Cd depende de la que llega, de −32 a +19 % frente a la transición libre de Ladson. Sin Tu medida es una calibración, no una validación. La entrada por defecto se disipa antes de llegar al perfil.
 - Fuera del NACA 0012 no hay tolerancias.
 - `polar_xfoil.txt` lleva solo los puntos convergidos, sin banda ni CDp. Su formato no se ha probado todavía importándolo en QBlade, que además exige completar la polar a 360°.
 - Borde de salida abierto: la malla C propia lo cierra, así que no representa perfiles romos. Hasta 0.2 % de la cuerda solo lo anota en la ficha; hasta 2 %, avisa del arrastre de base que falta (Hoerner), y eso no entra en la banda de malla; con más, rechaza el perfil. Un perfil de 30 % con 2 % de abertura queda 11 % más delgado en x/c=0.8.

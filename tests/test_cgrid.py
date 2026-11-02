@@ -241,3 +241,15 @@ def test_the_job_log_shows_the_opening_also_when_the_mesh_is_reused(tmp_path, mo
         lineas = []
         ensure_mesh(p, lineas.append)
         assert any("1.00 %" in l for l in lineas)
+
+
+def test_transition_warns_when_the_inlet_turbulence_decays_before_the_profile():
+    from core.cgrid import transition_notice, turbulence_at_profile
+
+    p = {"u_inlet": 15.0, "chord": 1.0, "reynolds": 5.97e6, "farfield": 200.0}
+    decae = dict(p, turb_intensity=0.2, viscosity_ratio=1.0)
+    assert turbulence_at_profile(decae) == pytest.approx(0.0063, abs=0.0005)
+    assert "se disipa" in transition_notice(decae)
+    llega = dict(p, turb_intensity=0.6, viscosity_ratio=1000.0)
+    assert turbulence_at_profile(llega) == pytest.approx(0.22, abs=0.02)
+    assert transition_notice(llega) == ""

@@ -432,6 +432,11 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
                 from core.initial_field import start_from
                 tiempo = start_from(job.params["campo_inicial"], job.case_dir, msh, job.params)
                 ev.log(job, f"🔁 Arranca del campo de la iteración {tiempo} de {job.params['campo_inicial']}")
+            if "SST-LM" in job.params.get("turbulence", ""):
+                from core.cgrid import transition_notice
+                aviso_tu = transition_notice(job.params)
+                if aviso_tu:
+                    ev.log(job, aviso_tu)
             if transient and job.params.get("mesher") == "cgrid":
                 from core.cgrid import transient_notice
                 ev.log(job, transient_notice(job.params))

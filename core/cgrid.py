@@ -39,6 +39,8 @@ ASPECTO_ESTELA = 3000.0 # celda mas alargada que se admite en la estela
 # resistencia de base del 27 % de Cd (Hoerner), mas que cualquier banda que da el programa.
 ABERTURA_AVISO = 0.002
 ABERTURA_MAX = 0.02
+# Tu al llegar al perfil, en %, por debajo de la cual se avisa con un modelo de transicion.
+TU_PERFIL_MIN = 0.05
 
 
 def naca4(codigo: str, n: int = 40001) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -369,6 +371,27 @@ def transient_notice(params: Dict) -> str:
     if pasos > 200_000:
         texto += " Es muy largo: acorta el tiempo final o sube el Courant máximo (10 es estable en esta malla, 30 diverge)."
     return texto
+
+
+def turbulence_at_profile(params: Dict) -> float:
+    """Tu estimada al llegar al perfil, en %: decaimiento de k y omega en SST sin produccion."""
+    beta, beta_estrella = 0.0828, 0.09
+    u, cuerda = float(params.get("u_inlet", 15.0)), float(params.get("chord", 1.0))
+    tu = float(params.get("turb_intensity", 0.052))
+    nu = u * cuerda / float(params.get("reynolds", 1e6))
+    omega = 1.5 * (u * tu / 100.0) ** 2 / (float(params.get("viscosity_ratio", 0.009)) * nu)
+    tiempo = float(params.get("farfield", 200.0)) * cuerda / u
+    return tu * (1.0 + beta * omega * tiempo) ** (-0.5 * beta_estrella / beta)
+
+
+def transition_notice(params: Dict) -> str:
+    """Con transicion, Cd depende de la turbulencia que llega al perfil. Vacio si llega bastante."""
+    llega = turbulence_at_profile(params)
+    if llega >= TU_PERFIL_MIN:
+        return ""
+    return (f"⚠️ Transición: Tu de entrada {float(params.get('turb_intensity', 0.052)):g} % se disipa y llega cerca de "
+            f"{llega:.3f} % al perfil. Medido en NACA 0012, Re=6e6: con unos 0.006 % Cd sale de 6 a 32 % bajo frente a "
+            f"Ladson, aunque converja. SST-LM no está validado para Cd.")
 
 
 def build_mesh(params: Dict, salida: str) -> Dict:
