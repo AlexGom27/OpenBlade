@@ -148,7 +148,15 @@ k-ε da Cd 36 % por debajo de SST: no se recomienda para coeficientes.
 | 12 | CONVERGIDO | 1.2594 | −0.7 % | 0.01078 | 0.01226 | −12.1 % |
 | 15 | oscila | 1.5291 | +1.1 % | 0.01556 | 0.01816 | −14.3 % |
 
-Con Tu=0.052 % y νt/ν=0.009 sale casi lo mismo: Cd −32.3 % a 0° (sin convergir) y −29.2 % a 4°. Ladson señala que la turbulencia de su túnel adelantó la transición. Hipótesis sin comprobar: en 200 cuerdas la turbulencia de entrada decae (de 0.2 % a cerca de 0.006 % según la ecuación de decaimiento de SST), y por eso no influye. Laminar a Re=5000, α=0: Cd 0.0543, CONVERGIDO.
+Con Tu=0.052 % y νt/ν=0.009 sale casi lo mismo: Cd −32.3 % a 0° (sin convergir) y −29.2 % a 4°. Ladson señala que la turbulencia de su túnel adelantó la transición. En 200 cuerdas la turbulencia de entrada decae: de 0.2 % a cerca de 0.006 % según la ecuación de decaimiento de SST, y por eso no influye. Lo confirma subir la que llega al perfil (estimada, no medida):
+
+| Entrada | Tu estimada en el perfil | Cd a 0° | 4° | 8° | 12° | Cl, máxima dif. |
+|---|---|---|---|---|---|---|
+| Tu=0.2 %, νt/ν=1 | 0.006 % | −28.9 % | −26.6 % | −6.1 % | −12.1 % | −2.9 % |
+| Tu=0.6 %, νt/ν=1000 | 0.2 % | −7.3 % | −7.1 % | +9.5 % | −4.1 % | +0.7 % |
+| Tu=1 %, νt/ν=10 000 | 0.6 % | +2.7 % | +0.2 % | +18.8 % | +4.4 % | +0.5 % |
+
+Todos CONVERGIDOS salvo lo indicado arriba. La tendencia es correcta, pero es una calibración: la turbulencia del túnel de Ladson se desconoce, así que elegir la Tu que mejor coincide no valida el modelo. Además νt/ν de 1000 o más es muy alta, sin estudiar su efecto, y a 8° la tabla de Ladson tiene un valor bajo (0.0080) que ningún caso sigue. Falta un caso con Tu medida. Laminar a Re=5000, α=0: Cd 0.0543, CONVERGIDO.
 
 **Salida (M).** Laminar, Re=1000, α=30: el reflujo en la esquina superior de la salida crecía de Ux=−23 m/s en t=0.8 s a −309 en t=2.2 s, y Cl acababa en −23. Con `inletOutlet` llega a t=4 s desprendiendo vórtices. En estacionario no cambia nada donde el flujo sale: Cd 0.00764 a 0° y Cl 1.4794, Cd 0.01864 a 15°, como antes.
 
@@ -192,7 +200,7 @@ Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos lleva
 - La banda de malla de Cl a 15° es grande (±4.3 %) porque el nivel 1 es pobre ahí.
 - Transitorio a Re alto con y+<1: no validado.
 - k-ε con ley de pared y k-ω: solo comprobados en funcionamiento.
-- SST-LM: Cd de −6 a −32 % frente a la transición libre de Ladson; no usar para Cd.
+- SST-LM: Cd depende de la turbulencia que llega al perfil, de −32 a +19 % frente a la transición libre de Ladson. Sin Tu medida es una calibración, no una validación. La entrada por defecto se disipa antes de llegar al perfil.
 - Fuera del NACA 0012 no hay tolerancias.
 - `polar_xfoil.txt` lleva solo los puntos convergidos, sin banda ni CDp. Su formato no se ha probado todavía importándolo en QBlade, que además exige completar la polar a 360°.
 - Borde de salida abierto: la malla C propia lo cierra, así que no representa perfiles romos. Hasta 0.2 % de la cuerda solo lo anota en la ficha; hasta 2 %, avisa del arrastre de base que falta (Hoerner), y eso no entra en la banda de malla; con más, rechaza el perfil. Un perfil de 30 % con 2 % de abertura queda 11 % más delgado en x/c=0.8.
