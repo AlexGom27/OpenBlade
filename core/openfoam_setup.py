@@ -291,17 +291,28 @@ relaxationFactors {{
 {alg} {{
     nNonOrthogonalCorrectors 3;
     nCorrectors     2;
-    nOuterCorrectors 12;
+    // 2 basta: en transitorio el avance lo marca dt, no la convergencia
+    // del paso. Antes eran 12.
+    nOuterCorrectors 2;
     pRefCell        0;
     pRefValue       0;
-    // OpenFOAM 12 exige valores simples aqui, no diccionarios. Con
-    // {{ tolerance ...; relTol 0; }} aborta con:
-    //   "Solution convergence criteria specified in PIMPLE.residualControl
-    //    must be given as single values"
-    residualControl {{
-        p               {tolerance};
-        U               {tolerance};
-        "(k|omega|epsilon|nuTilda|gammaInt|ReThetat)" {tolerance};
+    // PIMPLE necesita diccionarios, no valores simples: con
+    // "p {tolerance};" OF-12 avisa "No corrector convergence criteria found"
+    // y agota nOuterCorrectors en todos los pasos, segun lo que midio
+    // OpenClaw en otra sesion; aqui no se ha comprobado. En SIMPLE si vale
+    // el valor simple, por eso el estacionario no lo necesita.
+    outerCorrectorResidualControl
+    {{
+        "(U|k|omega|epsilon|nuTilda|gammaInt|ReThetat)"
+        {{
+            tolerance       {tolerance};
+            relTol          0;
+        }}
+        p
+        {{
+            tolerance       {tolerance};
+            relTol          0;
+        }}
     }}
 }}
 relaxationFactors {{
