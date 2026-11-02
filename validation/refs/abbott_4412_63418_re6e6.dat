@@ -1,0 +1,50 @@
+# Abbott y von Doenhoff (1959), Theory of Wing Sections, apendice IV, Re = 6e6.
+# NACA 4412: pp. 488-489.  NACA 63(3)-418: pp. 536-537.
+# Digitalizado a ojo de las figuras escaneadas el 2026-11-02, antes de ver resultados
+# de OpenBlade. Error de lectura estimado: Cl +-0.02, Cd +-0.0004, Cm +-0.005.
+# liso = transicion libre; rugoso = "standard roughness" (grano 0.011 in en el borde de ataque).
+# Cm es respecto a c/4.
+#
+# zona, perfil, alpha[deg], cl_liso, cl_rugoso, cm_liso
+CL,4412,0,0.41,0.40,-0.090
+CL,4412,4,0.82,0.80,-0.090
+CL,4412,8,1.21,1.15,-0.084
+CL,4412,12,1.53,1.36,
+CL,63-418,0,0.30,0.29,-0.077
+CL,63-418,4,0.69,0.66,
+CL,63-418,8,1.08,1.02,-0.087
+CL,63-418,12,1.37,1.19,
+#
+# zona, perfil, serie, cl, cd   (polar de arrastre)
+CD,4412,liso,-0.04,0.0063
+CD,4412,liso,0.20,0.0061
+CD,4412,liso,0.40,0.0060
+CD,4412,liso,0.60,0.0059
+CD,4412,liso,0.85,0.0063
+CD,4412,liso,1.05,0.0079
+CD,4412,liso,1.25,0.0105
+CD,4412,liso,1.45,0.0134
+CD,4412,rugoso,-0.02,0.0115
+CD,4412,rugoso,0.18,0.0103
+CD,4412,rugoso,0.40,0.0097
+CD,4412,rugoso,0.60,0.0102
+CD,4412,rugoso,0.80,0.0115
+CD,4412,rugoso,1.00,0.0134
+CD,4412,rugoso,1.20,0.0169
+CD,4412,rugoso,1.35,0.0229
+CD,63-418,liso,-0.20,0.0067
+CD,63-418,liso,0.00,0.0057
+CD,63-418,liso,0.20,0.0051
+CD,63-418,liso,0.40,0.0051
+CD,63-418,liso,0.60,0.0054
+CD,63-418,liso,0.80,0.0065
+CD,63-418,liso,1.00,0.0086
+CD,63-418,liso,1.20,0.0111
+CD,63-418,liso,1.35,0.0151
+CD,63-418,rugoso,-0.20,0.0105
+CD,63-418,rugoso,0.07,0.0094
+CD,63-418,rugoso,0.40,0.0098
+CD,63-418,rugoso,0.50,0.0103
+CD,63-418,rugoso,0.73,0.0117
+CD,63-418,rugoso,0.95,0.0158
+CD,63-418,rugoso,1.10,0.0208
