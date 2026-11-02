@@ -136,7 +136,19 @@ A α=15 en 897×257, desde el flujo potencial el cálculo revienta hacia la iter
 | SST-LM, con transición | nivel 1 | 0.4314 | 0.00526 | oscila 1.6 % |
 | k-ε, y+=46, ley de pared | nivel 2 | 0.4560 | 0.00531 | oscila 3.4 % |
 
-k-ε da Cd 36 % por debajo de SST: no se recomienda para coeficientes. Laminar a Re=5000, α=0: Cd 0.0543, CONVERGIDO.
+k-ε da Cd 36 % por debajo de SST: no se recomienda para coeficientes.
+
+**Transición libre con SST-LM: no validada (M).** NACA 0012, nivel 2, Re=5.97×10⁶, frente a la Tabla I de Ladson interpolada, cuya turbulencia de túnel no se conoce. Entrada Tu=0.2 %, νt/ν=1:
+
+| α | Veredicto | Cl | Dif. | Cd | Ladson | Dif. |
+|---|---|---|---|---|---|---|
+| 0 | CONVERGIDO | 0.0000 | | 0.00462 | 0.00650 | −28.9 % |
+| 4 | CONVERGIDO | 0.4243 | −1.8 % | 0.00553 | 0.00753 | −26.6 % |
+| 8 | CONVERGIDO | 0.8315 | −2.9 % | 0.00739 | 0.00787 | −6.1 % |
+| 12 | CONVERGIDO | 1.2594 | −0.7 % | 0.01078 | 0.01226 | −12.1 % |
+| 15 | oscila | 1.5291 | +1.1 % | 0.01556 | 0.01816 | −14.3 % |
+
+Con Tu=0.052 % y νt/ν=0.009 sale casi lo mismo: Cd −32.3 % a 0° (sin convergir) y −29.2 % a 4°. Ladson señala que la turbulencia de su túnel adelantó la transición. Hipótesis sin comprobar: en 200 cuerdas la turbulencia de entrada decae (de 0.2 % a cerca de 0.006 % según la ecuación de decaimiento de SST), y por eso no influye. Laminar a Re=5000, α=0: Cd 0.0543, CONVERGIDO.
 
 **Salida (M).** Laminar, Re=1000, α=30: el reflujo en la esquina superior de la salida crecía de Ux=−23 m/s en t=0.8 s a −309 en t=2.2 s, y Cl acababa en −23. Con `inletOutlet` llega a t=4 s desprendiendo vórtices. En estacionario no cambia nada donde el flujo sale: Cd 0.00764 a 0° y Cl 1.4794, Cd 0.01864 a 15°, como antes.
 
@@ -179,7 +191,8 @@ Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos lleva
 - Nivel 2 sirve para Cl. Para Cd a menos de 5 % de TMR, nivel 3.
 - La banda de malla de Cl a 15° es grande (±4.3 %) porque el nivel 1 es pobre ahí.
 - Transitorio a Re alto con y+<1: no validado.
-- k-ε con ley de pared, k-ω y SST-LM: solo comprobados en funcionamiento.
+- k-ε con ley de pared y k-ω: solo comprobados en funcionamiento.
+- SST-LM: Cd de −6 a −32 % frente a la transición libre de Ladson; no usar para Cd.
 - Fuera del NACA 0012 no hay tolerancias.
 - `polar_xfoil.txt` lleva solo los puntos convergidos, sin banda ni CDp. Su formato no se ha probado todavía importándolo en QBlade, que además exige completar la polar a 360°.
 - Borde de salida abierto: la malla C propia lo cierra, así que no representa perfiles romos. Hasta 0.2 % de la cuerda solo lo anota en la ficha; hasta 2 %, avisa del arrastre de base que falta (Hoerner), y eso no entra en la banda de malla; con más, rechaza el perfil. Un perfil de 30 % con 2 % de abertura queda 11 % más delgado en x/c=0.8.
