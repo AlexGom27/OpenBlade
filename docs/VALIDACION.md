@@ -198,6 +198,15 @@ Las fichas coinciden en archivos, parámetros y versiones; la malla es `c2ed1a99
 
 A Re=2×10⁶ Cl sale alto y Cd bajo con más diferencia. No se estudió por qué. A ese Reynolds el grano de Ladson pesa más, lo cual el modelo no representa, pero no está demostrado que esa sea la causa.
 
+**Tolerancias fijadas el 2026-11-02, antes de correr.** Todo con SST, malla C, nivel 2, y lanzado desde la ventana:
+
+| Caso | Referencia | Criterio |
+|---|---|---|
+| NACA 0012, Re=2×10⁶ y 3.99×10⁶, estudio de malla a 0° y 10° | Ladson, grano 80 | Nivel 2: Cl a 10° ≤3 %, Cd a 0° ≤5 %, Cd a 10° ≤10 %, como a 6×10⁶. Se informa la banda GCI |
+| NACA 4412 y NACA 63₃-418, Re=6×10⁶, α=0, 4, 8 y 12 | Abbott y von Doenhoff, apéndice IV, digitalizado de figura | Cl ≤5 % de 0° a 8°, contra el perfil liso. Cd entre el liso y el de rugosidad estándar: SST es totalmente turbulento, pero sin rugosidad. Cm a menos de 0.01. A 12° solo se informa |
+
+La lectura de las figuras de Abbott añade su error, estimado en ±0.02 en Cl y ±0.0004 en Cd. Las coordenadas del 63₃-418 son las de Abbott, apéndice III: `validation/refs/naca63-3-418_abbott.dat`.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
