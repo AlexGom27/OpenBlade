@@ -104,15 +104,21 @@ class Job:
         os.replace(tmp, os.path.join(self.folder, "job.json"))
 
 
+def profile_name(params: Dict[str, Any]) -> str:
+    """Nombre corto del perfil: el archivo si es propio, si no el codigo NACA."""
+    if "Custom" in params.get("profile_type", "") and params.get("file_path"):
+        # El campo NACA conserva lo ultimo escrito y no es el perfil que se calcula.
+        return os.path.splitext(os.path.basename(params["file_path"]))[0]
+    return str(params.get("naca") or "custom")
+
+
 def new_job(params: Dict[str, Any], host: str = "", nproc: int = 0, group: str = "",
             label: str = "") -> Job:
     """Trabajo nuevo con carpeta propia. Dos en el mismo segundo no comparten nada."""
-    if "Custom" in params.get("profile_type", "") and params.get("file_path"):
-        # El campo NACA conserva lo ultimo escrito y no es el perfil que se calcula.
-        perfil = os.path.splitext(os.path.basename(params["file_path"]))[0]
-    else:
-        perfil = params.get("naca") or "custom"
-    etiqueta = label or f"{perfil}_a{params.get('aoa', 0)}"
+    perfil = profile_name(params)
+    # Con transicion se distingue en el nombre: en una misma tanda puede haber de los dos.
+    modelo = "_LM" if "SST-LM" in params.get("turbulence", "") else ""
+    etiqueta = label or f"{perfil}_a{params.get('aoa', 0)}{modelo}"
     etiqueta = re.sub(r"[^A-Za-z0-9_.-]", "_", etiqueta)
     while True:
         identificador = f"{time.strftime('%Y%m%d_%H%M%S')}_{etiqueta}_{secrets.token_hex(2)}"
@@ -356,7 +362,8 @@ def insiste(accion: Callable[[], None], avisar: Callable[[str], None], soltar: C
                 raise
             if str(e) != avisado:
                 avisado = str(e)
-                avisar(f"⚠️ Sin respuesta de la máquina; se reintenta. {e}")
+                from core.remote_runner import friendly_error
+                avisar(f"⚠️ Sin respuesta de la máquina; se reintenta. {friendly_error(str(e))}")
         time.sleep(poll_s)
     raise RemoteError("Sin conexión con la máquina")
 
@@ -390,7 +397,8 @@ def follow(runner, on_event: Callable[[tuple], None], on_step: Callable[[str], N
             fallos += 1
             if str(e) != avisado:
                 avisado = str(e)
-                on_notice(f"⚠️ Sin respuesta de la máquina; el trabajo sigue allí. {e}")
+                from core.remote_runner import friendly_error
+                on_notice(f"⚠️ Sin respuesta de la máquina; el trabajo sigue allí. {friendly_error(str(e))}")
             if fallos >= MAX_FALLOS:
                 on_notice("⚠️ Sigue sin conexión: se deja de seguir. El trabajo sigue en su máquina "
                           "y se retoma al abrir de nuevo el programa.")

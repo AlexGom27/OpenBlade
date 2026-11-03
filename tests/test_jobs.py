@@ -565,3 +565,10 @@ def test_a_server_that_is_only_downloading_counts_as_free(corrida_falsa):
     assert sorted(t.host for t in nuevos) == ["a@h", "b@h"]
     corrida_falsa["soltar"].set()
     assert d.wait(5)
+
+
+def test_transition_runs_and_grid_levels_say_what_they_are():
+    from core.jobs import profile_name
+    lm = new_job(case_params(aoa=2.0, turbulence="k-Omega SST-LM Transición (RAS)"))
+    assert lm.label == "0012_a2.0_LM"
+    assert profile_name(case_params(profile_type="Archivo Custom (.txt, .csv)", file_path="/x/s809.dat")) == "s809"
