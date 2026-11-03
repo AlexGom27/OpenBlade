@@ -28,8 +28,8 @@ import threading
 
 from qtpy.QtCore import Qt, QTimer, Signal
 from qtpy.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel,
-                            QLineEdit, QPushButton, QTabWidget, QTableWidget, QTableWidgetItem,
-                            QVBoxLayout, QWidget)
+                            QLineEdit, QPushButton, QScrollArea, QTabWidget, QTableWidget,
+                            QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .plots import new_chart, style_axes
 
@@ -68,7 +68,16 @@ class RemoteMonitorPanel(QWidget):
 
     # ---------------------------------------------------------------- UI
     def _build_ui(self) -> None:
-        lay = QVBoxLayout(self)
+        # Todo va dentro de un area con barra de desplazamiento: en una ventana baja las
+        # tablas dejaban la grafica sin espacio. Asi cada parte conserva su altura.
+        externo = QVBoxLayout(self)
+        externo.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        contenido = QWidget()
+        self.scroll.setWidget(contenido)
+        externo.addWidget(self.scroll)
+        lay = QVBoxLayout(contenido)
         lay.setContentsMargins(8, 8, 8, 8)
 
         # Todos los servidores y todos sus casos: lo que corre, lo que espera en su cola y
@@ -79,7 +88,8 @@ class RemoteMonitorPanel(QWidget):
             ["Servidor", "Conexión", "CPU", "Corriendo / en cola", "Procesos OpenFOAM"])
         self.tabla_servidores.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabla_servidores.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabla_servidores.setMaximumHeight(110)
+        self.tabla_servidores.setMinimumHeight(100)
+        self.tabla_servidores.setMaximumHeight(140)
         lay.addWidget(self.tabla_servidores)
         lay.addWidget(QLabel("<b>Casos en los servidores</b> (clic para ver su detalle)"))
         self.tabla_casos = QTableWidget(0, 5)
@@ -89,7 +99,8 @@ class RemoteMonitorPanel(QWidget):
         cab.setSectionResizeMode(0, QHeaderView.Stretch)
         self.tabla_casos.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tabla_casos.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tabla_casos.setMaximumHeight(200)
+        self.tabla_casos.setMinimumHeight(180)
+        self.tabla_casos.setMaximumHeight(260)
         self.tabla_casos.cellClicked.connect(self._caso_elegido)
         lay.addWidget(self.tabla_casos)
 
@@ -147,6 +158,7 @@ class RemoteMonitorPanel(QWidget):
         self.subtabs.addTab(self.canvas_cd, "Cd")
         self.subtabs.addTab(self.canvas, "Residuales")
         self.subtabs.currentChanged.connect(lambda _i: self._dibujar())
+        self.subtabs.setMinimumHeight(420)
         lay.addWidget(self.subtabs, 1)
 
         # métricas del servidor

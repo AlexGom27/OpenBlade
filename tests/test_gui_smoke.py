@@ -335,3 +335,9 @@ def test_server_tab_lists_every_server_and_its_cases(window, monkeypatch):
     monkeypatch.setattr(panel, "watch", lambda h, caso: vistos.append((h, caso)))
     panel._caso_elegido(2, 0)
     assert vistos == [("u@a", "~/openblade_jobs/z")]
+
+
+def test_server_tab_scrolls_so_the_charts_keep_their_height(window):
+    panel = window.remote_panel
+    assert panel.scroll.widgetResizable() and panel.subtabs.minimumHeight() >= 400
+    assert panel.scroll.widget().isAncestorOf(panel.subtabs)
