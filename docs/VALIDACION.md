@@ -222,7 +222,9 @@ Perfiles con curvatura, Re=6×10⁶, nivel 2:
 | 63₃-418 | 4 (oscila) | 0.822 | 0.69 | **+19.1 %** | sí | |
 | 63₃-418 | 8 | 1.251 | 1.08 | **+15.8 %** | sí | 0.000 |
 
-Cl no cumple en ningún punto; Cd y Cm cumplen en todos. El ángulo de sustentación nula coincide (4412: −4.25° frente a −4.13°; 63₃-418: −3.11° frente a −3.08°). Lo que difiere es la pendiente: 0.105 frente a 0.100 por grado en el 4412, y 0.114 frente a 0.098 en el 63₃-418. No se ha determinado si viene del modelo, de la lectura de las figuras o de las correcciones de túnel del experimento.
+Cl no cumple en ningún punto; Cd y Cm cumplen en todos.
+
+**Corrección del 2026-11-03: la referencia del 63₃-418 estaba mal leída.** Dos repeticiones independientes de los mismos datos de Abbott, la de Ehrmann y White (2014, fig. 7) y la del catálogo de Risø (Bertagnolio et al. 2001, fig. 30), dan Cl≈0.32 a 0°, ≈0.78 a 4° y ≈1.19 a 8°, entre 0.06 y 0.09 más que mi lectura. Ehrmann además mide el perfil limpio y coincide con Abbott en la zona lineal. Frente a esos valores OpenBlade queda a +12 % a 0° (Cl pequeño), +5.4 % a 4° y +5 % a 8°. El código Navier-Stokes del catálogo de Risø (EllipSys2D, SST con transición) da casi lo mismo que OpenBlade, 0.85 a 4° y 1.25 a 8°, y su informe cuenta una diferencia media de 5.1 % con el experimento en la zona lineal; XFOIL da lo mismo. La tolerancia sigue sin cumplirse, pero por un margen mucho menor. El 4412 no tiene todavía una segunda fuente. El ángulo de sustentación nula coincide (4412: −4.25° frente a −4.13°; 63₃-418: −3.11° frente a −3.08°). Lo que difiere es la pendiente: 0.105 frente a 0.100 por grado en el 4412, y 0.114 frente a 0.098 en el 63₃-418. No se ha determinado si viene del modelo, de la lectura de las figuras o de las correcciones de túnel del experimento.
 
 ## 8. Por qué lo anterior no sirve
 

@@ -4,6 +4,10 @@
 # de OpenBlade. Error de lectura estimado: Cl +-0.02, Cd +-0.0004, Cm +-0.005.
 # liso = transicion libre; rugoso = "standard roughness" (grano 0.011 in en el borde de ataque).
 # Cm es respecto a c/4.
+# AVISO (2026-11-03): la lectura del 63(3)-418 subestima Cl. Dos repeticiones independientes de
+# estos mismos datos, Ehrmann y White 2014 (fig. 7, Re=3e6) y Bertagnolio et al. 2001 (Riso-R-1280,
+# fig. 30), dan Cl ~0.32 a 0 grados, ~0.78 a 4 y ~1.19 a 8: de 0.06 a 0.09 mas que esta tabla.
+# No usar las filas CL de 63-418 sin repetir la digitalizacion.
 #
 # zona, perfil, alpha[deg], cl_liso, cl_rugoso, cm_liso
 CL,4412,0,0.41,0.40,-0.090
