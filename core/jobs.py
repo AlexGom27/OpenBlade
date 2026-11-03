@@ -38,6 +38,7 @@ FALLIDO = "fallido"
 DETENIDO = "detenido"
 ACTIVOS = (MALLANDO, PREPARANDO, SUBIENDO, CORRIENDO, DESCARGANDO)
 FINALES = (TERMINADO, FALLIDO, DETENIDO)
+OCUPAN = (MALLANDO, PREPARANDO, SUBIENDO, CORRIENDO)    # usan o van a usar la maquina
 
 LOCAL = "local"
 RC_DETENIDA = 143
@@ -580,8 +581,12 @@ class Dispatcher:
         return sum(1 for i in self._hilos if self.jobs[i].host == host)
 
     def _asignados(self, host: str) -> int:
-        """Lo que ya se envio a esa maquina y no ha terminado, corra o espere en su cola."""
-        return sum(1 for j in self.jobs.values() if j.host == host and j.state not in FINALES
+        """Lo que ocupa o va a ocupar el procesador de esa maquina: corre o espera en su cola.
+
+        Lo que se descarga ya no cuenta: el servidor termino con ello. Contarlo mandaba
+        todo a la otra maquina mientras esta, libre, solo enviaba resultados.
+        """
+        return sum(1 for j in self.jobs.values() if j.host == host and j.state in OCUPAN
                    and (j.id in self._hilos or j.remote_dir))
 
     def _maquina_libre(self, job: Job) -> Optional[str]:

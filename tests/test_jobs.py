@@ -548,3 +548,20 @@ def test_a_profile_from_a_file_is_labelled_with_the_file_name():
     j = new_job(case_params(aoa=4.0, profile_type="Archivo Custom (.txt, .csv)", naca="4412",
                             file_path="/datos/naca63-3-418_abbott.dat"))
     assert j.label == "naca63-3-418_abbott_a4.0"
+
+
+def test_a_server_that_is_only_downloading_counts_as_free(corrida_falsa):
+    from core.jobs import DESCARGANDO
+    d = Dispatcher(poll_s=0)
+    d.set_machines([Machine("a@h", 8, 2), Machine("b@h", 8, 2)])
+    for a in (1.0, 2.0):
+        viejo = new_job(case_params(aoa=a), "b@h", 8)
+        viejo.state, viejo.remote_dir = DESCARGANDO, f"openblade_jobs/{viejo.id}"
+        d.jobs[viejo.id] = viejo
+    nuevos = [new_job(case_params(aoa=a)) for a in (3.0, 4.0)]
+    for t in nuevos:
+        d.submit(t)
+    time.sleep(0.2)
+    assert sorted(t.host for t in nuevos) == ["a@h", "b@h"]
+    corrida_falsa["soltar"].set()
+    assert d.wait(5)
