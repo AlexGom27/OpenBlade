@@ -544,3 +544,9 @@ def test_queued_jobs_go_to_the_least_busy_machine(corrida_falsa):
     assert sorted(len(v) for v in corrida_falsa["por_maquina"].values()) == [1, 1]
     corrida_falsa["soltar"].set()
     assert d.wait(5)
+
+
+def test_a_profile_from_a_file_is_labelled_with_the_file_name():
+    j = new_job(case_params(aoa=4.0, profile_type="Archivo Custom (.txt, .csv)", naca="4412",
+                            file_path="/datos/naca63-3-418_abbott.dat"))
+    assert j.label == "naca63-3-418_abbott_a4.0"

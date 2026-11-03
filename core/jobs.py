@@ -105,7 +105,12 @@ class Job:
 def new_job(params: Dict[str, Any], host: str = "", nproc: int = 0, group: str = "",
             label: str = "") -> Job:
     """Trabajo nuevo con carpeta propia. Dos en el mismo segundo no comparten nada."""
-    etiqueta = label or f"{params.get('naca') or 'custom'}_a{params.get('aoa', 0)}"
+    if "Custom" in params.get("profile_type", "") and params.get("file_path"):
+        # El campo NACA conserva lo ultimo escrito y no es el perfil que se calcula.
+        perfil = os.path.splitext(os.path.basename(params["file_path"]))[0]
+    else:
+        perfil = params.get("naca") or "custom"
+    etiqueta = label or f"{perfil}_a{params.get('aoa', 0)}"
     etiqueta = re.sub(r"[^A-Za-z0-9_.-]", "_", etiqueta)
     while True:
         identificador = f"{time.strftime('%Y%m%d_%H%M%S')}_{etiqueta}_{secrets.token_hex(2)}"
