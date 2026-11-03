@@ -421,18 +421,24 @@ class MainWindow(QMainWindow):
     def _restore_jobs(self) -> None:
         """Al abrir: lista lo anterior y vuelve a seguir lo que sigue corriendo."""
         ultimo = None
+        reenviar = []
         for job in load_jobs()[-200:]:
             if job.state == PENDIENTE or (job.state in ACTIVOS and not job.remote_dir):
-                # Se cerro la ventana antes de que saliera de esta maquina.
-                job.state, job.error = DETENIDO, job.error or "La ventana se cerró antes de enviarlo"
+                # Se cerro la ventana antes de que saliera de esta maquina: vuelve a la cola.
+                job.state, job.step = PENDIENTE, ""
                 job.save()
+                reenviar.append(job)
             self.dispatcher.jobs[job.id] = job
             self.jobs_panel.add_job(job)
             ultimo = job
             if job.state in ACTIVOS:
-                self.log(f"🔌 {job.label} seguía corriendo en {job.host}: se vuelve a seguir.")
+                self.log(f"🔌 {job.label} seguía en {job.host}: se vuelve a seguir.")
                 self.dispatcher.attach(job)
         self._sync_machines()
+        if reenviar:
+            self.log(f"📤 {len(reenviar)} paquetes no habían salido de esta computadora: vuelven a la cola.")
+        for job in reenviar:
+            self.dispatcher.submit(job)
         if ultimo is not None:
             self._select_job(ultimo.id)
 

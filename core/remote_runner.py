@@ -166,6 +166,27 @@ def configurar_acceso(host: str, contrasena: str) -> None:
                           "si tiene frase de contrasena, cargala en ssh-agent")
 
 
+def script_cola(ranuras: int) -> str:
+    """Espera una ranura libre del servidor y corre el paquete en ella.
+
+    Las ranuras son cerrojos flock en openblade_jobs: los comparten todos los paquetes
+    de esa cuenta, se lancen desde la computadora que sea, y el sistema los suelta si el
+    proceso muere. Mientras espera, status.json dice "en cola" con el grupo de procesos,
+    asi que detenerlo funciona igual que con un paquete que ya corre.
+    """
+    return f"""echo '{{"state": "running", "step": "en cola", "rc": null, "pid": '$$', "pgid": '$$'}}' > status.json
+trap 'grep -q "en cola" status.json && echo "{{\\"state\\": \\"stopped\\", \\"step\\": \\"en cola\\", \\"rc\\": 143}}" > status.json; exit 143' TERM INT
+while :; do
+  for k in $(seq 1 {int(ranuras)}); do
+    flock -n -E 75 "$HOME/{JOBS_DIR}/.ranura_$k" python3 remote_job.py
+    r=$?
+    [ "$r" -ne 75 ] && exit "$r"
+  done
+  sleep 20
+done
+"""
+
+
 def interpret_status(estado_txt: str, vivo: str, log: str) -> Dict[str, Any]:
     """Estado a partir de status.json, si su proceso sigue vivo y job.log."""
     try:
@@ -186,8 +207,11 @@ def interpret_status(estado_txt: str, vivo: str, log: str) -> Dict[str, Any]:
 
 class RemoteJob:
     def __init__(self, host: str, job_dir: Optional[str] = None,
-                 etiqueta: str = "caso", carpeta_propia: bool = False) -> None:
+                 etiqueta: str = "caso", carpeta_propia: bool = False, ranuras: int = 0) -> None:
         self.host = validar_host(host)
+        # Con ranuras > 0 la cola vive en el servidor: el paquete se sube ya y espera alli a
+        # que haya una de las ranuras libre, aunque la computadora que lo lanzo se apague.
+        self.ranuras = int(ranuras)
         self.carpeta_propia = carpeta_propia
         limpia = re.sub(r"[^A-Za-z0-9_.-]", "_", etiqueta)
         # El sufijo evita que dos lanzamientos en el mismo segundo compartan carpeta.
@@ -255,8 +279,11 @@ class RemoteJob:
         # salida conectada al canal y ssh no volveria hasta que acabe el trabajo.
         # set -C crea job.log solo si no existe: si la conexion se corta justo aqui y se
         # reintenta, el calculo no se lanza dos veces.
+        orden = "python3 remote_job.py" if self.ranuras <= 0 else "bash cola.sh"
+        if self.ranuras > 0:
+            self._run(f"cat > cola.sh <<'FIN'\n{script_cola(self.ranuras)}FIN", timeout=30)
         self._run("if (set -C; : > job.log) 2>/dev/null; then "
-                  "(setsid nohup python3 remote_job.py >> job.log 2>&1 < /dev/null &); fi",
+                  f"(setsid nohup {orden} >> job.log 2>&1 < /dev/null &); fi",
                   timeout=30)
 
     def subir_y_lanzar(self, case_dir: str, msh_file: str, nproc: int, transient: bool,

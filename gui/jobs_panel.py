@@ -40,9 +40,13 @@ class JobsPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
 
-        lay.addWidget(QLabel("<b>Máquinas</b>: «Repartir entre máquinas» envía cada paquete "
-                             "a la primera marcada que esté libre. Esta computadora reparte la cola: "
-                             "si se duerme, lo que ya corre sigue en su máquina y lo pendiente espera."))
+        aviso = QLabel("<b>Máquinas</b>: «Repartir entre máquinas» envía cada paquete al servidor marcado "
+                       "con menos trabajo. Cada servidor guarda su cola y corre a la vez los indicados en "
+                       "«A la vez»: puedes cerrar el programa o apagar esta computadora y siguen corriendo. "
+                       "Al abrir de nuevo, los trabajos aparecen y se descargan. Los niveles finos de un "
+                       "estudio de malla salen cuando termina el anterior, con el programa abierto.")
+        aviso.setWordWrap(True)
+        lay.addWidget(aviso)
         self.tabla_maquinas = QTableWidget(0, 4)
         self.tabla_maquinas.setHorizontalHeaderLabels(["Usar", "Máquina", "Procesos", "A la vez"])
         self.tabla_maquinas.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)

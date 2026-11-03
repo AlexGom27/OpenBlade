@@ -81,6 +81,7 @@ class Job:
     started: Optional[float] = None
     finished: Optional[float] = None
     despues: str = ""       # trabajo que debe terminar antes: este arranca de su campo si se puede
+    ranuras: int = 0        # > 0: espera en la cola del servidor, que corre esas a la vez
 
     @property
     def folder(self) -> str:
@@ -230,7 +231,8 @@ def make_runner(job: Job):
         from core.local_runner import LocalJob
         return LocalJob(job.case_dir, job.id, bool(job.params.get("native_foam")))
     # La carpeta lleva el id del trabajo: si ya existe, es de un intento anterior suyo.
-    return RemoteJob(job.host, job_dir=job.remote_dir or f"openblade_jobs/{job.id}", carpeta_propia=True)
+    return RemoteJob(job.host, job_dir=job.remote_dir or f"openblade_jobs/{job.id}", carpeta_propia=True,
+                     ranuras=job.ranuras)
 
 
 class Events:
@@ -577,13 +579,29 @@ class Dispatcher:
     def _ocupados(self, host: str) -> int:
         return sum(1 for i in self._hilos if self.jobs[i].host == host)
 
+    def _asignados(self, host: str) -> int:
+        """Lo que ya se envio a esa maquina y no ha terminado, corra o espere en su cola."""
+        return sum(1 for j in self.jobs.values() if j.host == host and j.state not in FINALES
+                   and (j.id in self._hilos or j.remote_dir))
+
     def _maquina_libre(self, job: Job) -> Optional[str]:
+        # Los servidores llevan su propia cola: se les envia todo de inmediato, repartido
+        # segun lo que ya tiene cada uno, y ellos arrancan cuando hay ranura. Asi el
+        # trabajo sigue aunque esta computadora se duerma o se cierre el programa.
+        # Local no tiene cola propia: ahi se espera a que haya hueco.
         if job.host:
             m = self.machines.get(job.host)
+            if job.host != LOCAL:
+                return job.host
             return job.host if m is None or self._ocupados(job.host) < m.slots else None
+        remotos = [m for m in self.machines.values() if m.reparto and m.host != LOCAL]
+        if remotos:
+            return min(remotos, key=lambda m: (self._asignados(m.host) / m.slots,
+                                               list(self.machines).index(m.host))).host
         # La menos ocupada en proporcion a sus huecos: antes iba a la primera con hueco,
         # y con dos paquetes en cola los dos caian en la misma maquina y la otra esperaba.
-        libres = [m for m in self.machines.values() if m.reparto and self._ocupados(m.host) < m.slots]
+        libres = [m for m in self.machines.values() if m.reparto and self._ocupados(m.host) < m.slots
+                  and m.host == LOCAL]
         if not libres:
             return None
         return min(libres, key=lambda m: self._ocupados(m.host) / m.slots).host
@@ -601,9 +619,11 @@ class Dispatcher:
                 if previo is not None and has_start_field(previo):
                     job.params["campo_inicial"] = previo.case_dir
                 job.host = host
+                m = self.machines.get(host)
                 if not job.nproc:
-                    m = self.machines.get(host)
                     job.nproc = m.nproc if m else 1
+                if host != LOCAL:
+                    job.ranuras = m.slots if m else 1
                 self._cola.remove(identificador)
                 self._arranca(job)
 

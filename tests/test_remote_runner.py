@@ -188,3 +188,44 @@ def test_the_server_check_tells_physical_cores_from_threads(monkeypatch):
 def test_more_processes_than_cores_are_not_refused():
     fuente = open(os.path.join(os.path.dirname(__file__), "..", "core", "remote_job.py")).read()
     assert '"--oversubscribe"' in fuente
+
+
+def _cola_falsa(tmp_path, ocupadas):
+    """Carpeta de trabajo con flock y python3 falsos: flock sale con 75 si la ranura esta ocupada."""
+    import os, stat
+    from core.remote_runner import JOBS_DIR, script_cola
+    binarios = tmp_path / "bin"; binarios.mkdir()
+    (binarios / "flock").write_text(
+        "#!/bin/bash\n# flock -n -E 75 RANURA orden...\nr=$4; shift 4\n"
+        f"case \"$r\" in *ranura_[{''.join(map(str, ocupadas)) or '0'}]) exit 75;; esac\n"
+        "echo \"$r\" > ranura_usada; exec \"$@\"\n")
+    (binarios / "python3").write_text("#!/bin/bash\necho corrio > corrio\nexit 0\n")
+    for b in binarios.iterdir():
+        b.chmod(b.stat().st_mode | stat.S_IEXEC)
+    caso = tmp_path / "caso"; caso.mkdir()
+    (caso / "cola.sh").write_text(script_cola(2))
+    entorno = dict(os.environ, PATH=f"{binarios}:{os.environ['PATH']}", HOME=str(tmp_path))
+    (tmp_path / JOBS_DIR).mkdir()
+    return caso, entorno
+
+
+def test_server_queue_runs_the_package_in_a_free_slot(tmp_path):
+    import subprocess
+    caso, entorno = _cola_falsa(tmp_path, ocupadas=[1])
+    r = subprocess.run(["bash", "cola.sh"], cwd=caso, env=entorno, timeout=20)
+    assert r.returncode == 0 and (caso / "corrio").exists()
+    assert (caso / "ranura_usada").read_text().strip().endswith(".ranura_2")
+
+
+def test_a_job_waiting_in_the_server_queue_says_so_and_can_be_stopped(tmp_path):
+    import json, signal, subprocess, time
+    caso, entorno = _cola_falsa(tmp_path, ocupadas=[1, 2])
+    p = subprocess.Popen(["bash", "cola.sh"], cwd=caso, env=entorno, start_new_session=True)
+    time.sleep(1.5)
+    estado = json.loads((caso / "status.json").read_text())
+    assert estado["state"] == "running" and estado["step"] == "en cola" and estado["pgid"] == p.pid
+    import os
+    os.killpg(p.pid, signal.SIGTERM)
+    p.wait(25)
+    assert json.loads((caso / "status.json").read_text())["state"] == "stopped"
+    assert not (caso / "corrio").exists()

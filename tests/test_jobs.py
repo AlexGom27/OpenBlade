@@ -223,22 +223,20 @@ def corrida_falsa(monkeypatch):
     return registro
 
 
-def test_dispatcher_spreads_jobs_and_respects_each_machine(corrida_falsa):
+def test_servers_get_every_job_at_once_in_proportion_to_their_slots(corrida_falsa):
+    """Cada servidor lleva su cola: nada se queda esperando en esta computadora."""
     d = Dispatcher(poll_s=0)
     d.set_machines([Machine("a@h", 10, 1), Machine("b@h", 8, 2)])
     trabajos = [new_job(case_params(aoa=float(a))) for a in range(5)]
     for t in trabajos:
         d.submit(t)
     time.sleep(0.2)
-    assert sorted(len(v) for v in corrida_falsa["por_maquina"].values()) == [1, 2]
-    assert sum(1 for t in trabajos if t.state == PENDIENTE) == 2
+    assert sum(1 for t in trabajos if t.state == PENDIENTE) == 0
+    assert {h: len(v) for h, v in corrida_falsa["por_maquina"].items()} == {"a@h": 2, "b@h": 3}
+    assert {t.host: (t.nproc, t.ranuras) for t in trabajos} == {"a@h": (10, 1), "b@h": (8, 2)}
     corrida_falsa["soltar"].set()
     assert d.wait(5)
     assert all(t.state == TERMINADO for t in trabajos)
-    assert sorted(a for v in corrida_falsa["por_maquina"].values() for a in v) == [0, 1, 2, 3, 4]
-    assert corrida_falsa["maximo"]["a@h"] == 1 and corrida_falsa["maximo"]["b@h"] <= 2
-    por_maquina = {t.host: t.nproc for t in trabajos}
-    assert por_maquina == {"a@h": 10, "b@h": 8}
 
 
 def test_unmarked_machine_only_runs_jobs_sent_to_it(corrida_falsa):
@@ -252,22 +250,22 @@ def test_unmarked_machine_only_runs_jobs_sent_to_it(corrida_falsa):
     assert corrida_falsa["por_maquina"] == {"marcada@h": [1.0], "sin@marcar": [2.0]}
 
 
-def test_job_with_a_fixed_machine_waits_for_it(corrida_falsa):
+def test_job_with_a_fixed_server_goes_to_its_queue_at_once(corrida_falsa):
     d = Dispatcher(poll_s=0)
     d.set_machines([Machine("a@h", 4, 1), Machine("b@h", 4, 1)])
     uno, dos = new_job(case_params(aoa=1.0), "a@h", 4), new_job(case_params(aoa=2.0), "a@h", 4)
     d.submit(uno)
     d.submit(dos)
     time.sleep(0.2)
-    assert uno.state == CORRIENDO and dos.state == PENDIENTE
+    assert uno.state == CORRIENDO and dos.state == CORRIENDO and dos.ranuras == 1
     corrida_falsa["soltar"].set()
     assert d.wait(5)
     assert corrida_falsa["por_maquina"] == {"a@h": [1.0, 2.0]}
 
 
-def test_stopping_a_queued_job_never_launches_it(corrida_falsa):
+def test_stopping_a_locally_queued_job_never_launches_it(corrida_falsa):
     d = Dispatcher(poll_s=0)
-    d.set_machines([Machine("a@h", 4, 1)])
+    d.set_machines([Machine(LOCAL, 4, 1)])
     uno, dos = new_job(case_params(aoa=1.0)), new_job(case_params(aoa=2.0))
     d.submit(uno)
     d.submit(dos)
@@ -276,7 +274,7 @@ def test_stopping_a_queued_job_never_launches_it(corrida_falsa):
     assert dos.state == DETENIDO
     corrida_falsa["soltar"].set()
     assert d.wait(5)
-    assert corrida_falsa["por_maquina"] == {"a@h": [1.0]}
+    assert corrida_falsa["por_maquina"] == {LOCAL: [1.0]}
 
 
 def test_failed_mesh_fails_the_job_and_frees_the_machine(monkeypatch):
