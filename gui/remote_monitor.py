@@ -27,8 +27,9 @@ import os
 import threading
 
 from qtpy.QtCore import Qt, QTimer, Signal
-from qtpy.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit,
-                            QPushButton, QTabWidget, QVBoxLayout, QWidget)
+from qtpy.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel,
+                            QLineEdit, QPushButton, QTabWidget, QTableWidget, QTableWidgetItem,
+                            QVBoxLayout, QWidget)
 
 from .plots import new_chart, style_axes
 
@@ -37,6 +38,7 @@ class RemoteMonitorPanel(QWidget):
     """Panel con estado, gráficas y métricas del servidor."""
 
     _datos_listos = Signal(object)
+    _resumen_listo = Signal(object)
 
     def __init__(self, remote: str = "", case: str = "openfoam_case",
                  parent=None) -> None:
@@ -47,10 +49,16 @@ class RemoteMonitorPanel(QWidget):
         self.historial = {"t": [], "res": {}, "cl": [], "cd": []}
         self._serie = []
         self._busy = False
+        self.hosts: list = []
+        self._resumenes: dict = {}
+        self._busy_resumen = False
 
         self._build_ui()
 
         self._datos_listos.connect(self._aplicar)
+        self._resumen_listo.connect(self._aplicar_resumen)
+        self.timer_resumen = QTimer(self)
+        self.timer_resumen.timeout.connect(self.refrescar_resumen)
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refrescar)
@@ -62,6 +70,28 @@ class RemoteMonitorPanel(QWidget):
     def _build_ui(self) -> None:
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
+
+        # Todos los servidores y todos sus casos: lo que corre, lo que espera en su cola y
+        # lo que termino en las ultimas 48 h. Un clic en un caso lo muestra abajo.
+        lay.addWidget(QLabel("<b>Servidores</b>"))
+        self.tabla_servidores = QTableWidget(0, 5)
+        self.tabla_servidores.setHorizontalHeaderLabels(
+            ["Servidor", "Conexión", "CPU", "Corriendo / en cola", "Procesos OpenFOAM"])
+        self.tabla_servidores.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tabla_servidores.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla_servidores.setMaximumHeight(110)
+        lay.addWidget(self.tabla_servidores)
+        lay.addWidget(QLabel("<b>Casos en los servidores</b> (clic para ver su detalle)"))
+        self.tabla_casos = QTableWidget(0, 5)
+        self.tabla_casos.setHorizontalHeaderLabels(["Caso", "Servidor", "Estado", "Avance", "Iteración"])
+        cab = self.tabla_casos.horizontalHeader()
+        cab.setSectionResizeMode(QHeaderView.ResizeToContents)
+        cab.setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tabla_casos.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla_casos.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tabla_casos.setMaximumHeight(200)
+        self.tabla_casos.cellClicked.connect(self._caso_elegido)
+        lay.addWidget(self.tabla_casos)
 
         # barra superior
         top = QHBoxLayout()
@@ -80,6 +110,13 @@ class RemoteMonitorPanel(QWidget):
         self.btn_conectar.clicked.connect(self._conectar)
         top.addWidget(self.btn_conectar)
         lay.addLayout(top)
+        # Escribir servidor y caso a mano queda para lo que no salga en las tablas.
+        for w in (self.ed_remote, self.cb_case, self.btn_conectar):
+            w.setVisible(False)
+        for i in range(top.count()):
+            item = top.itemAt(i).widget()
+            if isinstance(item, QLabel):
+                item.setVisible(False)
 
         # estado en una línea grande
         self.lbl_estado = QLabel("Sin conexión")
@@ -167,7 +204,8 @@ class RemoteMonitorPanel(QWidget):
             return
         # Sin "status" no hubo respuesta del servidor; con el, "error" es el del caso.
         if "status" not in d:
-            self.lbl_estado.setText(f"⚠️ {(d.get('error') or 'Sin respuesta')[:200]}")
+            from core.remote_runner import friendly_error
+            self.lbl_estado.setText(f"⚠️ {self.remote}: {friendly_error(d.get('error') or '')}")
             return
 
         estado = {"running": "⏳ EN CURSO", "done": "✔ TERMINÓ", "failed": "❌ FALLÓ",
@@ -220,6 +258,96 @@ class RemoteMonitorPanel(QWidget):
         if s.get("carga"):
             partes.append(f"carga {s['carga'][0]}")
         self.lbl_server.setText("   ·   ".join(partes) or "—")
+
+    # ------------------------------------------------------------ resumen
+    ESTADOS = {"running": "En curso", "done": "Terminó", "failed": "Falló", "stopped": "Detenida"}
+
+    def set_hosts(self, hosts) -> None:
+        """Los servidores que se resumen arriba: los de la tabla de máquinas."""
+        hosts = [h for h in hosts if h and h != "local"]
+        if hosts == self.hosts:
+            return
+        self.hosts = hosts
+        self._resumenes = {h: v for h, v in self._resumenes.items() if h in hosts}
+        if hosts:
+            self.timer_resumen.start(20000)
+            QTimer.singleShot(200, self.refrescar_resumen)
+        else:
+            self.timer_resumen.stop()
+        self._pintar_resumen()
+
+    def refrescar_resumen(self) -> None:
+        if not self.hosts or self._busy_resumen:
+            return
+        self._busy_resumen = True
+        hosts = list(self.hosts)
+
+        def trabajo():
+            from core.remote_runner import friendly_error, resumen_servidor
+            datos = {}
+            for h in hosts:
+                try:
+                    datos[h] = resumen_servidor(h)
+                except Exception as e:  # noqa: BLE001
+                    datos[h] = {"host": h, "error": friendly_error(str(e))}
+            self._resumen_listo.emit(datos)
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _aplicar_resumen(self, datos) -> None:
+        self._busy_resumen = False
+        for h, d in datos.items():
+            if "error" in d and h in self._resumenes and "casos" in self._resumenes[h]:
+                # Se conservan los casos de la ultima respuesta buena, con el aviso.
+                d = dict(self._resumenes[h], error=d["error"])
+            self._resumenes[h] = d
+        self._pintar_resumen()
+
+    @staticmethod
+    def _etiqueta(caso: str) -> str:
+        """20261103_111623_naca63-3-418_abbott_a2.0_609b -> naca63-3-418_abbott_a2.0, 03/11 11:16"""
+        partes = caso.split("_")
+        if len(partes) > 3 and partes[0].isdigit() and partes[1].isdigit():
+            return f"{'_'.join(partes[2:-1])}  ({partes[0][6:8]}/{partes[0][4:6]} {partes[1][:2]}:{partes[1][2:4]})"
+        return caso
+
+    def _pintar_resumen(self) -> None:
+        self.tabla_servidores.setRowCount(len(self.hosts))
+        filas = []
+        for i, h in enumerate(self.hosts):
+            d = self._resumenes.get(h, {})
+            s = d.get("servidor") or {}
+            casos = d.get("casos") or []
+            corriendo = sum(1 for c in casos if c["estado"] == "running" and c["paso"] != "en cola")
+            en_cola = sum(1 for c in casos if c["estado"] == "running" and c["paso"] == "en cola")
+            conexion = ("⚠️ " + d["error"]) if d.get("error") else ("✅ conectado" if d else "…")
+            valores = [h.split("@")[-1], conexion,
+                       f"{s['cpu_pct']:.0f} %" if s.get("cpu_pct") is not None else "—",
+                       f"{corriendo} / {en_cola}" if d.get("casos") is not None else "—",
+                       str(s.get("procesos", "—"))]
+            for j, v in enumerate(valores):
+                self.tabla_servidores.setItem(i, j, QTableWidgetItem(v))
+            for c in casos:
+                filas.append((h, c))
+        orden = {"running": 0, "failed": 1, "stopped": 2, "done": 3}
+        filas.sort(key=lambda f: (orden.get(f[1]["estado"], 4) + (0.5 if f[1]["paso"] == "en cola" else 0),
+                                  f[1]["caso"]), reverse=False)
+        self.tabla_casos.setRowCount(len(filas))
+        self._filas_casos = filas
+        for i, (h, c) in enumerate(filas):
+            estado = "En cola" if c["estado"] == "running" and c["paso"] == "en cola" else \
+                self.ESTADOS.get(c["estado"], "Sin estado")
+            if c["estado"] == "running" and c["paso"] not in ("solver", "en cola", None):
+                estado += f" ({c['paso']})"
+            avance = f"{c['pct']:.0f} %" if c.get("pct") is not None else "—"
+            it = f"{c['t']:.0f} de {c['fin']:.0f}" if c.get("t") is not None and c.get("fin") else "—"
+            for j, v in enumerate([self._etiqueta(c["caso"]), h.split("@")[-1], estado, avance, it]):
+                self.tabla_casos.setItem(i, j, QTableWidgetItem(v))
+
+    def _caso_elegido(self, fila: int, _col: int) -> None:
+        if 0 <= fila < len(getattr(self, "_filas_casos", [])):
+            h, c = self._filas_casos[fila]
+            self.watch(h, c["ruta"])
 
     def _dibujar(self) -> None:
         solo_final = self.cb_escala.currentIndex() == 1

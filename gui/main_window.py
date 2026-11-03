@@ -409,6 +409,8 @@ class MainWindow(QMainWindow):
 
     def _sync_machines(self) -> None:
         self.dispatcher.set_machines(self.jobs_panel.all_machines())
+        if getattr(self, "remote_panel", None) is not None:
+            self.remote_panel.set_hosts([m.host for m in self.jobs_panel.all_machines()])
 
     def _lanzar(self, job) -> None:
         self._has_unsaved_work = True

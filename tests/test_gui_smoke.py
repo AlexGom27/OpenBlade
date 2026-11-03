@@ -311,3 +311,27 @@ def test_theme_icons_are_found_from_any_folder():
     from gui.visual_theme import STYLESHEET
     rutas = re.findall(r'url\("([^"]+)"\)', STYLESHEET)
     assert rutas and all(os.path.isabs(r) and os.path.exists(r) for r in rutas)
+
+
+def test_server_tab_lists_every_server_and_its_cases(window, monkeypatch):
+    panel = window.remote_panel
+    monkeypatch.setattr(panel, "refrescar_resumen", lambda: None)
+    panel.set_hosts(["u@a", "u@b", "local"])
+    panel._aplicar_resumen({
+        "u@a": {"host": "u@a", "servidor": {"cpu_pct": 80.0, "procesos": 16}, "casos": [
+            {"caso": "20261103_111623_perfil_a2.0_609b", "ruta": "~/openblade_jobs/x", "estado": "running",
+             "paso": "solver", "t": 7338.0, "fin": 9000.0, "pct": 81.5},
+            {"caso": "20261103_111627_perfil_a6.0_4150", "ruta": "~/openblade_jobs/y", "estado": "running",
+             "paso": "en cola", "t": None, "fin": 40000.0, "pct": None},
+            {"caso": "20261103_083601_perfil_a8.0_09ff", "ruta": "~/openblade_jobs/z", "estado": "done",
+             "paso": "fin", "t": 40000.0, "fin": 40000.0, "pct": 100.0}]},
+        "u@b": {"host": "u@b", "error": "Sin respuesta del servidor; se reintenta solo"}})
+    t = panel.tabla_servidores
+    assert t.rowCount() == 2 and t.item(0, 3).text() == "1 / 1" and t.item(1, 1).text().startswith("⚠️")
+    c = panel.tabla_casos
+    assert [c.item(i, 2).text() for i in range(c.rowCount())] == ["En curso", "En cola", "Terminó"]
+    assert c.item(0, 0).text().startswith("perfil_a2.0") and c.item(0, 3).text() == "82 %"
+    vistos = []
+    monkeypatch.setattr(panel, "watch", lambda h, caso: vistos.append((h, caso)))
+    panel._caso_elegido(2, 0)
+    assert vistos == [("u@a", "~/openblade_jobs/z")]

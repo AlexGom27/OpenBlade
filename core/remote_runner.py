@@ -451,6 +451,66 @@ df -k . | tail -1; pgrep -c 'foamRun|simpleFoam|pimpleFoam'; true""", timeout=40
     return d
 
 
+def resumen_servidor(host: str, horas: float = 48.0) -> Dict[str, Any]:
+    """Carga del servidor y todos los casos de openblade_jobs tocados en esas horas, en una conexion."""
+    host = validar_host(host)
+    minutos = int(horas * 60)
+    r = _ssh(host, f"""cat /proc/loadavg; nproc; grep -E 'MemTotal|MemAvailable' /proc/meminfo
+pgrep -c 'foamRun|simpleFoam|pimpleFoam'; echo ---C
+cd {JOBS_DIR} 2>/dev/null || exit 0
+for d in $(find . -mindepth 1 -maxdepth 1 -type d -mmin -{minutos} | sort); do
+  echo "@@ $d"; cat "$d/status.json" 2>/dev/null; echo
+  grep -m1 -E '^endTime' "$d/system/controlDict" 2>/dev/null
+  tail -c 3000 "$d/run.log" 2>/dev/null | grep -E '^Time = ' | tail -1
+done; true""", timeout=40)
+    if r.returncode != 0:
+        raise RemoteError(r.stderr.strip()[-200:] or f"rc={r.returncode}")
+    cabeza, _, casos_txt = r.stdout.partition("---C\n")
+    v = cabeza.split("\n")
+    srv: Dict[str, Any] = {}
+    try:
+        carga = [float(x) for x in v[0].split()[:3]]
+        nucleos = int(v[1])
+        mem = {l.split(":")[0]: int(l.split()[1]) for l in v[2:4]}
+        total, libre = mem["MemTotal"] / 2**20, mem["MemAvailable"] / 2**20
+        srv = {"carga": carga[0], "cpu_pct": min(100.0, 100.0 * carga[0] / nucleos),
+               "ram_pct": 100.0 * (total - libre) / total, "procesos": int(v[4])}
+    except (IndexError, ValueError, KeyError):
+        pass
+    casos = []
+    for bloque in casos_txt.split("@@ ")[1:]:
+        lineas = bloque.split("\n")
+        nombre = lineas[0].strip().lstrip("./")
+        resto = "\n".join(lineas[1:])
+        try:
+            estado = json.loads(lineas[1]) if lineas[1].strip() else {}
+        except ValueError:
+            estado = {}
+        fin = re.search(r"endTime\s+([0-9.eE+\-]+);", resto)
+        t = re.findall(r"^Time = ([-+0-9.eE]+)", resto, re.M)
+        caso = {"caso": nombre, "ruta": f"~/{JOBS_DIR}/{nombre}", "estado": estado.get("state"),
+                "paso": estado.get("step"), "t": float(t[-1]) if t else None,
+                "fin": float(fin.group(1)) if fin else None}
+        caso["pct"] = 100.0 * caso["t"] / caso["fin"] if caso["t"] is not None and caso["fin"] else None
+        casos.append(caso)
+    return {"host": host, "servidor": srv, "casos": casos}
+
+
+def friendly_error(texto: str) -> str:
+    """Lo que se le dice al usuario cuando la conexion falla, sin la orden ssh entera."""
+    t = texto or ""
+    if "login.tailscale.com" in t:
+        enlace = re.search(r"https://login\.tailscale\.com/\S+", t)
+        return "Tailscale pide autenticarse" + (f": abre {enlace.group(0)}" if enlace else "")
+    if "timed out" in t.lower() or "no responde" in t:
+        return "Sin respuesta del servidor; se reintenta solo"
+    if "Permission denied" in t:
+        return "El servidor no acepta la clave SSH"
+    if "Could not resolve" in t or "No route" in t:
+        return "No se encuentra el servidor en la red"
+    return t.strip().splitlines()[-1][:160] if t.strip() else "Sin respuesta"
+
+
 class LogParser:
     """Convierte texto de run.log en los mismos eventos que una corrida local."""
     _time = re.compile(r"^Time = ([0-9.eE+\-]+)")
