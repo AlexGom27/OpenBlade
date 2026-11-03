@@ -224,7 +224,20 @@ Perfiles con curvatura, Re=6×10⁶, nivel 2:
 
 Cl no cumple en ningún punto; Cd y Cm cumplen en todos.
 
-**Corrección del 2026-11-03: la referencia del 63₃-418 estaba mal leída.** Dos repeticiones independientes de los mismos datos de Abbott, la de Ehrmann y White (2014, fig. 7) y la del catálogo de Risø (Bertagnolio et al. 2001, fig. 30), dan Cl≈0.32 a 0°, ≈0.78 a 4° y ≈1.19 a 8°, entre 0.06 y 0.09 más que mi lectura. Ehrmann además mide el perfil limpio y coincide con Abbott en la zona lineal. Frente a esos valores OpenBlade queda a +12 % a 0° (Cl pequeño), +5.4 % a 4° y +5 % a 8°. El código Navier-Stokes del catálogo de Risø (EllipSys2D, SST con transición) da casi lo mismo que OpenBlade, 0.85 a 4° y 1.25 a 8°, y su informe cuenta una diferencia media de 5.1 % con el experimento en la zona lineal; XFOIL da lo mismo. La tolerancia sigue sin cumplirse, pero por un margen mucho menor. El 4412 no tiene todavía una segunda fuente. El ángulo de sustentación nula coincide (4412: −4.25° frente a −4.13°; 63₃-418: −3.11° frente a −3.08°). Lo que difiere es la pendiente: 0.105 frente a 0.100 por grado en el 4412, y 0.114 frente a 0.098 en el 63₃-418. No se ha determinado si viene del modelo, de la lectura de las figuras o de las correcciones de túnel del experimento.
+**Corrección del 2026-11-03: la referencia del 63₃-418 estaba mal leída.** Dos repeticiones independientes de los mismos datos de Abbott, la de Ehrmann y White (2014, fig. 7) y la del catálogo de Risø (Bertagnolio et al. 2001, fig. 30), dan Cl≈0.32 a 0°, ≈0.78 a 4° y ≈1.19 a 8°, entre 0.06 y 0.09 más que mi lectura. Ehrmann además mide el perfil limpio y coincide con Abbott en la zona lineal. Frente a esos valores OpenBlade queda a +12 % a 0° (Cl pequeño), +5.4 % a 4° y +5 % a 8°. El código Navier-Stokes del catálogo de Risø (EllipSys2D, SST con transición) da casi lo mismo que OpenBlade, 0.85 a 4° y 1.25 a 8°, y su informe cuenta una diferencia media de 5.1 % con el experimento en la zona lineal; XFOIL da lo mismo. La tolerancia sigue sin cumplirse, pero por un margen mucho menor. El 4412 no tiene todavía una segunda fuente.
+
+**¿Corrige la transición esa diferencia? No (M).** NACA 63₃-418 a Re=2.4×10⁶, el de Ehrmann, frente a su perfil limpio (Cl≈0.32, 0.78 y 1.19, leído de su fig. 7; Tu del túnel 0.25 %):
+
+| Modelo | α | Cl | Dif. | Cd |
+|---|---|---|---|---|
+| SST | 0 | 0.352 | +9.9 % | 0.0103 |
+| SST | 4 | 0.806 | +3.3 % | 0.0117 |
+| SST | 8 (oscila) | 1.219 | +2.4 % | 0.0149 |
+| SST-LM, Tu≈0.24 % en el perfil | 0 | 0.384 | +20 % | 0.0056 |
+| SST-LM | 4 (oscila) | 0.850 | +9.0 % | 0.0072 |
+| SST-LM | 8 (oscila) | 1.266 | +6.4 % | 0.0112 |
+
+Con transición Cl sube en vez de bajar, porque la capa límite laminar es más delgada; Cd en cambio se acerca al medido por Ehrmann (≈0.006–0.007 entre Cl 0.3 y 0.8), que SST sobrestima. La malla tampoco es: a 4°, Cl cambia 0.2 % del nivel 1 al 3 en los dos perfiles (4412: 0.881, 0.876, 0.874; GCI 0.13 %). Con SST, a este Reynolds el 63₃-418 queda a +2.4 y +3.3 % en Cl a 4° y 8°. El ángulo de sustentación nula coincide (4412: −4.25° frente a −4.13°; 63₃-418: −3.11° frente a −3.08°). Lo que difiere es la pendiente: 0.105 frente a 0.100 por grado en el 4412, y 0.114 frente a 0.098 en el 63₃-418. No se ha determinado si viene del modelo, de la lectura de las figuras o de las correcciones de túnel del experimento.
 
 ## 8. Por qué lo anterior no sirve
 
