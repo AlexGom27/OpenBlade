@@ -28,7 +28,7 @@ import threading
 
 from qtpy.QtCore import Qt, QTimer, Signal
 from qtpy.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel,
-                            QLineEdit, QPushButton, QScrollArea, QTabWidget, QTableWidget,
+                            QLineEdit, QPushButton, QScrollArea, QSplitter, QTabWidget, QTableWidget,
                             QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .plots import new_chart, style_axes
@@ -68,15 +68,19 @@ class RemoteMonitorPanel(QWidget):
 
     # ---------------------------------------------------------------- UI
     def _build_ui(self) -> None:
-        # Todo va dentro de un area con barra de desplazamiento: en una ventana baja las
-        # tablas dejaban la grafica sin espacio. Asi cada parte conserva su altura.
+        # Dos partes con un divisor que se arrastra: arriba tablas y estado, con su propia
+        # barra de desplazamiento; abajo las graficas. Las graficas de matplotlib dentro de
+        # un QScrollArea redimensionable entran en recursion de tamanos y tiran la ventana.
         externo = QVBoxLayout(self)
         externo.setContentsMargins(0, 0, 0, 0)
+        self.divisor = QSplitter(Qt.Vertical)
+        self.divisor.setChildrenCollapsible(False)
+        externo.addWidget(self.divisor)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         contenido = QWidget()
         self.scroll.setWidget(contenido)
-        externo.addWidget(self.scroll)
+        self.divisor.addWidget(self.scroll)
         lay = QVBoxLayout(contenido)
         lay.setContentsMargins(8, 8, 8, 8)
 
@@ -137,6 +141,12 @@ class RemoteMonitorPanel(QWidget):
         self.lbl_estado.setWordWrap(True)
         lay.addWidget(self.lbl_estado)
 
+        graficas = QWidget()
+        self.divisor.addWidget(graficas)
+        self.divisor.setSizes([360, 480])
+        lay = QVBoxLayout(graficas)
+        lay.setContentsMargins(8, 0, 8, 8)
+
         # gráfica
         # selector de escala
         escala = QHBoxLayout()
@@ -158,7 +168,7 @@ class RemoteMonitorPanel(QWidget):
         self.subtabs.addTab(self.canvas_cd, "Cd")
         self.subtabs.addTab(self.canvas, "Residuales")
         self.subtabs.currentChanged.connect(lambda _i: self._dibujar())
-        self.subtabs.setMinimumHeight(420)
+        self.subtabs.setMinimumHeight(260)
         lay.addWidget(self.subtabs, 1)
 
         # métricas del servidor

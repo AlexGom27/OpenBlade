@@ -337,7 +337,9 @@ def test_server_tab_lists_every_server_and_its_cases(window, monkeypatch):
     assert vistos == [("u@a", "~/openblade_jobs/z")]
 
 
-def test_server_tab_scrolls_so_the_charts_keep_their_height(window):
+def test_server_tab_splits_tables_and_charts(window):
     panel = window.remote_panel
-    assert panel.scroll.widgetResizable() and panel.subtabs.minimumHeight() >= 400
-    assert panel.scroll.widget().isAncestorOf(panel.subtabs)
+    # Las graficas no van dentro del area con desplazamiento: ahi entran en recursion.
+    assert not panel.scroll.widget().isAncestorOf(panel.subtabs)
+    assert panel.scroll.widget().isAncestorOf(panel.tabla_casos)
+    assert panel.divisor.count() == 2 and panel.subtabs.minimumHeight() >= 250
