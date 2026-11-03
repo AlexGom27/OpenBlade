@@ -19,7 +19,7 @@
    "periodo": null,
    "trabajo": "20261031_104518_gci_a0_n2_3db0",
    "oscila": false,
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "yplus": 0.5232458474668142
   },
   {
@@ -37,7 +37,7 @@
    "periodo": null,
    "trabajo": "20261031_162113_polar_a2_3001",
    "oscila": false,
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "yplus": 0.5433539889970348
   },
   {
@@ -55,7 +55,7 @@
    "periodo": null,
    "trabajo": "20261031_162113_polar_a4_8117",
    "oscila": false,
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "yplus": 0.5745917704685877
   },
   {
@@ -73,7 +73,7 @@
    "periodo": null,
    "trabajo": "20261031_162113_polar_a6_fae3",
    "oscila": false,
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "yplus": 0.6095310910500356
   },
   {
@@ -91,7 +91,7 @@
    "periodo": null,
    "trabajo": "20261031_162113_polar_a8_6ae0",
    "oscila": false,
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "yplus": 0.6448076031737493
   },
   {
@@ -109,7 +109,7 @@
    "periodo": null,
    "trabajo": "20261031_104518_gci_a10_n2_ea0e",
    "oscila": false,
-   "maquina": "alejandro@100.109.3.56",
+   "maquina": "usuario@servidor-b",
    "yplus": 0.6865796615912434
   },
   {
@@ -127,7 +127,7 @@
    "periodo": null,
    "trabajo": "20261031_162113_polar_a12_6206",
    "oscila": false,
-   "maquina": "alejandro@100.109.3.56",
+   "maquina": "usuario@servidor-b",
    "yplus": 0.7328807068092271
   },
   {
@@ -145,7 +145,7 @@
    "periodo": null,
    "trabajo": "20261031_162113_polar_a14_ebdb",
    "oscila": false,
-   "maquina": "alejandro@100.109.3.56",
+   "maquina": "usuario@servidor-b",
    "yplus": 0.767926073452321
   },
   {
@@ -163,7 +163,7 @@
    "periodo": null,
    "trabajo": "20261031_104518_gci_a15_n2_ba47",
    "oscila": false,
-   "maquina": "alejandro@100.109.3.56",
+   "maquina": "usuario@servidor-b",
    "yplus": 0.7801090484800898
   },
   {
@@ -181,7 +181,7 @@
    "periodo": null,
    "trabajo": "20261031_162113_polar_a16_b144",
    "oscila": true,
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "yplus": 0.7902794459434294
   },
   {
@@ -199,7 +199,7 @@
    "periodo": null,
    "trabajo": "20261031_162113_polar_a17_778e",
    "oscila": true,
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "yplus": 0.802771566070015
   },
   {
@@ -217,7 +217,7 @@
    "periodo": null,
    "trabajo": "20261101_073838_polar_a18_vecino_e71c",
    "oscila": true,
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "yplus": 0.8119658487545787
   }
  ],

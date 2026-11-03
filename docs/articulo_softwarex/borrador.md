@@ -1,6 +1,8 @@
 # OpenBlade: verifiable 2D RANS airfoil polars with per-point verdict, grid uncertainty and traceable packages
 
-Draft for SoftwareX (Original Software Publication). Status: outline with measured results; sections marked TODO are pending. Limit about 3000 words, to be checked against the current Guide for Authors.
+Draft for SoftwareX (Original Software Publication).
+
+Authors: Alejandro Gómez Sánchez, Jesús Miguel Ruiz Martínez, Heriberto Cruz Martínez. Instituto Tecnológico del Valle de Etla (ITVE), Tecnológico Nacional de México (TecNM), Oaxaca, Mexico. TODO: confirm order, corresponding author and full affiliation address. Status: outline with measured results; sections marked TODO are pending. Limit about 3000 words, to be checked against the current Guide for Authors.
 
 ## Code metadata
 
@@ -53,5 +55,5 @@ TODO.
 ## Pending before submission
 - Make the repository public and tag a release.
 - Confirm the Guide for Authors: word limit, metadata fields, accepted licenses, fee (secondary sources give USD 760 or 970, not confirmed).
-- Authors and affiliations; software registration number.
+- Software registration number (unknown, ask the institution).
 - Figures: polar with bands, grid study, window screenshot.

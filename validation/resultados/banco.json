@@ -10,7 +10,7 @@
     "ajustes": {}
    },
    "trabajo": "20261101_084938_banco_sst_a0_02b7",
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "estado": "terminado",
    "error": "",
    "veredicto": "CONVERGIDO",
@@ -77,7 +77,7 @@
     "ajustes": {}
    },
    "trabajo": "20261101_084938_banco_sst_a10_7d09",
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "estado": "terminado",
    "error": "",
    "veredicto": "CONVERGIDO",
@@ -144,7 +144,7 @@
     "ajustes": {}
    },
    "trabajo": "20261101_084938_banco_sst_a15_65f3",
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "estado": "terminado",
    "error": "",
    "veredicto": "CONVERGIDO",
@@ -211,7 +211,7 @@
     "ajustes": {}
    },
    "trabajo": "20261101_084938_banco_sa_a0_7612",
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "estado": "terminado",
    "error": "",
    "veredicto": "CONVERGIDO",
@@ -278,7 +278,7 @@
     "ajustes": {}
    },
    "trabajo": "20261101_084938_banco_sa_a10_8e39",
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "estado": "terminado",
    "error": "",
    "veredicto": "CONVERGIDO",
@@ -345,7 +345,7 @@
     "ajustes": {}
    },
    "trabajo": "20261101_084938_banco_sa_a15_4290",
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "estado": "terminado",
    "error": "",
    "veredicto": "CONVERGIDO",
@@ -412,7 +412,7 @@
     "ajustes": {}
    },
    "trabajo": "20261101_084938_banco_dominio_R40_a10_aa60",
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "estado": "terminado",
    "error": "",
    "veredicto": "CONVERGIDO",
@@ -436,7 +436,7 @@
     "ajustes": {}
    },
    "trabajo": "20261101_084938_banco_dominio_R500_a10_9744",
-   "maquina": "alejandro@100.85.66.123",
+   "maquina": "usuario@servidor-a",
    "estado": "terminado",
    "error": "",
    "veredicto": "CONVERGIDO",

@@ -1,281 +1,203 @@
-# OpenBlade 2D — Guía de Instalación y Uso
+# OpenBlade 2D
 
-**Workbench CFD 2D para Perfiles Aerodinámicos**
+English · [Español](README.es.md)
 
-Programa desarrollado en el Instituto Tecnológico del Valle de Etla (ITVE-TecNM).  
-Directores: Alejandro Gómez Sánchez, Heriberto Cruz Martínez.  
-Desarrollador: Jesús Miguel Ruiz Martínez.
+**Verifiable 2D RANS airfoil analysis with OpenFOAM.**
 
----
+OpenBlade builds the mesh and the case on your computer, runs OpenFOAM 12 locally (through Docker) or on your own Linux servers over SSH, and gives every result with a convergence verdict, a grid uncertainty band and a record of exactly what produced it.
 
-## Descripción
+Developed at the Instituto Tecnológico del Valle de Etla (ITVE, TecNM), Mexico, by Alejandro Gómez Sánchez, Jesús Miguel Ruiz Martínez and Heriberto Cruz Martínez.
 
-OpenBlade 2D es un entorno de simulación CFD (Computational Fluid Dynamics) para el análisis aerodinámico de perfiles alares. Genera la malla en esta máquina y resuelve con **OpenFOAM 12**, en local (vía Docker) o en servidores por SSH, con una interfaz gráfica construida en Python.
-
-Lo que se ha validado, con qué tolerancias y lo que no cumple está en [docs/VALIDACION.md](docs/VALIDACION.md).
-
-### Características principales
-- Generación automática de perfiles NACA (4 dígitos) o importación de perfiles personalizados
-- Malla C estructurada propia, con niveles anidados para estudios de malla (GCI), y con y+ estimado antes de calcular y medido después
-- Solvers estacionarios (simpleFoam) y transitorios (pimpleFoam)
-- Inicialización de flujo potencial (potentialFoam)
-- Modelos de turbulencia: k-ω SST, k-ε, Spalart-Allmaras, k-ω SST-LM (transición)
-- Visualización 3D interactiva de resultados (campos de presión/velocidad)
-- Barrido paramétrico de ángulo de ataque con curvas Cl vs α, Cd vs α
-- Monitor de convergencia en tiempo real (residuos)
-- Veredicto en cada corrida: CONVERGIDO, NO CONVERGIDO o DIVERGIDO, con media y amplitud de Cl, Cd y Cm
-- Ficha por caso con las huellas sha256 de la malla y de los diccionarios, versiones y checkMesh
-- Cola de trabajos: cada paquete tiene su carpeta y se reparte entre Local y varios servidores
-- Estudio de malla con incertidumbre (GCI) y banco de validación frente a NASA TMR y Ladson, con informe PDF
+What is validated, with which tolerances, and what does not pass is in [docs/VALIDACION.md](docs/VALIDACION.md) (Spanish). Read it before using the numbers.
 
 ---
 
-## Requisitos Previos (Todas las Plataformas)
+## What it does
 
-| Software | Versión mínima | Propósito |
+- **Airfoils:** NACA 4-digit profiles, or any profile from a coordinates file (Selig or Lednicer format).
+- **Mesh:** its own nested structured C-grid (225×65, 449×129, 897×257), with y+ estimated before the run and measured after it. The angle of attack is set by the flow, so all angles share one mesh.
+- **Solvers and models:** steady (simpleFoam) and transient (pimpleFoam); k-ω SST, k-ε, Spalart-Allmaras and k-ω SST-LM transition.
+- **A verdict for every run:** CONVERGIDO, NO CONVERGIDO (with an "oscillates" flag) or DIVERGIDO, from the drift of the forces. Points that did not converge are flagged and do not get an uncertainty band.
+- **Grid uncertainty:** grid studies with the Grid Convergence Index (GCI) on three nested levels, each level started from the solution of the previous one.
+- **Traceability:** every case is a package with a `ficha.json` holding the sha256 of the mesh and every dictionary, program version and parameters. A server refuses a package that was altered after it was built. The same package gives byte-identical forces on two servers with the same hardware.
+- **Several servers, one window:** each run is a package with its own folder. Packages go to the least busy server, and each server keeps its own queue, so work goes on if you close the program or your computer sleeps. The **Servidor** (Server) tab lists every server and every case with its progress.
+- **Outputs:** Cl, Cd, Cm, Cp and Cf, 3D field views, residuals, polars with uncertainty bands, PDF reports, and the converged polar points exported in XFOIL text format.
+
+## Current validation, in short
+
+| Case | Result |
+|---|---|
+| NACA 0012, Re = 6×10⁶, SST, tripped | Cl within 1.7 % of Ladson (NASA TM 4074) from 4° to 17°. Validation bench: 35 of 40 checks pass |
+| NACA 0012, Re = 3.99×10⁶ | Passes the tolerances fixed before running |
+| NACA 0012, Re = 2×10⁶ | Fails two of three checks |
+| NACA 4412 and NACA 63₃-418, cambered, Re = 6×10⁶ | Drag and moment within tolerance. NACA 63₃-418 lift is 3 to 5 % high against modern data; NACA 4412 lift is 6 to 11 % high against a reading of Abbott and von Doenhoff that still needs a second source |
+| Stall | **Not predicted** with SST |
+| Transition (SST-LM) | Not validated: drag depends on the turbulence that reaches the airfoil |
+
+---
+
+## Requirements
+
+| Software | Version | Why |
 |---|---|---|
-| Python | 3.10+ | Motor de la aplicación |
-| Docker Desktop | 4.0+ | Ejecutar OpenFOAM en Local sin compilar (no hace falta si solo se usan servidores) |
-| Git | 2.0+ | Descargar el código fuente |
+| Python | 3.10 or newer | The application |
+| Docker | Desktop 4.0+ or Engine | OpenFOAM on your own computer. Not needed if you only use servers |
+| Git | 2.0+ | To get the code |
+| rsync | any | To send packages to servers |
 
----
+On each server: Linux with OpenFOAM 12, `python3`, `rsync` and `flock` (util-linux). Tested with macOS (Apple silicon) as the desktop and Ubuntu 24.04 servers. The Linux and Windows desktop instructions below have not been re-tested for this release.
 
-## 🍎 Instalación en macOS
+## Installation
 
-### 1. Instalar Python
+### macOS
+
 ```bash
-# Opción A: Desde python.org (recomendado)
-# Descargar de https://www.python.org/downloads/
-
-# Opción B: Con Homebrew
 brew install python@3.12
 ```
 
-### 2. Instalar Docker Desktop
-1. Descargar desde [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-2. Abrir el archivo `.dmg` e instalar arrastrando a Aplicaciones
-3. Abrir Docker Desktop y esperar a que la ballena 🐳 esté quieta en la barra superior
+Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and wait until it reports that it is running. Then:
 
-### 3. Construir la imagen de OpenFOAM
-
-Es OpenFOAM 12, la misma versión que usan los servidores. Se construye una sola vez, después del paso 4.
 ```bash
-docker build --platform linux/amd64 -t openblade/openfoam12:20250206 -f docker/Dockerfile.openfoam12 docker
+git clone https://github.com/AlexGom27/OpenBlade.git OpenBlade2D
 ```
 
-### 4. Descargar OpenBlade 2D
 ```bash
-git clone <URL_DEL_REPOSITORIO> OpenBlade2D
 cd OpenBlade2D
 ```
 
-### 5. Instalar dependencias de Python
 ```bash
 pip3 install -r requirements.txt
 ```
 
-### 6. Ejecutar
-```bash
-python3 main.py
-```
-
-> **⚠️ Nota macOS:** Si aparece el mensaje `"Python" no se puede abrir porque no se puede verificar al desarrollador`, ve a **Preferencias del Sistema → Seguridad y Privacidad → Abrir de todos modos**.
-
----
-
-## 🐧 Instalación en Linux (Ubuntu/Debian)
-
-### 1. Instalar Python y dependencias del sistema
-```bash
-sudo apt update
-sudo apt install -y python3 python3-pip python3-venv git
-sudo apt install -y libgl1-mesa-glx libxkbcommon-x11-0 libxcb-xinerama0 libegl1
-```
-
-### 2. Instalar Docker Engine
-```bash
-# Añadir repositorio oficial de Docker
-sudo apt install -y ca-certificates curl gnupg
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io
-
-# Permitir usar Docker sin sudo
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-### 3. Construir la imagen de OpenFOAM
-
-Es OpenFOAM 12, la misma versión que usan los servidores. Se construye una sola vez, después del paso 4.
 ```bash
 docker build --platform linux/amd64 -t openblade/openfoam12:20250206 -f docker/Dockerfile.openfoam12 docker
 ```
 
-### 4. Descargar OpenBlade 2D
 ```bash
-git clone <URL_DEL_REPOSITORIO> OpenBlade2D
-cd OpenBlade2D
-```
-
-### 5. Crear entorno virtual e instalar dependencias
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 6. Ejecutar
-```bash
-source venv/bin/activate  # (si no está activado)
 python3 main.py
 ```
 
-> **💡 Tip Linux:** Si tienes problemas gráficos con Qt, prueba: `export QT_QPA_PLATFORM=xcb` antes de ejecutar.
+If macOS says Python cannot be opened because the developer cannot be verified, allow it in **System Settings → Privacy & Security**.
 
----
+### Linux (Ubuntu or Debian)
 
-## 🪟 Instalación en Windows
+```bash
+sudo apt install -y python3 python3-pip python3-venv git rsync libgl1 libxkbcommon-x11-0 libxcb-xinerama0 libegl1
+```
 
-### 1. Instalar Python
-1. Descargar desde [python.org/downloads](https://www.python.org/downloads/)
-2. **IMPORTANTE:** Marca la casilla ☑️ **"Add Python to PATH"** durante la instalación
+Install Docker Engine following [the official guide](https://docs.docker.com/engine/install/ubuntu/) and add your user to the `docker` group. Then:
 
-### 2. Instalar Docker Desktop
-1. Descargar desde [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-2. Instalar y reiniciar la computadora cuando lo solicite
-3. Si pide activar WSL 2, seguir las instrucciones en pantalla
-4. Abrir Docker Desktop y esperar a que esté listo (icono verde)
+```bash
+git clone https://github.com/AlexGom27/OpenBlade.git OpenBlade2D && cd OpenBlade2D
+```
 
-### 3. Construir la imagen de OpenFOAM
+```bash
+python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+```
 
-Es OpenFOAM 12, la misma versión que usan los servidores. Se construye una sola vez, después del paso 4.
+```bash
+docker build --platform linux/amd64 -t openblade/openfoam12:20250206 -f docker/Dockerfile.openfoam12 docker
+```
+
+```bash
+python3 main.py
+```
+
+If Qt has graphics problems, run `export QT_QPA_PLATFORM=xcb` first.
+
+### Windows
+
+Install Python from [python.org](https://www.python.org/downloads/) and tick **Add Python to PATH**. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/), which needs WSL 2. Then, in PowerShell:
+
+```powershell
+git clone https://github.com/AlexGom27/OpenBlade.git OpenBlade2D; cd OpenBlade2D
+```
+
+```powershell
+pip install -r requirements.txt
+```
+
 ```powershell
 docker build --platform linux/amd64 -t openblade/openfoam12:20250206 -f docker/Dockerfile.openfoam12 docker
 ```
 
-### 4. Descargar OpenBlade 2D
-```powershell
-git clone <URL_DEL_REPOSITORIO> OpenBlade2D
-cd OpenBlade2D
-```
-
-### 5. Instalar dependencias de Python
-```powershell
-pip install -r requirements.txt
-```
-
-### 6. Ejecutar
 ```powershell
 python main.py
 ```
 
-> **⚠️ Nota Windows:** Docker Desktop requiere **WSL 2** (Windows Subsystem for Linux). Si al instalar Docker te pide habilitarlo, ejecuta en PowerShell como Administrador:
-> ```powershell
-> wsl --install
-> ```
-> Y reinicia la computadora.
+Running on servers from Windows needs `ssh` and `rsync`, for example inside WSL.
 
 ---
 
-## Correr en un servidor
+## Running on servers
 
-En la sección **Ejecución** del panel elige *Servidor (SSH)*, escribe `usuario@host`, pulsa **Probar conexión** e indica los procesos. El programa genera la malla y prepara el caso en esta máquina, lo sube con `rsync`, lo ejecuta en el servidor y descarga los resultados al terminar.
+1. In **Ejecución** (Execution), choose **Servidor (SSH)**, type `user@host` and press **Probar conexión** (Test connection).
+2. The first time on each computer, press **Configurar acceso…** (Configure access) and type the server password once. An SSH key is installed; the password is not stored.
+3. To use several servers, add them in the **Trabajos** (Jobs) tab and set how many processes (**Procesos**) and simultaneous runs (**A la vez**) each takes. Then choose **Repartir entre máquinas** (Spread across machines).
 
-La primera vez en cada computadora, pulsa **Configurar acceso…** y escribe la contraseña del servidor: se instala una clave SSH y la contraseña no se guarda (Mac y Linux; en Windows, desde WSL).
+Packages are uploaded with `rsync` and kept in `~/openblade_jobs/` on the server. The mesh and the case are always built on your computer; servers only compute.
 
-Requisitos: `rsync` en esta máquina, y `rsync`, `python3` y OpenFOAM en el servidor. Los trabajos quedan en `~/openblade_jobs/`. Cerrar la app no los detiene: al abrirla de nuevo los retoma.
+Two things still need the launching computer to be on: stopping early when the forces no longer change (without it the run goes on to its iteration limit), and starting the finer levels of a grid study, which begin from the field of the previous level.
 
-## Trabajos y reparto
+## First run
 
-Cada **Iniciar Análisis** envía un paquete con su propia carpeta en `~/.openblade/jobs/`; se puede lanzar otro sin esperar al anterior. La pestaña **Trabajos** muestra todos, con su máquina, estado y veredicto; con doble clic se ve uno en la ventana.
+1. If you run locally, open Docker first.
+2. Run `python3 main.py`.
+3. Set the airfoil, flow conditions and where to run.
+4. Press **Iniciar Análisis** (Run Analysis).
+5. Read the verdict in the banner before using any number.
+6. Press **Ver Resultados** (View Results).
 
-Con **Correr en: Repartir entre máquinas**, cada paquete va a la primera máquina marcada que esté libre, sin pasar de los procesos y trabajos simultáneos que indique su fila. Un barrido de ángulos envía un paquete por ángulo y la polar se completa a medida que terminan.
+Suggested first case: NACA 0012, 5°, 15 m/s, steady, k-ω SST, 40000 iterations (an upper limit: the run stops earlier when the forces no longer change).
 
-Los mismos parámetros dan el mismo archivo de malla, y cada máquina verifica la ficha antes de calcular: un paquete alterado se rechaza. El mismo paquete con los mismos procesos da fuerzas idénticas en Local y en los servidores.
+## Without the window
 
-## Sin ventana
-
-```bash
-python3 -m core.cli doctor --hosts usuario@a,usuario@b
-```
-
-`doctor` comprueba sin lanzar nada que todo está listo: versiones, espacio en disco, Docker, acceso a cada servidor y OpenFOAM.
-
-```bash
-python3 -m core.cli correr --host usuario@host --procesos 8 aoa=8 reynolds=6e6
-```
+The command line uses the same functions as the window.
 
 ```bash
-python3 -m core.cli control --hosts usuario@a,usuario@b --procesos 8
+python3 -m core.cli doctor --hosts user@a,user@b
 ```
 
-`control` corre el caso de control en cada máquina y evalúa sus 8 compuertas (ver `docs/ESTRATEGIA_PROGRAMA.md`).
+Checks versions, disk space, Docker, access to each server and OpenFOAM, without running anything.
 
 ```bash
-python3 -m core.cli banco --maquinas usuario@a:10:1,usuario@b:8:1 --salida carpeta
+python3 -m core.cli polar --maquinas user@a:8:2,user@b:8:2 --angulos 0,4,8,12 --gci 0,8 reynolds=6e6
 ```
 
-`banco` corre el NACA 0012 frente a NASA TMR y Ladson y deja un informe PDF con lo que cumple y lo que no.
+One package per angle, a three-level GCI at the angles in `--gci`, and `polar.csv`, `polar.json`, `polar.png` and `polar_xfoil.txt` as output. `--continuar` resumes an interrupted campaign.
 
 ```bash
-python3 -m core.cli polar --maquinas usuario@a:10:1 --angulos 0,4,8 --gci 0,8 --urans reynolds=6e6
+python3 -m core.cli banco --maquinas user@a:8:2 --salida bench
 ```
 
-`polar` lanza un paquete por ángulo, añade un GCI de tres mallas en los ángulos de `--gci` y deja `polar.csv`, `polar.json` y `polar.png`. Con `--urans` repite en transitorio los ángulos que no convergen, arrancando de su campo estacionario. Con `--continuar` retoma una campaña interrumpida: lo terminado no se repite y lo que sigue en su máquina se recoge.
+Runs the NACA 0012 validation bench against NASA TMR and Ladson and writes a PDF report.
 
-Esta computadora reparte la cola. Si se duerme o pierde la red, lo que ya corre sigue en su servidor y lo pendiente espera; los trabajos esperan a que vuelva la conexión.
-
-Todas estas órdenes usan las mismas funciones que la ventana. En la ventana están en el botón **Banco de Validación** y en **Análisis: Estudio de Malla**. Para abrir un proyecto guardado: `python3 main.py proyecto.obp`.
-
-## 🚀 Uso Rápido
-
-### Flujo de trabajo recomendado:
-
-```
-1. Si vas a correr en Local, abrir Docker Desktop y esperar a que esté listo
-2. Ejecutar: python3 main.py
-3. Configurar perfil, condiciones de frontera y dónde correr
-4. Pulsar "Generar Malla" para verla (opcional: el análisis la genera si no existe)
-5. Pulsar "Iniciar Análisis"
-6. Leer el veredicto en la franja superior antes de usar los números
-7. Pulsar "Ver Resultados"
+```bash
+python3 -m core.cli control --hosts user@a,user@b --procesos 8
 ```
 
-### Parámetros recomendados para primera simulación:
+Runs the same package on each server and checks that the forces match.
 
-| Parámetro | Valor |
+## Tests
+
+```bash
+python3 -m pytest -q
+```
+
+## Troubleshooting
+
+| Problem | What to do |
 |---|---|
-| Perfil | NACA 0012 |
-| Ángulo de ataque | 5° |
-| Velocidad de entrada | 15 m/s |
-| Régimen | Estacionario (simpleFoam) |
-| Modelo de turbulencia | k-Omega SST |
-| Iteraciones máximas | 40000 (es un tope: termina antes si las fuerzas ya no cambian) |
+| `docker: command not found` | Open Docker and wait until it is ready |
+| Verdict DIVERGIDO | Check the inlet turbulence and the mesh; those coefficients are not a result |
+| Verdict NO CONVERGIDO | Raise the iteration limit, or use the transient solver if Cl oscillates |
+| `Paquete alterado, no se calcula` | A file changed after the package was built; run the analysis again |
+| `ModuleNotFoundError` | Run `pip install -r requirements.txt` again |
 
----
+The interface is in Spanish.
 
-## 🔧 Solución de Problemas Comunes
+## License
 
-| Problema | Solución |
-|---|---|
-| `docker: command not found` | Abre Docker Desktop y espera a que esté listo |
-| `ERROR: Comando 'docker' no encontrado` | Docker Desktop no está abierto o no está instalado |
-| El veredicto dice DIVERGIDO | Revisa Tu y νt/ν de entrada y la malla; esos coeficientes no son un resultado |
-| El veredicto dice NO CONVERGIDO | Aumenta las iteraciones, o usa el régimen transitorio si Cl oscila |
-| `Paquete alterado, no se calcula` | Un archivo cambió después de crear la ficha: lanza el análisis de nuevo |
-| La GUI se congela | Espera a que termine el proceso actual; no dar doble clic |
-| `ModuleNotFoundError` | Ejecuta `pip install -r requirements.txt` de nuevo |
-| Pantalla negra en visualización 3D | Actualiza tus drivers gráficos (especialmente en Linux) |
+OpenBlade is free software under the [GNU General Public License, version 3](LICENSE) (GPL-3.0-only). It can be used, also commercially, modified and redistributed; redistributed versions, modified or not, must use the same license and include their source code. It comes without warranty: see sections 15 and 16 of the license and the validation limits in [docs/VALIDACION.md](docs/VALIDACION.md).
 
----
-
-## 📄 Licencia
-
-OpenBlade es software libre bajo la [Licencia Pública General de GNU, versión 3](LICENSE) (GPL-3.0-only). Puede usarse, también en empresas, modificarse y redistribuirse; quien lo redistribuya, modificado o no, debe hacerlo bajo la misma licencia y con su código fuente. Se distribuye sin garantía: ver las secciones 15 y 16 de la licencia y los límites de validación en [docs/VALIDACION.md](docs/VALIDACION.md).
-
-Desarrollado en el ITVE-TecNM.  
-Contacto: alejandro.gs@itvalletla.edu.mx
+Contact: alejandro.gs@itvalletla.edu.mx

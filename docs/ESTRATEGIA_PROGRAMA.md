@@ -1,6 +1,6 @@
 # Estrategia: OpenBlade como programa confiable
 
-Fecha: 2026-10-31. Acordada entre Claude y OpenClaw, a partir de la propuesta de Alejandro. Reemplaza la ruta de `docs/ANALISIS_E1_Y_RUTA.md` §3.
+Fecha: 2026-10-31. Acordada entre Claude y OpenClaw, a partir de la propuesta de Alejandro. Reemplaza la ruta de `docs/ANALISIS_E1_Y_RUTA.md` §3 (retirado del árbol; está en la etiqueta `archivo-2026-11-03`).
 M = medido; H = hipótesis. OpenClaw reprodujo las tablas de §2 y §3 por su cuenta, con las columnas leídas por nombre.
 
 ## 1. Objetivo y regla

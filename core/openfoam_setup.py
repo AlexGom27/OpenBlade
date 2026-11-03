@@ -298,8 +298,8 @@ relaxationFactors {{
     pRefValue       0;
     // PIMPLE necesita diccionarios, no valores simples: con
     // "p {tolerance};" OF-12 avisa "No corrector convergence criteria found"
-    // y agota nOuterCorrectors en todos los pasos, segun lo que midio
-    // OpenClaw en otra sesion; aqui no se ha comprobado. En SIMPLE si vale
+    // y agota nOuterCorrectors en todos los pasos, segun una revision
+    // externa; aqui no se ha comprobado. En SIMPLE si vale
     // el valor simple, por eso el estacionario no lo necesita.
     outerCorrectorResidualControl
     {{

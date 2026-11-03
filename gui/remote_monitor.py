@@ -14,7 +14,7 @@ no está configurada, el panel lo indica en lugar de fallar.
 Configuración
 -------------
 Variable de entorno (o atributo) con el destino SSH:
-    OPENBLADE_REMOTE=alejandro@100.85.66.123
+    OPENBLADE_REMOTE=usuario@servidor-a
 OPENBLADE_REMOTE_CASE admite varios casos separados por comas: el primero se
 abre al iniciar y el resto queda en el selector.
 

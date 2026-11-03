@@ -21,49 +21,49 @@
    },
    {
     "n": 4,
-    "compuerta": "rango de Cd (100.85.66.123)",
+    "compuerta": "rango de Cd (servidor-a)",
     "ok": true,
     "detalle": "0.04 %"
    },
    {
     "n": 4,
-    "compuerta": "rango de Cd (100.109.3.56)",
+    "compuerta": "rango de Cd (servidor-b)",
     "ok": true,
     "detalle": "0.04 %"
    },
    {
     "n": 5,
-    "compuerta": "sin divergencia (100.85.66.123)",
+    "compuerta": "sin divergencia (servidor-a)",
     "ok": true,
     "detalle": "|Cl| máx 0.010, Cd<0 en 0 filas"
    },
    {
     "n": 5,
-    "compuerta": "sin divergencia (100.109.3.56)",
+    "compuerta": "sin divergencia (servidor-b)",
     "ok": true,
     "detalle": "|Cl| máx 0.010, Cd<0 en 0 filas"
    },
    {
     "n": 6,
-    "compuerta": "Cd frente a Ladson (100.85.66.123)",
+    "compuerta": "Cd frente a Ladson (servidor-a)",
     "ok": true,
     "detalle": "0.00784 (-3.1 %)"
    },
    {
     "n": 6,
-    "compuerta": "Cd frente a Ladson (100.109.3.56)",
+    "compuerta": "Cd frente a Ladson (servidor-b)",
     "ok": true,
     "detalle": "0.00784 (-3.1 %)"
    },
    {
     "n": 7,
-    "compuerta": "|Cl| a α=0 (100.85.66.123)",
+    "compuerta": "|Cl| a α=0 (servidor-a)",
     "ok": true,
     "detalle": "+0.00000"
    },
    {
     "n": 7,
-    "compuerta": "|Cl| a α=0 (100.109.3.56)",
+    "compuerta": "|Cl| a α=0 (servidor-b)",
     "ok": true,
     "detalle": "+0.00000"
    },
@@ -95,37 +95,37 @@
    },
    {
     "n": 4,
-    "compuerta": "rango de Cd (100.85.66.123)",
+    "compuerta": "rango de Cd (servidor-a)",
     "ok": true,
     "detalle": "0.64 %"
    },
    {
     "n": 4,
-    "compuerta": "rango de Cd (100.109.3.56)",
+    "compuerta": "rango de Cd (servidor-b)",
     "ok": true,
     "detalle": "0.64 %"
    },
    {
     "n": 5,
-    "compuerta": "sin divergencia (100.85.66.123)",
+    "compuerta": "sin divergencia (servidor-a)",
     "ok": true,
     "detalle": "|Cl| máx 0.862, Cd<0 en 0 filas"
    },
    {
     "n": 5,
-    "compuerta": "sin divergencia (100.109.3.56)",
+    "compuerta": "sin divergencia (servidor-b)",
     "ok": true,
     "detalle": "|Cl| máx 0.862, Cd<0 en 0 filas"
    },
    {
     "n": 6,
-    "compuerta": "Cl y Cd frente a Ladson (100.85.66.123)",
+    "compuerta": "Cl y Cd frente a Ladson (servidor-a)",
     "ok": true,
     "detalle": "Cl 0.8615 (+0.7 %), Cd 0.00987 (-3.9 %)"
    },
    {
     "n": 6,
-    "compuerta": "Cl y Cd frente a Ladson (100.109.3.56)",
+    "compuerta": "Cl y Cd frente a Ladson (servidor-b)",
     "ok": true,
     "detalle": "Cl 0.8615 (+0.7 %), Cd 0.00987 (-3.9 %)"
    },
@@ -138,9 +138,9 @@
   ]
  },
  "trabajos": {
-  "0@alejandro@100.85.66.123": "20261101_131713_control_a0_100.85.66.123_ae97",
-  "0@alejandro@100.109.3.56": "20261101_131713_control_a0_100.109.3.56_4fbc",
-  "8@alejandro@100.85.66.123": "20261101_131713_control_a8_100.85.66.123_ded3",
-  "8@alejandro@100.109.3.56": "20261101_131713_control_a8_100.109.3.56_55aa"
+  "0@usuario@servidor-a": "20261101_131713_control_a0_servidor-a_ae97",
+  "0@usuario@servidor-b": "20261101_131713_control_a0_servidor-b_4fbc",
+  "8@usuario@servidor-a": "20261101_131713_control_a8_servidor-a_ded3",
+  "8@usuario@servidor-b": "20261101_131713_control_a8_servidor-b_55aa"
  }
 }
