@@ -239,6 +239,8 @@ Cl no cumple en ningún punto; Cd y Cm cumplen en todos.
 
 Con transición Cl sube en vez de bajar, porque la capa límite laminar es más delgada; Cd en cambio se acerca al medido por Ehrmann (≈0.006–0.007 entre Cl 0.3 y 0.8), que SST sobrestima. La malla tampoco es: a 4°, Cl cambia 0.2 % del nivel 1 al 3 en los dos perfiles (4412: 0.881, 0.876, 0.874; GCI 0.13 %). Con SST, a este Reynolds el 63₃-418 queda a +2.4 y +3.3 % en Cl a 4° y 8°. El ángulo de sustentación nula coincide (4412: −4.25° frente a −4.13°; 63₃-418: −3.11° frente a −3.08°). Lo que difiere es la pendiente: 0.105 frente a 0.100 por grado en el 4412, y 0.114 frente a 0.098 en el 63₃-418. No se ha determinado si viene del modelo, de la lectura de las figuras o de las correcciones de túnel del experimento.
 
+**Tolerancias fijadas el 2026-11-03, antes de correr.** NACA 63₃-418, Re=2.4×10⁶, frente a Ehrmann (`validation/refs/ehrmann_63418_re2.4e6.dat`), α de 2° a 10°: SST, Cl ≤5 %; SST-LM con Tu≈0.24 % en el perfil, Cd ≤15 % a Cl de 0.2 a 1.0. Estudio de malla de SST-LM a 4°.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:

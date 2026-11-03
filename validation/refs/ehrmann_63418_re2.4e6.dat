@@ -1,0 +1,24 @@
+# Ehrmann y White (2014), AIAA 2014-0170, NACA 63(3)-418 limpio, Re = 2.4e6, Tu = 0.25 %.
+# Leido a ojo de sus figuras 7 (Cl) y 8 (polar), el 2026-11-03, antes de las corridas que lo usan.
+# Error de lectura estimado: Cl +-0.02, Cd +-0.0004. Coincide con Abbott en la zona lineal.
+# zona, alpha o cl, valor
+CL,-2,0.09
+CL,0,0.32
+CL,2,0.55
+CL,4,0.78
+CL,6,1.02
+CL,8,1.20
+CL,10,1.25
+CD,-0.13,0.0069
+CD,0.00,0.0063
+CD,0.10,0.0062
+CD,0.22,0.0060
+CD,0.35,0.0064
+CD,0.45,0.0064
+CD,0.60,0.0067
+CD,0.70,0.0072
+CD,0.80,0.0078
+CD,0.90,0.0083
+CD,1.00,0.0093
+CD,1.10,0.0118
+CD,1.20,0.0145
