@@ -207,6 +207,23 @@ A Re=2×10⁶ Cl sale alto y Cd bajo con más diferencia. No se estudió por qu�
 
 La lectura de las figuras de Abbott añade su error, estimado en ±0.02 en Cl y ±0.0004 en Cd. Las coordenadas del 63₃-418 son las de Abbott, apéndice III: `validation/refs/naca63-3-418_abbott.dat`.
 
+**Resultado frente a esas tolerancias (M).**
+
+NACA 0012, estudio de malla: a Re=3.99×10⁶ cumple todo (Cd a 0° −3.3 %, Cl a 10° +1.1 %, Cd a 10° −4.0 %). A Re=2×10⁶ falla Cd a 0° (−6.3 %, tope 5 %) y Cl a 10° (+3.7 %, tope 3 %); Cd a 10° cumple justo (−9.5 %). En Cd la malla fina explica casi toda la diferencia (extrapolado −1.2 % a 0° y −4.4 % a 10°); en Cl no, porque la banda de malla es ±0.7 %.
+
+Perfiles con curvatura, Re=6×10⁶, nivel 2:
+
+| Perfil | α | Cl | Abbott | Dif. | Cd dentro de liso-rugoso | Cm, dif. |
+|---|---|---|---|---|---|---|
+| 4412 | 0 | 0.455 | 0.41 | **+11.0 %** | sí | −0.008 |
+| 4412 | 4 | 0.876 | 0.82 | **+6.8 %** | sí | −0.003 |
+| 4412 | 8 | 1.281 | 1.21 | **+5.9 %** | sí | −0.004 |
+| 63₃-418 | 0 | 0.360 | 0.30 | **+19.9 %** | sí | −0.003 |
+| 63₃-418 | 4 (oscila) | 0.822 | 0.69 | **+19.1 %** | sí | |
+| 63₃-418 | 8 | 1.251 | 1.08 | **+15.8 %** | sí | 0.000 |
+
+Cl no cumple en ningún punto; Cd y Cm cumplen en todos. El ángulo de sustentación nula coincide (4412: −4.25° frente a −4.13°; 63₃-418: −3.11° frente a −3.08°). Lo que difiere es la pendiente: 0.105 frente a 0.100 por grado en el 4412, y 0.114 frente a 0.098 en el 63₃-418. No se ha determinado si viene del modelo, de la lectura de las figuras o de las correcciones de túnel del experimento.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
