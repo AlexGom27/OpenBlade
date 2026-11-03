@@ -576,10 +576,12 @@ class Dispatcher:
         if job.host:
             m = self.machines.get(job.host)
             return job.host if m is None or self._ocupados(job.host) < m.slots else None
-        for m in self.machines.values():
-            if m.reparto and self._ocupados(m.host) < m.slots:
-                return m.host
-        return None
+        # La menos ocupada en proporcion a sus huecos: antes iba a la primera con hueco,
+        # y con dos paquetes en cola los dos caian en la misma maquina y la otra esperaba.
+        libres = [m for m in self.machines.values() if m.reparto and self._ocupados(m.host) < m.slots]
+        if not libres:
+            return None
+        return min(libres, key=lambda m: self._ocupados(m.host) / m.slots).host
 
     def _tick(self) -> None:
         with self._candado:

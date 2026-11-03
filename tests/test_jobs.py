@@ -533,3 +533,14 @@ def test_a_job_waits_for_the_one_it_starts_from(corrida_falsa, monkeypatch):
     nuevo.submit(siguiente)
     assert nuevo.wait(5)
     assert siguiente.params["campo_inicial"] == grueso.case_dir
+
+
+def test_queued_jobs_go_to_the_least_busy_machine(corrida_falsa):
+    d = Dispatcher(poll_s=0)
+    d.set_machines([Machine("a@h", 8, 2), Machine("b@h", 8, 2)])
+    for a in (1.0, 2.0):
+        d.submit(new_job(case_params(aoa=a)))
+    time.sleep(0.3)
+    assert sorted(len(v) for v in corrida_falsa["por_maquina"].values()) == [1, 1]
+    corrida_falsa["soltar"].set()
+    assert d.wait(5)
