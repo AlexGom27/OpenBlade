@@ -198,14 +198,18 @@ def _exterior(p: np.ndarray, n: np.ndarray, radio: float, x_out: float, centro: 
 
 def generate_cgrid(contorno: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], primera_celda: float,
                    nivel: int = NIVEL_BASE, radio: float = 500.0,
-                   estela: float = 0.0) -> Tuple[np.ndarray, np.ndarray]:
+                   estela: float = 0.0, refinar_cuerda: int = 0) -> Tuple[np.ndarray, np.ndarray]:
     """Rejilla x(i,j), y(i,j) de cuerda 1. `primera_celda` es la del nivel 2.
 
     i va de la salida inferior a la superior pasando por el perfil; j de la pared
-    al contorno exterior.
+    al contorno exterior. `refinar_cuerda` toma a lo largo de la cuerda y la estela
+    los puntos de ese numero de niveles mas fino, sin tocar la direccion normal: es
+    lo que pide la transicion (Langtry y Menter: dx/c <= 0.005 donde ocurre).
     """
     if nivel not in NIVELES:
         raise ValueError(f"Nivel {nivel}: los hay de 0 a 4")
+    if refinar_cuerda < 0 or nivel + refinar_cuerda > NIVEL_MAX:
+        raise ValueError(f"Nivel {nivel} refinado {refinar_cuerda} veces en la cuerda: el máximo es el nivel {NIVEL_MAX}")
     if radio < 5.0:
         raise ValueError(f"Radio del dominio de {radio:g} cuerdas: el mínimo es 5")
     if not 1e-8 <= primera_celda <= 0.01:
@@ -299,7 +303,8 @@ def generate_cgrid(contorno: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarra
     x[0, :] = x_out
     x[-1, :] = x_out
     salto = 2 ** (NIVEL_MAX - nivel)
-    return x[::salto, ::salto], y[::salto, ::salto]
+    salto_i = 2 ** (NIVEL_MAX - nivel - refinar_cuerda)
+    return x[::salto_i, ::salto], y[::salto_i, ::salto]
 
 
 def _reparte_exterior(fin: np.ndarray, radio: float, x_out: float, centro: float) -> np.ndarray:
@@ -401,10 +406,12 @@ def build_mesh(params: Dict, salida: str) -> Dict:
 
     nivel = int(params.get("grid_level", NIVEL_BASE))
     cuerda = float(params.get("chord", 1.0))
+    refinar = int(params.get("chord_refine", 0) or 0)
     x, y = generate_cgrid(contour_from_params(params), first_cell_of(params), nivel,
-                          float(params.get("farfield", 500.0)), float(params.get("wake_length", 0.0)))
+                          float(params.get("farfield", 500.0)), float(params.get("wake_length", 0.0)), refinar)
     info = write_cgrid_msh(salida, x * cuerda, y * cuerda, float(params.get("depth", 0.1)) * cuerda)
-    info["mallador"] = f"C propia, nivel {nivel} ({NIVELES[nivel]})"
+    info["mallador"] = f"C propia, nivel {nivel} ({NIVELES[nivel]})" + (
+        f", cuerda refinada x{2 ** refinar} ({x.shape[0]} × {x.shape[1]})" if refinar else "")
     if "Custom" in params.get("profile_type", ""):
         abertura = trailing_edge_gap(params["file_path"])
         info["abertura_borde_salida"] = round(abertura, 5)

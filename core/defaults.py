@@ -16,6 +16,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "aoa_step": 2.0,
     "mesher": "cgrid",
     "grid_level": 2,
+    "chord_refine": 0,
     "yplus_target": 0.5,
     "mesh_size_min": 0.006,
     "bl_dist_min": 0.00002,

@@ -207,6 +207,12 @@ class InputPanel(QWidget):
         self.grid_level.setCurrentIndex(2)
         self.grid_level.setToolTip("Cada nivel tiene el doble de puntos por dirección que el anterior "
                                    "y contiene sus puntos: permite un estudio de malla exacto.")
+        self.chord_refine = QComboBox()
+        for veces, texto in enumerate(("No", "× 2 (un nivel más)", "× 4 (dos niveles más)")):
+            self.chord_refine.addItem(texto, veces)
+        self.chord_refine.setToolTip("Más puntos a lo largo de la cuerda y la estela, sin cambiar la dirección "
+                                     "normal. Para transición (SST-LM): el criterio de Langtry y Menter pide "
+                                     "dx/c ≤ 0.005 donde ocurre; en la malla media es 0.02 y con × 4, 0.005.")
         self.yplus_target = QDoubleSpinBox()
         self.yplus_target.setRange(0.05, 300.0)
         self.yplus_target.setDecimals(2)
@@ -288,6 +294,7 @@ class InputPanel(QWidget):
         # estela no llegaban a ningun sitio: la malla C siempre es de cuadrilateros.
         mesh_layout.addRow("Malla:", self.mesher)
         mesh_layout.addRow("Nivel:", self.grid_level)
+        mesh_layout.addRow("Refinar en la cuerda:", self.chord_refine)
         mesh_layout.addRow("y+ objetivo:", self.yplus_target)
         mesh_layout.addRow("Puntos del perfil:", self.nb_airfoil_pts)
         mesh_layout.addRow("Tamaño Mín Elemento:", self.mesh_size_min)
@@ -522,6 +529,7 @@ class InputPanel(QWidget):
 
         for senal in (self.reynolds_input.valueChanged, self.bl_dist_min.valueChanged,
                       self.yplus_target.valueChanged, self.grid_level.currentIndexChanged,
+                      self.chord_refine.currentIndexChanged,
                       self.mesher.currentIndexChanged):
             senal.connect(self._update_yplus_estimate)
         self.turbulence_model.currentIndexChanged.connect(self._on_turbulence_changed)
@@ -723,7 +731,7 @@ class InputPanel(QWidget):
     def _toggle_mesher(self) -> None:
         """Cada malla muestra solo los controles que la cambian."""
         propia = self.mesher.currentData() == "cgrid"
-        for campo in (self.grid_level, self.yplus_target):
+        for campo in (self.grid_level, self.chord_refine, self.yplus_target):
             self.mesh_layout.setRowVisible(campo, propia)
         for campo in (self.nb_airfoil_pts, self.mesh_size_min, self.fila_primera_celda,
                       self.mesh_growth_rate):
@@ -801,6 +809,7 @@ class InputPanel(QWidget):
             "aoa_step": self.aoa_step.value(),
             "mesher": self.mesher.currentData(),
             "grid_level": self.grid_level.currentData(),
+            "chord_refine": self.chord_refine.currentData(),
             "yplus_target": self.yplus_target.value(),
             "mesh_size_min": self.mesh_size_min.value(),
             "bl_dist_min": self.bl_dist_min.value(),
@@ -876,6 +885,9 @@ class InputPanel(QWidget):
         if "grid_level" in p:
             i = self.grid_level.findData(int(p["grid_level"]))
             if i >= 0: self.grid_level.setCurrentIndex(i)
+        if "chord_refine" in p:
+            i = self.chord_refine.findData(int(p["chord_refine"] or 0))
+            if i >= 0: self.chord_refine.setCurrentIndex(i)
         if "yplus_target" in p:
             self.yplus_target.setValue(float(p["yplus_target"]))
         if "mesh_size_min" in p:

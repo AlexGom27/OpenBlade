@@ -154,6 +154,8 @@ def mesh_key(params: Dict[str, Any]) -> str:
     datos = {k: params[k] for k in CLAVES_MALLA if k in params}
     if angle_by_flow(params):
         datos.pop("aoa", None)  # el mismo archivo sirve para todos los angulos
+    if params.get("chord_refine"):
+        datos["chord_refine"] = int(params["chord_refine"])
     if params.get("mesher") == "cgrid":
         # La primera celda sale del Reynolds: otro Reynolds es otra malla.
         from core.cgrid import first_cell_of

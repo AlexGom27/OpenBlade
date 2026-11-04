@@ -253,3 +253,24 @@ def test_transition_warns_when_the_inlet_turbulence_decays_before_the_profile():
     llega = dict(p, turb_intensity=0.6, viscosity_ratio=1000.0)
     assert turbulence_at_profile(llega) == pytest.approx(0.22, abs=0.02)
     assert transition_notice(llega) == ""
+
+
+def test_chord_refinement_adds_points_only_along_the_chord():
+    from core.cgrid import CELDAS_ESTELA, CARAS_POR_LADO
+    base = generate_cgrid(naca4("0012"), H, 2, 100.0)
+    fina = generate_cgrid(naca4("0012"), H, 2, 100.0, refinar_cuerda=2)
+    assert fina[0].shape[1] == base[0].shape[1]
+    assert fina[0].shape[0] - 1 == 4 * (base[0].shape[0] - 1)
+    # la normal de la pared es la misma: mismos puntos donde coinciden
+    assert np.allclose(fina[0][::4], base[0]) and np.allclose(fina[1][::4], base[1])
+    area, maximo = calidad(*fina)
+    assert (np.all(area > 0) or np.all(area < 0)) and maximo < 55.0
+    with pytest.raises(ValueError):
+        generate_cgrid(naca4("0012"), H, 3, 100.0, refinar_cuerda=2)
+
+
+def test_chord_refinement_changes_the_mesh_key_only_when_used():
+    from core.defaults import case_params
+    from core.jobs import mesh_key
+    p = case_params()
+    assert mesh_key(p) == mesh_key(dict(p, chord_refine=0)) != mesh_key(dict(p, chord_refine=2))
