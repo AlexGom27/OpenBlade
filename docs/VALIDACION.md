@@ -260,6 +260,17 @@ SST cumple Cl en 3 de 5 ángulos; a 10° el experimento ya se aparta de la zona 
 
 **Corrección del 2026-11-04, antes de ver los resultados de esa tanda.** Los autores de Özçakmak advierten que, de −5° a 5°, su transición de 0.25 a 0.28 es prematura: la provocan micrófonos en la estela de otros. Esa parte no sirve de referencia, y la comparación con Özçakmak queda solo a 6°. La referencia para la posición de la transición es Ehrmann, medida por termografía infrarroja, que no toca la superficie (`validation/refs/ehrmann_63418_transicion.dat`). Esa comparación no estaba fijada de antemano; a 0°, 2° y 4° de Re=2.4×10⁶ se calculó la transición antes de digitalizar la figura de Ehrmann.
 
+**Posición de la transición frente a Ehrmann (M, comparación posterior).** NACA 63₃-418, Re=2.4×10⁶, SST-LM, cuerda refinada ×4 (a 4° también nivel 3). Extradós; «inicio» es el mínimo de Cf y «subida» donde Cf crece más rápido:
+
+| α | Inicio | Subida | Ehrmann, infrarrojo |
+|---|---|---|---|
+| 0 | 0.528 | 0.538 | 0.50 |
+| 2 | 0.488 | 0.498 | 0.46 |
+| 4 | 0.413 (nivel 3: 0.406) | 0.448 (0.435) | 0.40 |
+| 6 | 0.191 | 0.315 | 0.27 |
+
+Con la cuerda refinada la transición queda a 0.05 de la cuerda o menos del infrarrojo en los cuatro ángulos; sin refinar, a 4° y 6° se adelantaba hasta 0.13. Cd queda 21 % por debajo de Ehrmann, cuyo modelo modular da más arrastre que el de Abbott; frente a la polar lisa de Abbott a Re=3×10⁶ que reproduce Ehrmann (fig. 8), la diferencia es de unos −7 a −9 %, leída a ojo y a otro Reynolds.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
