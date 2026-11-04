@@ -254,6 +254,10 @@ Con transición Cl sube en vez de bajar, porque la capa límite laminar es más 
 
 SST cumple Cl en 3 de 5 ángulos; a 10° el experimento ya se aparta de la zona lineal (Ehrmann: «diverge de Abbott después de 9°») y SST no predice esa caída. SST-LM cumple Cd en los 3 puntos dentro del rango (−11 a −12 %), mientras que SST lo sobrestima de 49 a 62 % en esos mismos ángulos. Pero el estudio de malla de SST-LM a 4° no da banda: los niveles 1 y 2 oscilan, y Cd va de 0.00738 a 0.00773 y luego a 0.00653 (nivel 3), sin convergencia monótona. Además, el mismo caso del nivel 2 dio Cd 0.00716 arrancando del flujo potencial y 0.00773 arrancando del nivel 1: el punto de arranque mueve el resultado un 8 %. **SST-LM sigue sin validar:** acierta Cd en el nivel 2, pero la malla y el arranque lo mueven tanto como la tolerancia.
 
+**Malla a lo largo de la cuerda para SST-LM (M).** NACA 63₃-418, Re=2.4×10⁶, 4°: con la cuerda refinada (dx/c de 0.01 y 0.005 en la zona de transición) la transición del extradós queda en 0.406 y 0.413 de la cuerda, y en 0.406 en el nivel 3; Cd 0.00637, 0.00625 y 0.00653, todos CONVERGIDOS. Sin refinar saltaba de 0.29 a 0.33 y Cd de 0.00716 a 0.00773 según el arranque. La transición ya no depende de la malla, pero Cd queda 21 % por debajo de Ehrmann al mismo Cl, fuera de la tolerancia de 15 %. Ehrmann advierte que su modelo, modular, tiene más arrastre que el de Abbott.
+
+**Tolerancias fijadas el 2026-11-04, antes de correr.** NACA 63₃-418 con SST-LM, cuerda refinada ×4, Tu≈0.1 % en el perfil, frente a Özçakmak et al. (2018), túnel sin rejilla (Tu 0.1 %): posición de la transición en el extradós a menos de 0.05 de la cuerda, a Re=3×10⁶ (0° a 6°) y 6×10⁶ (2° y 4°). La turbulencia de 1.2 % con rejilla no se prueba: con un dominio de 200 cuerdas llegaría al perfil solo con viscosidades de entrada fuera de lo razonable.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
