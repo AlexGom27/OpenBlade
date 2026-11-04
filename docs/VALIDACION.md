@@ -1,6 +1,6 @@
 # Validación de OpenBlade
 
-Todo lo de este documento salió del programa: malla y caso generados en la Mac, cálculo con OpenFOAM 12 en los servidores, y veredicto y ficha de cada paquete. Las campañas anteriores al 2026-10-31 no sirven como validación (§8).
+Todo lo de este documento salió del programa: malla y caso generados en la Mac, cálculo con OpenFOAM 12 en los servidores, y veredicto y ficha de cada paquete. Los archivos de resultados (polar, banco, control) se generan con las órdenes de §2 y no se guardan en el repositorio. Las campañas anteriores al 2026-10-31 no sirven como validación (§8).
 
 ## 1. Resumen
 
@@ -69,7 +69,7 @@ Ladson está interpolado entre sus ángulos medidos. «Oscila» es NO CONVERGIDO
 
 ## 5. Banco de validación
 
-Ocho paquetes en el nivel 2, todos CONVERGIDOS: **35 de 40 comprobaciones cumplidas**. Tolerancias en `core/bench.py`; informe en `validation/resultados/banco_validacion.pdf`. Lo que no cumple:
+Ocho paquetes en el nivel 2, todos CONVERGIDOS: **35 de 40 comprobaciones cumplidas**. Tolerancias en `core/bench.py`: el informe PDF lo genera `python3 -m core.cli banco` (§2). Lo que no cumple:
 
 | Caso | Comprobación | Medido | Tope | Causa |
 |---|---|---|---|---|

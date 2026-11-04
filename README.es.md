@@ -215,7 +215,7 @@ python3 -m core.cli correr --host usuario@host --procesos 8 aoa=8 reynolds=6e6
 python3 -m core.cli control --hosts usuario@a,usuario@b --procesos 8
 ```
 
-`control` corre el caso de control en cada máquina y evalúa sus 8 compuertas (ver `docs/ESTRATEGIA_PROGRAMA.md`).
+`control` corre el caso de control en cada máquina y evalúa sus 8 compuertas: misma malla, mismas fuerzas fila por fila, convergencia y comparación con Ladson.
 
 ```bash
 python3 -m core.cli banco --maquinas usuario@a:10:1,usuario@b:8:1 --salida carpeta
