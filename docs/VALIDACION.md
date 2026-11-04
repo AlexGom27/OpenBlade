@@ -241,6 +241,19 @@ Con transición Cl sube en vez de bajar, porque la capa límite laminar es más 
 
 **Tolerancias fijadas el 2026-11-03, antes de correr.** NACA 63₃-418, Re=2.4×10⁶, frente a Ehrmann (`validation/refs/ehrmann_63418_re2.4e6.dat`), α de 2° a 10°: SST, Cl ≤5 %; SST-LM con Tu≈0.24 % en el perfil, Cd ≤15 % a Cl de 0.2 a 1.0. Estudio de malla de SST-LM a 4°.
 
+**Resultado frente a esas tolerancias (M).** NACA 63₃-418, Re=2.4×10⁶, nivel 2, frente a Ehrmann:
+
+| α | SST: Cl | Dif. | ¿≤5 %? | SST-LM: Cl | Cd | Cd de Ehrmann al mismo Cl | Dif. |
+|---|---|---|---|---|---|---|---|
+| 0 | 0.352 | +9.9 % | (fuera del rango) | 0.384 | 0.00561 | 0.0064 | −12.4 % |
+| 2 | 0.582 | +5.9 % | **no** | 0.622 | 0.00602 | 0.0068 | −11.6 % |
+| 4 | 0.806 | +3.3 % | sí | 0.850 (oscila) | 0.00716 | 0.0080 | −11.0 % |
+| 6 | 1.019 | −0.1 % | sí | 1.070 (oscila) | 0.00865 | | (Cl > 1.0) |
+| 8 | 1.219 (oscila) | +1.6 % | sí | 1.266 (oscila) | 0.01115 | | (Cl > 1.0) |
+| 10 | 1.392 (oscila) | +11.3 % | **no** | 1.436 (oscila) | 0.01502 | | (Cl > 1.0) |
+
+SST cumple Cl en 3 de 5 ángulos; a 10° el experimento ya se aparta de la zona lineal (Ehrmann: «diverge de Abbott después de 9°») y SST no predice esa caída. SST-LM cumple Cd en los 3 puntos dentro del rango (−11 a −12 %), mientras que SST lo sobrestima de 49 a 62 % en esos mismos ángulos. Pero el estudio de malla de SST-LM a 4° no da banda: los niveles 1 y 2 oscilan, y Cd va de 0.00738 a 0.00773 y luego a 0.00653 (nivel 3), sin convergencia monótona. Además, el mismo caso del nivel 2 dio Cd 0.00716 arrancando del flujo potencial y 0.00773 arrancando del nivel 1: el punto de arranque mueve el resultado un 8 %. **SST-LM sigue sin validar:** acierta Cd en el nivel 2, pero la malla y el arranque lo mueven tanto como la tolerancia.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
