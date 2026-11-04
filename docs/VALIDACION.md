@@ -258,6 +258,8 @@ SST cumple Cl en 3 de 5 ángulos; a 10° el experimento ya se aparta de la zona 
 
 **Tolerancias fijadas el 2026-11-04, antes de correr.** NACA 63₃-418 con SST-LM, cuerda refinada ×4, Tu≈0.1 % en el perfil, frente a Özçakmak et al. (2018), túnel sin rejilla (Tu 0.1 %): posición de la transición en el extradós a menos de 0.05 de la cuerda, a Re=3×10⁶ (0° a 6°) y 6×10⁶ (2° y 4°). La turbulencia de 1.2 % con rejilla no se prueba: con un dominio de 200 cuerdas llegaría al perfil solo con viscosidades de entrada fuera de lo razonable.
 
+**Corrección del 2026-11-04, antes de ver los resultados de esa tanda.** Los autores de Özçakmak advierten que, de −5° a 5°, su transición de 0.25 a 0.28 es prematura: la provocan micrófonos en la estela de otros. Esa parte no sirve de referencia, y la comparación con Özçakmak queda solo a 6°. La referencia para la posición de la transición es Ehrmann, medida por termografía infrarroja, que no toca la superficie (`validation/refs/ehrmann_63418_transicion.dat`). Esa comparación no estaba fijada de antemano; a 0°, 2° y 4° de Re=2.4×10⁶ se calculó la transición antes de digitalizar la figura de Ehrmann.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:

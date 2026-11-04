@@ -1,0 +1,17 @@
+# Ehrmann y White (2014), AIAA 2014-0170, NACA 63(3)-418 limpio, Tu = 0.25 %, transicion por
+# termografia infrarroja en el extrados. Leido el 2026-11-04 de sus figuras 10 y 11, midiendo
+# pixeles contra los ejes. Error de lectura estimado: x/c +-0.01, alpha +-0.1 grados.
+# zona, variable, x_tr/c
+# figura 10: Re = 2.4e6, alpha [grados]
+ALFA,-2,0.54
+ALFA,0,0.50
+ALFA,2,0.46
+ALFA,4,0.40
+ALFA,5,0.36
+ALFA,6,0.27
+ALFA,7,0.17
+# figura 11: alpha = 0, Re
+RE,0.8e6,0.57
+RE,2.4e6,0.50
+RE,3.0e6,0.50
+RE,4.5e6,0.445
