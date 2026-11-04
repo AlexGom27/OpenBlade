@@ -33,6 +33,7 @@ What is validated, with which tolerances, and what does not pass is in [docs/VAL
 | NACA 4412 and NACA 63₃-418, cambered, Re = 6×10⁶ | Drag and moment within tolerance. NACA 63₃-418 lift is 3 to 5 % high against modern data; NACA 4412 lift is 6 to 11 % high against a reading of Abbott and von Doenhoff that still needs a second source |
 | Stall | **Not predicted** with SST |
 | Transition (SST-LM) | Not validated: drag depends on the turbulence that reaches the airfoil |
+| Fluid-structure interaction (**Análisis FSI**) | Experimental: the Turek-Hron benchmark was not completed because the coupling diverges. Do not use its results |
 
 ---
 
