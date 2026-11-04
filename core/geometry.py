@@ -76,7 +76,7 @@ class NacaGeometry:
     #
     # Consecuencias prácticas:
     #   * 500c libres de bloqueo pero inalcanzables con malla estructurada
-    #     (el C-Grid genera celdas de aspect ratio >1e5, ver PLAN_FSI.md).
+    #     (el C-Grid genera celdas de aspect ratio >1e5).
     #   * 30c sesga el Cd salvo que se aplique la corrección PV.
     #   * 50c es el compromiso validado en este proyecto: error de Cd < 2%
     #     en el NACA 0012 a Re=6e6 (CAMPANA_VALIDACION.md).
