@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use OpenBlade, please cite it as below."
+title: "OpenBlade 2D: verifiable 2D RANS airfoil analysis with OpenFOAM"
+type: software
+authors:
+  - family-names: "Gómez Sánchez"
+    given-names: "Alejandro"
+    email: alejandro.gs@itvalletla.edu.mx
+    affiliation: "Instituto Tecnológico del Valle de Etla, Tecnológico Nacional de México"
+  - family-names: "Ruiz Martínez"
+    given-names: "Jesús Miguel"
+    affiliation: "Instituto Tecnológico del Valle de Etla, Tecnológico Nacional de México"
+  - family-names: "Cruz Martínez"
+    given-names: "Heriberto"
+    affiliation: "Instituto Tecnológico del Valle de Etla, Tecnológico Nacional de México"
+version: 1.0.0
+license: GPL-3.0-only
+repository-code: "https://github.com/AlexGom27/OpenBlade"
+keywords:
+  - computational fluid dynamics
+  - airfoil
+  - OpenFOAM
+  - RANS
+  - verification and validation
+  - wind energy
