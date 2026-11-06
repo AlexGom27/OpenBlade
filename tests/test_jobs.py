@@ -547,7 +547,7 @@ def test_queued_jobs_go_to_the_least_busy_machine(corrida_falsa):
 def test_a_profile_from_a_file_is_labelled_with_the_file_name():
     j = new_job(case_params(aoa=4.0, profile_type="Archivo Custom (.txt, .csv)", naca="4412",
                             file_path="/datos/naca63-3-418_abbott.dat"))
-    assert j.label == "naca63-3-418_abbott_a4.0"
+    assert j.label == "naca63-3-418_abbott_a4.0_Re" + j.label.split("_Re")[1]
 
 
 def test_a_server_that_is_only_downloading_counts_as_free(corrida_falsa):
@@ -569,6 +569,6 @@ def test_a_server_that_is_only_downloading_counts_as_free(corrida_falsa):
 
 def test_transition_runs_and_grid_levels_say_what_they_are():
     from core.jobs import profile_name
-    lm = new_job(case_params(aoa=2.0, turbulence="k-Omega SST-LM Transición (RAS)"))
-    assert lm.label == "0012_a2.0_LM"
+    lm = new_job(case_params(aoa=2.0, reynolds=2.4e6, turbulence="k-Omega SST-LM Transición (RAS)"))
+    assert lm.label == "0012_a2.0_Re2.4e6_LM"
     assert profile_name(case_params(profile_type="Archivo Custom (.txt, .csv)", file_path="/x/s809.dat")) == "s809"

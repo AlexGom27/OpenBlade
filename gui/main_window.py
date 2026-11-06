@@ -598,7 +598,7 @@ class MainWindow(QMainWindow):
         grupo = f"malla_{secrets.token_hex(3)}"
         self.log(f"📐 Estudio de malla a α = {p.get('aoa', 0)}°: 225×65, 449×129 y 897×257, "
                  "cada una desde la solución de la anterior")
-        trabajos = [new_job(q, *destino, group=grupo, label=f"{profile_name(q)}_a{q.get('aoa', 0)}_malla_n{q['grid_level']}")
+        trabajos = [new_job(q, *destino, group=grupo, label=f"{profile_name(q)}_a{q.get('aoa', 0)}_Re{float(q.get('reynolds', 1e6)) / 1e6:g}e6_malla_n{q['grid_level']}")
                     for q in grid_study_cases(dict(p, analysis_mode="Punto Único"))]
         chain_levels(trabajos)
         for trabajo in trabajos:

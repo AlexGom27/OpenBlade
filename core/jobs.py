@@ -118,7 +118,9 @@ def new_job(params: Dict[str, Any], host: str = "", nproc: int = 0, group: str =
     perfil = profile_name(params)
     # Con transicion se distingue en el nombre: en una misma tanda puede haber de los dos.
     modelo = "_LM" if "SST-LM" in params.get("turbulence", "") else ""
-    etiqueta = label or f"{perfil}_a{params.get('aoa', 0)}{modelo}"
+    # Y el Reynolds: una tanda puede llevar el mismo angulo a varios.
+    reynolds = f"_Re{float(params.get('reynolds', 1e6)) / 1e6:g}e6"
+    etiqueta = label or f"{perfil}_a{params.get('aoa', 0)}{reynolds}{modelo}"
     etiqueta = re.sub(r"[^A-Za-z0-9_.-]", "_", etiqueta)
     while True:
         identificador = f"{time.strftime('%Y%m%d_%H%M%S')}_{etiqueta}_{secrets.token_hex(2)}"
