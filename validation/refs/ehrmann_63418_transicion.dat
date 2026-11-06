@@ -10,8 +10,11 @@ ALFA,4,0.40
 ALFA,5,0.36
 ALFA,6,0.27
 ALFA,7,0.17
-# figura 11: alpha = 0, Re
+# figura 11: alpha = 0, Re. El texto da las mediciones a 0.8, 1.6, 2.4, 3.2, 4.0 y 4.4e6; la curva limpia
+# de la figura llega a ~4.6e6. 3.2e6 y 4.4e6 releidos el 2026-11-06; 4.5e6 queda fuera del maximo que da el texto.
 RE,0.8e6,0.57
 RE,2.4e6,0.50
 RE,3.0e6,0.50
+RE,3.2e6,0.48
+RE,4.4e6,0.455
 RE,4.5e6,0.445

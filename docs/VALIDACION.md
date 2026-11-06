@@ -288,6 +288,8 @@ A 0° y Re=3×10⁶ la transición queda a +0.03–0.05 de la de Ehrmann (0.50, 
 
 **Tolerancias fijadas el 2026-11-06, antes de correr.** NACA 63₃-418 con SST-LM, nivel 2, cuerda refinada ×4, Tu≈0.24 % en el perfil (la de Ehrmann es 0.25 %), frente al infrarrojo de Ehrmann (`validation/refs/ehrmann_63418_transicion.dat`), en puntos que no se habían simulado: Re=2.4×10⁶ a −2°, 5° y 7° (fig. 10), y 0° a Re=0.8×10⁶ y 4.5×10⁶ (fig. 11). Inicio de la transición en el extradós a menos de 0.05 de la cuerda del valor leído. Entrada: Tu 0.6 % con relación de viscosidades 500 (2.4×10⁶), 167 (0.8×10⁶) y 940 (4.5×10⁶).
 
+**Corrección del 2026-11-06, antes de ver resultados.** El texto de Ehrmann da como Reynolds máximo 4.4×10⁶, aunque la curva limpia de su fig. 11 llega a unos 4.6×10⁶ (lo advirtió OpenClaw). La comparación fijada pasa a 4.4×10⁶ (x_tr 0.455, releído); el punto a 4.5×10⁶ ya enviado se informa aparte, sin contar para la tolerancia. Definición de la transición, la misma de la tabla anterior: en el extradós, el mínimo de Cf antes del punto donde Cf crece más rápido con x («inicio»).
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
