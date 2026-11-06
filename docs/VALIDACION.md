@@ -271,6 +271,21 @@ SST cumple Cl en 3 de 5 ángulos; a 10° el experimento ya se aparta de la zona 
 
 Con la cuerda refinada la transición queda a 0.05 de la cuerda o menos del infrarrojo en los cuatro ángulos; sin refinar, a 4° y 6° se adelantaba hasta 0.13. Cd queda 21 % por debajo de Ehrmann, cuyo modelo modular da más arrastre que el de Abbott; frente a la polar lisa de Abbott a Re=3×10⁶ que reproduce Ehrmann (fig. 8), la diferencia es de unos −7 a −9 %, leída a ojo y a otro Reynolds.
 
+**Re=3×10⁶ y 6×10⁶ (M).** Misma configuración, Tu≈0.1 % en el perfil:
+
+| Re | α | Veredicto | Cl | Cd | Abbott liso, Re=3×10⁶ (fig. 8 de Ehrmann) | Transición: inicio–subida |
+|---|---|---|---|---|---|---|
+| 3×10⁶ | 0 | oscila | 0.370 | 0.00515 | 0.0059 (−13 %) | 0.53–0.55 |
+| 3×10⁶ | 2 | oscila | 0.609 | 0.00538 | 0.0064 (−15 %) | 0.49–0.50 |
+| 3×10⁶ | 4 | oscila | 0.847 | 0.00550 | 0.0069 (−20 %) | 0.44–0.45 |
+| 3×10⁶ | 6 | CONVERGIDO | 1.068 | 0.00707 | 0.0083 (−15 %) | 0.27–0.35 |
+| 6×10⁶ | 2 | CONVERGIDO | 0.611 | 0.00521 | | 0.40–0.41 |
+| 6×10⁶ | 4 | CONVERGIDO | 0.842 | 0.00622 | | 0.26–0.31 |
+
+A 0° y Re=3×10⁶ la transición queda a +0.03–0.05 de la de Ehrmann (0.50, fig. 11), y al subir el Reynolds se adelanta, como en el experimento. Frente a la tolerancia fijada con Özçakmak a 6° **no cumple**: ellos miden ≈0.08 y OpenBlade 0.27–0.35, pero Ehrmann mide 0.27 a ese ángulo con infrarrojo, así que los dos experimentos no coinciden entre sí ahí. Cd queda sistemáticamente de 13 a 20 % por debajo de la polar lisa de Abbott, leída a ojo (±0.0004, unos 6 %).
+
+**Estado de SST-LM.** Con la cuerda refinada, la posición de la transición del NACA 63₃-418 a Re de 2.4 y 3×10⁶ coincide con el infrarrojo de Ehrmann a 0.05 de la cuerda o menos de 0° a 6°, y sigue la tendencia con el Reynolds. Cd sale de 10 a 20 % bajo frente a las dos referencias. Varios puntos a Re=3×10⁶ siguen oscilando. Sin refinar la cuerda, la transición no es fiable.
+
 ## 8. Por qué lo anterior no sirve
 
 Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos llevan el aviso «Superado»:
