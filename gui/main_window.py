@@ -885,6 +885,11 @@ class MainWindow(QMainWindow):
             marca = {"ok": "✅", "aviso": "⚠️", "mal": "❌"}.get(aviso["level"], "ℹ️")
             self.log(f"{marca} {aviso['text']}")
             lineas.append(f"{marca} {aviso['text']}")
+        from core.surface import surface_text
+        sup = surface_text(analisis.get("superficie"), v.cd)
+        if sup:
+            self.log(f"ℹ️ {sup}")
+            lineas.append(f"ℹ️ {sup}")
         malla = analisis.get("mesh_notice")
         if malla:
             marca = {"ok": "✅", "aviso": "⚠️", "mal": "❌"}.get(malla["level"], "ℹ️")

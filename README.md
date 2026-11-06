@@ -21,7 +21,7 @@ What is validated, with which tolerances, and what does not pass is in [docs/VAL
 - **Grid uncertainty:** grid studies with the Grid Convergence Index (GCI) on three nested levels, each level started from the solution of the previous one.
 - **Traceability:** every case is a package with a `ficha.json` holding the sha256 of the mesh and every dictionary, program version and parameters. A server refuses a package that was altered after it was built. The same package gives byte-identical forces on two servers with the same hardware.
 - **Several servers, one window:** each run is a package with its own folder. Packages go to the least busy server, and each server keeps its own queue, so work goes on if you close the program or your computer sleeps. The **Servidor** (Server) tab lists every server and every case with its progress.
-- **Outputs:** Cl, Cd, Cm, Cp and Cf, 3D field views, residuals, polars with uncertainty bands, PDF reports, and the converged polar points exported in XFOIL text format.
+- **Outputs:** Cl, Cd split into friction and pressure, Cm, Cp and Cf, the transition location on each side with SST-LM, 3D field views, residuals, polars with uncertainty bands, PDF reports, and the converged polar points exported in XFOIL text format.
 
 ## Current validation, in short
 

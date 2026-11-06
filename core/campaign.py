@@ -150,9 +150,17 @@ def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = ()) 
                 "cl": None, "cl_amp": None, "cd": None, "cd_amp": None, "cm": None,
                 "banda_cl": None, "banda_cd": None, "periodo": v.get("period"), "trabajo": j.id,
                 "oscila": _oscilacion_pequena(v),
-                "maquina": j.host, "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean")}
+                "maquina": j.host, "yplus": ((j.analysis or {}).get("yplus") or {}).get("mean"),
+                "cd_friccion": None, "xtr_sup": None, "xtr_inf": None, "con_transicion": False}
         if usable(j) or fila["oscila"]:
             fila.update(cl=v["cl"], cl_amp=v["cl_amp"], cd=v["cd"], cd_amp=v["cd_amp"], cm=v["cm"])
+            sup = (j.analysis or {}).get("superficie") or {}
+            fila["cd_friccion"] = sup.get("cd_friccion")
+            if "transicion" in sup:
+                fila["con_transicion"] = True
+                for clave, cara in (("xtr_sup", "extrados"), ("xtr_inf", "intrados")):
+                    t = sup["transicion"].get(cara)
+                    fila[clave] = t["inicio"] if t else None
         if usable(j):
             # La banda de Cl se interpola en absoluto: a 0 grados Cl es casi nulo y su banda
             # relativa no significa nada. Cd nunca es nulo y crece mucho con el angulo.
@@ -166,7 +174,7 @@ def polar_table(puntos: Sequence[Job], estudios: Sequence[Dict[str, Any]] = ()) 
 
 def write_polar_csv(filas: Iterable[Dict[str, Any]], ruta: str) -> None:
     columnas = ["aoa", "veredicto", "oscila", "transitorio", "cl", "banda_cl", "cl_amp", "cd", "banda_cd", "cd_amp", "cm",
-                "yplus", "maquina", "trabajo", "razon"]
+                "cd_friccion", "xtr_sup", "xtr_inf", "yplus", "maquina", "trabajo", "razon"]
     with open(ruta, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=columnas, extrasaction="ignore")
         w.writeheader()
@@ -179,19 +187,26 @@ def write_polar_xfoil(filas: Iterable[Dict[str, Any]], ruta: str, nombre: str, r
 
     Solo van los puntos estacionarios CONVERGIDOS: lo demas acabaria en un calculo de turbina
     como si fuera bueno, y SST no predice la perdida. La banda de malla no cabe en este
-    formato: esta en el CSV. El flujo es totalmente turbulento (Xtr 0); CDp no se calcula aqui.
+    formato: esta en el CSV. CDp es Cd menos la friccion integrada en la pared (0 si no se
+    pudo leer). Con SST el flujo es turbulento desde el borde de ataque (Xtr 0); con SST-LM,
+    Xtr es el inicio de la transicion, y 0 donde no se detecta una clara.
     """
     buenas = sorted((f for f in filas if f["veredicto"] == "CONVERGIDO" and not f["transitorio"]),
                     key=lambda f: f["aoa"])
+    libre = any(p.get("con_transicion") for p in buenas)
+    xtrf = "1.000 (top)        1.000 (bottom)" if libre else "0.000 (top)        0.000 (bottom)"
     with open(ruta, "w") as f:
         f.write(f"       OpenBlade, polar RANS en formato XFOIL\n\n Calculated polar for: {nombre}\n\n"
                 " 1 1 Reynolds number fixed          Mach number fixed\n\n"
-                " xtrf =   0.000 (top)        0.000 (bottom)\n"
+                f" xtrf =   {xtrf}\n"
                 f" Mach =   0.000     Re = {reynolds / 1e6:9.3f} e 6     Ncrit =   9.000\n\n"
                 "   alpha    CL        CD       CDp       CM     Top_Xtr  Bot_Xtr\n"
                 "  ------ -------- --------- --------- -------- -------- --------\n")
         for p in buenas:
-            f.write(f"  {p['aoa']:6.3f} {p['cl']:8.4f} {p['cd']:9.5f} {0.0:9.5f} {p['cm']:8.4f} {0.0:8.4f} {0.0:8.4f}\n")
+            cdf = p.get("cd_friccion")
+            cdp = p["cd"] - cdf if cdf is not None else 0.0
+            f.write(f"  {p['aoa']:6.3f} {p['cl']:8.4f} {p['cd']:9.5f} {cdp:9.5f} {p['cm']:8.4f} "
+                    f"{p.get('xtr_sup') or 0.0:8.4f} {p.get('xtr_inf') or 0.0:8.4f}\n")
     return len(buenas)
 
 

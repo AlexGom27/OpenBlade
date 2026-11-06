@@ -278,6 +278,11 @@ def analyze_case(case_dir: str, transient: bool = False, rc: int = 0,
     except YPlusError as e:
         resultado["yplus_notice"] = {"level": "sin datos", "text": f"y+ no disponible: {e}"}
     try:
+        from core.surface import surface_summary
+        resultado["superficie"] = surface_summary(case_dir)
+    except (YPlusError, OSError, ValueError, IndexError, KeyError):
+        resultado["superficie"] = None
+    try:
         with open(os.path.join(case_dir, "log.checkMesh"), errors="replace") as f:
             resultado["mesh_notice"] = mesh_notice(parse_checkmesh(f.read()))
     except OSError:

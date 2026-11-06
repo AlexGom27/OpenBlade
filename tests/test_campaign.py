@@ -270,3 +270,30 @@ def test_the_xfoil_export_only_carries_converged_steady_points(tmp_path):
     datos = [l.split() for l in lineas[lineas.index(next(l for l in lineas if "------" in l)) + 1:]]
     assert [float(d[0]) for d in datos] == [-2.0, 4.0] and all(len(d) == 7 for d in datos)
     assert float(datos[1][1]) == 0.43 and float(datos[1][2]) == 0.0084
+
+
+def test_the_xfoil_export_carries_pressure_drag_and_transition(tmp_path):
+    a, b = trabajo(aoa=0.0, cd=0.0055), trabajo(aoa=4.0, cd=0.0060)
+    a.analysis["superficie"] = {"cd_friccion": 0.0040,
+                                "transicion": {"extrados": {"inicio": 0.53, "subida": 0.55}, "intrados": None}}
+    b.analysis["superficie"] = {"cd_friccion": 0.0045,
+                                "transicion": {"extrados": {"inicio": 0.44, "subida": 0.45},
+                                               "intrados": {"inicio": 0.60, "subida": 0.62}}}
+    filas = polar_table([a, b])
+    assert filas[0]["xtr_sup"] == 0.53 and filas[0]["xtr_inf"] is None and filas[1]["xtr_inf"] == 0.60
+    ruta = tmp_path / "p.txt"
+    write_polar_xfoil(filas, str(ruta), "NACA 63-418", 3e6)
+    texto = ruta.read_text()
+    assert "xtrf =   1.000" in texto
+    datos = [l.split() for l in texto.splitlines() if l.startswith("  ") and l.split()[0].replace(".", "").replace("-", "").isdigit()]
+    assert [float(d[3]) for d in datos] == [0.0015, 0.0015]
+    assert [float(d[5]) for d in datos] == [0.53, 0.44] and [float(d[6]) for d in datos] == [0.0, 0.6]
+    csv_ruta = tmp_path / "p.csv"
+    write_polar_csv(filas, str(csv_ruta))
+    assert "cd_friccion,xtr_sup,xtr_inf" in csv_ruta.read_text().splitlines()[0]
+
+
+def test_without_transition_model_the_xfoil_export_stays_fully_turbulent(tmp_path):
+    ruta = tmp_path / "p.txt"
+    write_polar_xfoil(polar_table([trabajo()]), str(ruta), "NACA 0012", 6e6)
+    assert "xtrf =   0.000" in ruta.read_text()

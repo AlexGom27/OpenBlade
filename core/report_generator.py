@@ -61,6 +61,11 @@ def generate_pdf_report(filename, params, analysis, images, ficha=None):
     if aviso:
         elements.append(Spacer(1, 6))
         elements.append(Paragraph(aviso["text"], normal_style))
+    from core.surface import surface_text
+    sup = surface_text(analysis.get("superficie"), verdict.get("cd"))
+    if sup:
+        elements.append(Spacer(1, 6))
+        elements.append(Paragraph(sup[0].upper() + sup[1:] + ".", normal_style))
     elements.append(Spacer(1, 12))
 
     if ficha:
