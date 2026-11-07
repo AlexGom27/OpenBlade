@@ -14,6 +14,15 @@ authors:
     given-names: "Heriberto"
     affiliation: "Instituto Tecnológico del Valle de Etla, Tecnológico Nacional de México"
 version: 1.0.0
+date-released: 2026-11-06
+doi: 10.5281/zenodo.24028939
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24028939
+    description: "All versions (concept DOI)"
+  - type: doi
+    value: 10.5281/zenodo.24028940
+    description: "Version 1.0.0"
 license: GPL-3.0-only
 repository-code: "https://github.com/AlexGom27/OpenBlade"
 keywords:

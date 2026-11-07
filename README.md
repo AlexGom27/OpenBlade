@@ -4,6 +4,8 @@ English · [Español](README.es.md)
 
 **Verifiable 2D RANS airfoil analysis with OpenFOAM.**
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24028939.svg)](https://doi.org/10.5281/zenodo.24028939)
+
 OpenBlade builds the mesh and the case on your computer, runs OpenFOAM 12 locally (through Docker) or on your own Linux servers over SSH, and gives every result with a convergence verdict, a grid uncertainty band and a record of exactly what produced it.
 
 Developed at the Instituto Tecnológico del Valle de Etla (ITVE, TecNM), Mexico, by Alejandro Gómez Sánchez, Jesús Miguel Ruiz Martínez and Heriberto Cruz Martínez.
@@ -196,6 +198,10 @@ python3 -m pytest -q
 | `ModuleNotFoundError` | Run `pip install -r requirements.txt` again |
 
 The interface is in Spanish.
+
+## How to cite
+
+Cite the archived version you used: v1.0.0 is [10.5281/zenodo.24028940](https://doi.org/10.5281/zenodo.24028940), and [10.5281/zenodo.24028939](https://doi.org/10.5281/zenodo.24028939) always points to the latest version. The details are in [CITATION.cff](CITATION.cff).
 
 ## License
 
