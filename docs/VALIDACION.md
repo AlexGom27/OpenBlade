@@ -15,6 +15,7 @@ Todo lo de este documento salió del programa: malla y caso generados en la Mac,
 | Transitorio | Estable en un caso laminar. A Re alto con y+<1 **no está validado** (§7) |
 | Mallas oficiales de TMR | 449×129 no es practicable; 225×65 corre pero Cd oscila (§6) |
 | Banco de validación | 35 de 40 comprobaciones; las 5 restantes declaradas (§5) |
+| Transición con SST-LM (NACA 63₃-418, Tu en el perfil igual a la del túnel, cuerda refinada ×4) | Inicio en el extradós a 0.05 de la cuerda o menos del infrarrojo de Ehrmann en 7 de 9 puntos (4 de 5 en la prueba fijada antes de correr); fallan 5° y 6°, donde la transición se extiende; Cd de 10 a 21 % bajo (§7) |
 
 ## 2. Cómo repetirlo
 
@@ -284,11 +285,24 @@ Con la cuerda refinada la transición queda a 0.05 de la cuerda o menos del infr
 
 A 0° y Re=3×10⁶ la transición queda a +0.03–0.05 de la de Ehrmann (0.50, fig. 11), y al subir el Reynolds se adelanta, como en el experimento. Frente a la tolerancia fijada con Özçakmak a 6° **no cumple**: ellos miden ≈0.08 y OpenBlade 0.27–0.35, pero Ehrmann mide 0.27 a ese ángulo con infrarrojo, así que los dos experimentos no coinciden entre sí ahí. Cd queda sistemáticamente de 13 a 20 % por debajo de la polar lisa de Abbott, leída a ojo (±0.0004, unos 6 %).
 
-**Estado de SST-LM.** Con la cuerda refinada, la posición de la transición del NACA 63₃-418 a Re de 2.4 y 3×10⁶ coincide con el infrarrojo de Ehrmann a 0.05 de la cuerda o menos de 0° a 6°, y sigue la tendencia con el Reynolds. Cd sale de 10 a 20 % bajo frente a las dos referencias. Varios puntos a Re=3×10⁶ siguen oscilando. Sin refinar la cuerda, la transición no es fiable.
+**Estado de SST-LM.** Con la cuerda refinada, la posición de la transición del NACA 63₃-418 a Re de 2.4 y 3×10⁶ coincide con el infrarrojo de Ehrmann a 0.05 de la cuerda o menos de 0° a 4° (a 6° solo la subida; ver la prueba del 2026-11-06), y sigue la tendencia con el Reynolds. Cd sale de 10 a 20 % bajo frente a las dos referencias. Varios puntos a Re=3×10⁶ siguen oscilando. Sin refinar la cuerda, la transición no es fiable.
 
 **Tolerancias fijadas el 2026-11-06, antes de correr.** NACA 63₃-418 con SST-LM, nivel 2, cuerda refinada ×4, Tu≈0.24 % en el perfil (la de Ehrmann es 0.25 %), frente al infrarrojo de Ehrmann (`validation/refs/ehrmann_63418_transicion.dat`), en puntos que no se habían simulado: Re=2.4×10⁶ a −2°, 5° y 7° (fig. 10), y 0° a Re=0.8×10⁶ y 4.5×10⁶ (fig. 11). Inicio de la transición en el extradós a menos de 0.05 de la cuerda del valor leído. Entrada: Tu 0.6 % con relación de viscosidades 500 (2.4×10⁶), 167 (0.8×10⁶) y 940 (4.5×10⁶).
 
 **Corrección del 2026-11-06, antes de ver resultados.** El texto de Ehrmann da como Reynolds máximo 4.4×10⁶, aunque la curva limpia de su fig. 11 llega a unos 4.6×10⁶ (lo advirtió OpenClaw). La comparación fijada pasa a 4.4×10⁶ (x_tr 0.455, releído); el punto a 4.5×10⁶ ya enviado se informa aparte, sin contar para la tolerancia. Definición de la transición, la misma de la tabla anterior: en el extradós, el mínimo de Cf antes del punto donde Cf crece más rápido con x («inicio»).
+
+**Resultado frente a esas tolerancias (M).** Lanzado desde la ventana, repartido en los dos servidores. Inicio de la transición en el extradós:
+
+| Caso | Veredicto | Cl | Cd | Inicio | Subida | Ehrmann | Dif. del inicio | ¿≤0.05? |
+|---|---|---|---|---|---|---|---|---|
+| Re=2.4×10⁶, −2° | CONVERGIDO | 0.128 | 0.00545 | 0.567 | 0.577 | 0.54 | +0.027 | sí |
+| Re=2.4×10⁶, 5° | CONVERGIDO | 0.950 | 0.00696 | 0.289 | 0.394 | 0.36 | −0.071 | **no** |
+| Re=2.4×10⁶, 7° | CONVERGIDO | 1.159 | 0.00916 | 0.138 | 0.248 | 0.17 | −0.032 | sí |
+| Re=0.8×10⁶, 0° | oscila (Cd 1.2 %) | 0.351 | 0.00755 | 0.596 | 0.601 | 0.57 | +0.026 | sí |
+| Re=4.4×10⁶, 0° | CONVERGIDO | 0.370 | 0.00530 | 0.433 | 0.473 | 0.455 | −0.022 | sí |
+| Re=4.5×10⁶, 0° (aparte) | CONVERGIDO | 0.370 | 0.00532 | 0.428 | 0.468 | | | |
+
+**Cumple en 4 de 5 puntos.** A 5° el mínimo de Cf queda 0.07 por delante del infrarrojo, aunque la subida (0.394) queda a +0.034: entre 5° y 7° la transición se extiende sobre 0.1 de la cuerda, como a 6° (0.19–0.32), y el criterio del mínimo de Cf la sitúa en su extremo delantero. A 0.8×10⁶ el punto oscila con media estable y la transición se tomó del campo final. Con el Reynolds la transición se adelanta como en el experimento (0.60, 0.53, 0.43 a 0.8, 2.4 y 4.4×10⁶). La fricción es de 55 a 81 % del Cd. **Corrección de la tabla anterior (0° a 6°):** allí se dijo que la transición quedaba a 0.05 o menos del infrarrojo en los cuatro ángulos, pero a 6° eso solo vale para la subida (0.315, +0.045); el inicio, que es la definición fijada, queda a −0.079. Con el inicio, cumplen 0°, 2° y 4°, y 6° no. En total, 7 de 9 puntos a menos de 0.05; los dos que fallan, 5° y 6°, son los de transición más extendida. Este resultado confirma la posición de la transición en puntos nuevos; no dice nada del Cd, que sigue bajo (§7).
 
 ## 8. Por qué lo anterior no sirve
 

@@ -32,7 +32,7 @@ What is validated, with which tolerances, and what does not pass is in [docs/VAL
 | NACA 0012, Re = 2×10⁶ | Fails two of three checks |
 | NACA 4412 and NACA 63₃-418, cambered, Re = 6×10⁶ | Drag and moment within tolerance. NACA 63₃-418 lift is 3 to 5 % high against modern data; NACA 4412 lift is 6 to 11 % high against a reading of Abbott and von Doenhoff that still needs a second source |
 | Stall | **Not predicted** with SST |
-| Transition (SST-LM) | Not validated: drag depends on the turbulence that reaches the airfoil |
+| Transition (SST-LM), NACA 63₃-418 | With the airfoil turbulence matched to the wind tunnel and the chordwise grid refined, the upper-surface transition onset is within 0.05 chord of infrared measurements at 7 of 9 points (4 of 5 in a test fixed before running). Drag is 10 to 21 % low, so drag is **not validated**; it also depends on the turbulence that reaches the airfoil |
 | Fluid-structure interaction (**Análisis FSI**) | Experimental: the Turek-Hron benchmark was not completed because the coupling diverges. Do not use its results |
 
 ---
