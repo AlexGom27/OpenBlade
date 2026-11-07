@@ -21,6 +21,9 @@ identifiers:
     value: 10.5281/zenodo.24028939
     description: "All versions (concept DOI)"
   - type: doi
+    value: 10.5281/zenodo.24045781
+    description: "Version 1.0.1"
+  - type: doi
     value: 10.5281/zenodo.24028940
     description: "Version 1.0.0"
 license: GPL-3.0-only

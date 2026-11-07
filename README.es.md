@@ -2,7 +2,7 @@
 
 [English](README.md) · Español
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24028939.svg)](https://doi.org/10.5281/zenodo.24028939) · Para citarlo: v1.0.0, [10.5281/zenodo.24028940](https://doi.org/10.5281/zenodo.24028940); detalles en [CITATION.cff](CITATION.cff).
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24028939.svg)](https://doi.org/10.5281/zenodo.24028939) · Para citarlo: v1.0.1, [10.5281/zenodo.24045781](https://doi.org/10.5281/zenodo.24045781) (v1.0.0, [10.5281/zenodo.24028940](https://doi.org/10.5281/zenodo.24028940)); detalles en [CITATION.cff](CITATION.cff).
 
 **Workbench CFD 2D para Perfiles Aerodinámicos**
 
