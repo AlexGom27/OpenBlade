@@ -13,8 +13,8 @@ authors:
   - family-names: "Cruz Martínez"
     given-names: "Heriberto"
     affiliation: "Instituto Tecnológico del Valle de Etla, Tecnológico Nacional de México"
-version: 1.0.0
-date-released: 2026-11-06
+version: 1.0.1
+date-released: 2026-11-07
 doi: 10.5281/zenodo.24028939
 identifiers:
   - type: doi
