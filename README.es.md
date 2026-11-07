@@ -279,7 +279,7 @@ Todas estas órdenes usan las mismas funciones que la ventana. En la ventana est
 
 ## 📄 Licencia
 
-OpenBlade es software libre bajo la [Licencia Pública General de GNU, versión 3](LICENSE) (GPL-3.0-only). Puede usarse, también en empresas, modificarse y redistribuirse; quien lo redistribuya, modificado o no, debe hacerlo bajo la misma licencia y con su código fuente. Se distribuye sin garantía: ver las secciones 15 y 16 de la licencia y los límites de validación en [docs/VALIDACION.md](docs/VALIDACION.md).
+OpenBlade es software libre bajo la [Licencia Pública General de GNU, versión 3](LICENSE.txt) (GPL-3.0-only). Puede usarse, también en empresas, modificarse y redistribuirse; quien lo redistribuya, modificado o no, debe hacerlo bajo la misma licencia y con su código fuente. Se distribuye sin garantía: ver las secciones 15 y 16 de la licencia y los límites de validación en [docs/VALIDACION.md](docs/VALIDACION.md).
 
 Desarrollado en el ITVE-TecNM.  
 Contacto: alejandro.gs@itvalletla.edu.mx

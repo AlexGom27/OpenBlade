@@ -205,6 +205,6 @@ Cite the archived version you used: v1.0.0 is [10.5281/zenodo.24028940](https://
 
 ## License
 
-OpenBlade is free software under the [GNU General Public License, version 3](LICENSE) (GPL-3.0-only). It can be used, also commercially, modified and redistributed; redistributed versions, modified or not, must use the same license and include their source code. It comes without warranty: see sections 15 and 16 of the license and the validation limits in [docs/VALIDACION.md](docs/VALIDACION.md).
+OpenBlade is free software under the [GNU General Public License, version 3](LICENSE.txt) (GPL-3.0-only). It can be used, also commercially, modified and redistributed; redistributed versions, modified or not, must use the same license and include their source code. It comes without warranty: see sections 15 and 16 of the license and the validation limits in [docs/VALIDACION.md](docs/VALIDACION.md).
 
 Contact: alejandro.gs@itvalletla.edu.mx

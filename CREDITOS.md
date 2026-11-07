@@ -28,4 +28,4 @@
 
 ---
 Copyright © 2026 Alejandro Gómez Sánchez, Jesús Miguel Ruiz Martínez y Heriberto Cruz Martínez, Instituto Tecnológico del Valle de Etla.
-Distribuido bajo la [GNU GPL versión 3](LICENSE).
+Distribuido bajo la [GNU GPL versión 3](LICENSE.txt).
