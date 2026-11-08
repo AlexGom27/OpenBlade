@@ -26,3 +26,19 @@ def sin_campanas_ajenas(monkeypatch):
     real = owner.hay_cli_vivo
     monkeypatch.setattr(owner, "hay_cli_vivo", lambda: False)
     return real
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _datos_de_prueba_en_tmp():
+    """El programa escribe en OPENBLADE_DATA_DIR, y en las pruebas eso es un tmp.
+
+    Los 12 trabajos `c0..c5` que aparecieron en ~/.openblade/jobs los dejo una
+    sonda suelta que corrio fuera de pytest; dentro de pytest la regla se puede
+    comprobar, y aqui se comprueba en cada prueba: nada cae en el directorio real.
+    """
+    from core import paths
+
+    raiz = os.path.realpath(paths.data_root())
+    assert raiz.startswith(os.path.realpath(tempfile.gettempdir())), raiz
+    assert raiz != os.path.realpath(os.path.expanduser("~/.openblade")), raiz
+    yield raiz

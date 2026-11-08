@@ -272,7 +272,10 @@ class RemoteJob:
         malla = os.path.join(case_dir, "mesh.msh")
         shutil.copy2(msh_file, malla)
         with open(os.path.join(case_dir, "job.json"), "w") as f:
+            # max_iters: sin el, el servidor no sabe cuando podria recortar la corrida y
+            # seguiria hasta el final aunque las fuerzas ya no cambien (remote_job.py).
             json.dump({"nproc": nproc, "transient": transient,
+                       "max_iters": int(params.get("max_iters") or 0),
                        "sin_potencial": bool(params.get("campo_inicial"))}, f)
         shutil.copy2(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "remote_job.py"),
@@ -362,7 +365,21 @@ class RemoteJob:
         self._run(f"kill -{sig} -- -{pgid}", timeout=20)
 
     def terminar_en(self, iteracion: int) -> None:
-        """Adelanta el final del calculo a esa iteracion: las fuerzas ya no cambian."""
+        """Adelanta el final del calculo a esa iteracion: las fuerzas ya no cambian.
+
+        El servidor decide lo mismo por su cuenta (core/remote_job.py), porque la Mac
+        puede estar desconectada justo cuando convergen las fuerzas. Nunca se alarga:
+        si alli ya se recorto mas, se deja como esta.
+        """
+        r = self._run("grep -m1 '^endTime' system/controlDict 2>/dev/null", timeout=30)
+        actual = None
+        for trozo in (r.stdout or "").replace(";", " ").split():
+            try:
+                actual = int(float(trozo))
+            except ValueError:
+                continue
+        if actual is not None and actual <= int(iteracion):
+            return
         self._run(f"sed -i 's/^endTime .*/endTime         {int(iteracion)};/' system/controlDict", timeout=30)
 
     def detener(self) -> None:

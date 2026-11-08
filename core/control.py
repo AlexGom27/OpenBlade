@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Tuple
 
 from core.bench import ladson
 from core.defaults import case_params
-from core.forces import read_forces
+from core.forces import ForceDataError, read_forces
 from core.jobs import Dispatcher, Events, Job, Machine, ensure_mesh, new_job
 from core.package import read_ficha, sha256_file
 
@@ -27,6 +27,29 @@ def _md5(ruta: str) -> str:
         for bloque in iter(lambda: f.read(1 << 20), b""):
             h.update(bloque)
     return h.hexdigest()
+
+
+def _mismo_tramo(historias, comun: int) -> bool:
+    """Si las primeras `comun` filas coinciden en todas las historias.
+
+    Se compara el valor leido, no el texto: el redondeo de OpenFOAM puede escribir
+    1.23e-03 o 0.00123 segun la version, y eso no es una diferencia de fuerzas.
+    """
+    if len(historias) < 2 or comun < 2:
+        return False
+    primera = historias[0]
+    for h in historias[1:]:
+        for nombre in ("Time", "Cl", "Cd", "Cm"):
+            try:
+                a, b = primera.column(nombre)[:comun], h.column(nombre)[:comun]
+            except ForceDataError:
+                return False
+            if len(a) != comun or len(b) != comun:
+                return False
+            # Un ulp de diferencia es redondeo; mas que eso es otra corrida.
+            if any(abs(x - y) > 1e-12 * max(1.0, abs(x), abs(y)) for x, y in zip(a, b)):
+                return False
+    return True
 
 
 def run_control(hosts: List[str], nproc: int = 8, angulos: Tuple[float, ...] = (0.0, 8.0),
@@ -58,7 +81,12 @@ def evaluate_gates(angulo: float, trabajos: List[Job]) -> List[Dict[str, Any]]:
     compuerta(1, "misma malla", len(huellas) == 1 and None not in huellas,
               f"sha256 {sorted(str(h)[:12] for h in huellas)}")
 
-    # 2. mismas fuerzas fila por fila
+    # 2. mismas fuerzas entre maquinas
+    # No basta con comparar el archivo entero: una maquina puede haber seguido calculando
+    # porque la Mac no la alcanzaba para recortarle el final (8021 s sin red en el 6e6), y
+    # entonces las dos series son iguales hasta donde llega la corta y el archivo no. Lo que
+    # se exige es que coincidan en el tramo comun; que una siga mas alla no cambia el
+    # resultado, lo confirma.
     historias, fuentes = [], []
     for j in trabajos:
         try:
@@ -67,8 +95,18 @@ def evaluate_gates(angulo: float, trabajos: List[Job]) -> List[Dict[str, Any]]:
             fuentes.append(_md5(h.sources[-1]))
         except ValueError as e:
             compuerta(3, f"Cl y Cd por nombre en {j.host}", False, str(e))
-    compuerta(2, "mismas fuerzas entre máquinas", len(set(fuentes)) == 1 and len(fuentes) == len(trabajos),
-              f"md5 {sorted(f[:12] for f in set(fuentes))}")
+    detalle = f"md5 {sorted(f[:12] for f in set(fuentes))}"
+    ok = len(fuentes) == len(trabajos)
+    if ok and len(set(fuentes)) > 1:
+        largos = [len(h) for h in historias]
+        comun = min(largos) if largos else 0
+        ok = _mismo_tramo(historias, comun)
+        if ok:
+            detalle = (f"mismas fuerzas en el tramo común ({comun} filas); "
+                       f"terminaron en {largos}")
+        else:
+            detalle += f"; difieren en las primeras {comun} filas"
+    compuerta(2, "mismas fuerzas entre máquinas", ok, detalle)
 
     # 3. columnas por nombre
     if len(historias) == len(trabajos):

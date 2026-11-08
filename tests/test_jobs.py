@@ -624,3 +624,28 @@ def test_stop_jobs_stops_running_and_queued_jobs_on_their_server(monkeypatch):
     assert detenidos == [corre.id]
     assert elegidos[corre.id].state == DETENIDO and elegidos[sin_enviar.id].state == DETENIDO
     assert elegidos[hecho.id].state == TERMINADO
+
+
+def test_a_job_always_lands_inside_the_test_data_dir(_datos_de_prueba_en_tmp):
+    """Un trabajo de prueba no puede acabar en el ~/.openblade del usuario.
+
+    Asi se colaron 12 paquetes `c0..c5` en el directorio real: una sonda los creo
+    sin que las pruebas lo notaran, y abrir la ventana los habria mandado a los
+    servidores.
+    """
+    import tempfile
+
+    job = new_job(case_params(aoa=4.0), "", 0, label="c0")
+    for ruta in (job.folder, job.case_dir):
+        real = os.path.realpath(ruta)
+        assert real.startswith(os.path.realpath(tempfile.gettempdir())), real
+        assert not real.startswith(os.path.realpath(os.path.expanduser("~/.openblade"))), real
+
+
+def test_loading_jobs_never_reads_the_real_data_dir(_datos_de_prueba_en_tmp):
+    """`load_jobs` mira el directorio de datos: en pruebas, el tmp."""
+    import tempfile
+
+    job = new_job(case_params(), "", 0, label="c0")
+    assert job.id in {j.id for j in load_jobs()}
+    assert os.path.realpath(J.jobs_dir()).startswith(os.path.realpath(tempfile.gettempdir()))

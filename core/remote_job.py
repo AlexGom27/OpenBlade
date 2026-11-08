@@ -92,6 +92,138 @@ def correr(cmd, env, log, obligatorio=True):
     return rc
 
 
+# --- cuando terminar, aqui mismo ------------------------------------------------
+# Antes lo decidia la Mac leyendo run.log mientras estaba conectada. Con la maquina
+# inalcanzable (Tailscale caido 2 h 13 min en el 6e6) nadie veia la convergencia y el
+# solver seguia hasta max_iters: a 0 grados, una maquina acabo en 16000 y la otra en
+# 40000, con las fuerzas identicas hasta donde coinciden. El caso de control exige el
+# mismo archivo en las dos maquinas, asi que la decision no puede depender de la red.
+
+def _re_veces(nombre):
+    return re.compile(r"^\s*" + nombre + r"\s*[:=]\s*([0-9eE.+\-]+)\s*$")
+
+
+_RE_FUERZA = {n: _re_veces(n) for n in ("Cd", "Cl")}
+# Mismos valores que core.jobs._Vigilancia: si aqui y alli discrepan, el mismo paquete
+# daria un final distinto segun quien lo pare.
+CADA_CONVERGENCIA = 1000
+MARGEN = 2000
+MINIMO = 1000
+VENTANA = 500
+TOL_RANGO_CD = 0.008
+TOL_RANGO_CL = 0.005
+TOL_DERIVA_CD = 0.002
+TOL_DERIVA_CL = 0.001
+FRACCION_TRAMO = 10
+
+
+def _tramo_final(x):
+    """Media del ultimo tramo y del anterior, igual que core.verdict.tramo_final."""
+    n = len(x)
+    w = min(max(VENTANA, n // FRACCION_TRAMO), n // 2)
+    if w < 1:
+        return None, None
+    return sum(x[n - w:]) / w, sum(x[n - 2 * w:n - w]) / w
+
+
+class _Convergencia:
+    """Lo mismo que core.jobs._Vigilancia, sin depender de OpenBlade."""
+
+    def __init__(self):
+        self.n = 0
+        self.cl = []
+        self.cd = []
+
+    def final_previsto(self):
+        return (self.n // CADA_CONVERGENCIA + 1) * CADA_CONVERGENCIA + MARGEN
+
+    def convergio(self):
+        if self.n % CADA_CONVERGENCIA or self.n < MINIMO:
+            return False
+        ultimo_cd, ultimo_cl = self.cd[-VENTANA:], self.cl[-VENTANA:]
+        if len(ultimo_cd) < VENTANA or len(ultimo_cl) < VENTANA:
+            return False
+        media_cd = sum(ultimo_cd) / VENTANA
+        media_cl = sum(ultimo_cl) / VENTANA
+        if media_cd <= 0 or (max(ultimo_cd) - min(ultimo_cd)) / media_cd >= TOL_RANGO_CD:
+            return False
+        if max(ultimo_cl) - min(ultimo_cl) >= max(TOL_RANGO_CL * abs(media_cl), 2e-4):
+            return False
+        reciente, previo = _tramo_final(self.cd)
+        if reciente is None or abs(reciente - previo) / media_cd >= TOL_DERIVA_CD:
+            return False
+        reciente, previo = _tramo_final(self.cl)
+        return reciente is not None and abs(reciente - previo) < TOL_DERIVA_CL * max(abs(media_cl), 0.1)
+
+
+def correr_vigilado(cmd, env, log, max_iters, transient):
+    """Corre el solver y, en paralelo, mira si ya convergio para acortarlo."""
+    import threading
+
+    with open(log, "w") as fh:
+        proceso = subprocess.Popen(cmd, env=env, stdout=fh, stderr=subprocess.STDOUT,
+                                   stdin=subprocess.DEVNULL)
+        # En transitorio manda el tiempo fisico, no las vueltas: no se recorta.
+        if max_iters > 0 and not transient:
+            hilo = threading.Thread(target=vigilar_y_parar, args=(proceso, max_iters),
+                                    daemon=True)
+            hilo.start()
+        rc = proceso.wait()
+    return rc
+
+
+def vigilar_y_parar(proceso, max_iters):
+    """Sigue run.log mientras el solver corre y adelanta su final si converge.
+
+    Se llama desde un hilo aparte: el solver no se entera de nada hasta que se le
+    reescribe endTime, y entonces OpenFOAM termina solo, escribiendo sus campos.
+    """
+    vigia = _Convergencia()
+    posicion = 0
+    resto = ""
+    while proceso.poll() is None:
+        time.sleep(2.0)
+        try:
+            with open("run.log", errors="replace") as f:
+                f.seek(posicion)
+                datos = f.read()
+                posicion = f.tell()
+        except OSError:
+            continue
+        if not datos:
+            continue
+        for linea in (resto + datos).split("\n")[:-1]:
+            for nombre, patron in _RE_FUERZA.items():
+                m = patron.match(linea)
+                if not m:
+                    continue
+                try:
+                    valor = float(m.group(1))
+                except ValueError:
+                    continue
+                if nombre == "Cl":
+                    vigia.cl.append(valor)
+                    vigia.n += 1
+                else:
+                    vigia.cd.append(valor)
+            if vigia.n and vigia.n % 100 == 0 and vigia.convergio():
+                final = vigia.final_previsto()
+                if final >= max_iters:
+                    return
+                recortar_final(final)
+                guardar_estado(convergio_en=vigia.n, final=final)
+                return
+        resto = (resto + datos).split("\n")[-1]
+
+
+def recortar_final(iteracion):
+    """Adelanta endTime del controlDict: OpenFOAM termina solo, sin matarlo."""
+    ruta = os.path.join("system", "controlDict")
+    t = open(ruta).read()
+    nuevo = re.sub(r"^endTime\s+.*$", f"endTime         {int(iteracion)};", t, count=1, flags=re.M)
+    open(ruta, "w").write(nuevo)
+
+
 def ajustar_boundary():
     ruta = os.path.join("constant", "polyMesh", "boundary")
     t = open(ruta).read()
@@ -157,7 +289,8 @@ def main():
             cmd = ["mpirun", "--bind-to", "none", "--oversubscribe", "-np", str(nproc)] + cmd + ["-parallel"]
 
         guardar_estado(step="solver")
-        rc = correr(cmd, env, "run.log", obligatorio=False)
+        rc = correr_vigilado(cmd, env, "run.log", int(job.get("max_iters", 0)),
+                             bool(job.get("transient")))
         # El calculo ya acabo: lo que queda no se interrumpe a medias.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if rc == 0 and nproc > 1:
