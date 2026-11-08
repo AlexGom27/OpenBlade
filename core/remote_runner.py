@@ -17,16 +17,29 @@ import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-            # Si la Mac se duerme o cambia de red, la conexion muere sin avisar: sin esto
-            # una descarga se queda colgada para siempre.
-            "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
-            # El log es texto: comprimido pasa por una red lenta, como la del telefono.
-            "-o", "Compression=yes",
-            # Reutilizar la conexion: el avance se consulta cada pocos segundos.
-            "-o", "ControlMaster=auto",
-            "-o", "ControlPath=~/.ssh/openblade-%C",
-            "-o", "ControlPersist=120"]
+_SSH_BASE = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+             # Si la Mac se duerme o cambia de red, la conexion muere sin avisar: sin esto
+             # una descarga se queda colgada para siempre.
+             "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
+             # El log es texto: comprimido pasa por una red lenta, como la del telefono.
+             "-o", "Compression=yes"]
+
+# Una conexion por tarea y servidor, no una sola para todo. Antes, consultas, subidas y
+# descargas compartian el mismo canal SSH (mismo ControlPath), asi que un rsync de varios
+# minutos llenaba el canal: la subida del paquete siguiente esperaba a la descarga del
+# anterior (medido en el 6e6: gci_a15_n2 subio de 31877 s a 35142 s, con 1427 s solapados
+# con la descarga de gci_a0_n1), y las consultas de estado se quedaban sin respuesta
+# durante las descargas. Con canales distintos, una subida no hace cola detras de una
+# descarga. El ancho de banda sigue siendo el mismo para todos.
+def _ssh_opts(canal: str) -> List[str]:
+    return _SSH_BASE + ["-o", "ControlMaster=auto",
+                        "-o", f"ControlPath=~/.ssh/openblade-{canal}-%C",
+                        "-o", "ControlPersist=120"]
+
+
+SSH_OPTS = _ssh_opts("ssh")            # consultas cortas: estado, log, señales
+SSH_OPTS_SUBIDA = _ssh_opts("sube")
+SSH_OPTS_BAJADA = _ssh_opts("baja")
 JOBS_DIR = "openblade_jobs"
 INTENTOS_RSYNC = 5
 ESPERA_RSYNC = 5.0
@@ -229,9 +242,10 @@ class RemoteJob:
         return r.stdout
 
     def _rsync(self, origen: str, destino: str, excluir: List[str],
-               intentos: int = INTENTOS_RSYNC) -> None:
+               intentos: int = INTENTOS_RSYNC, opts: Optional[List[str]] = None) -> None:
         """Copia con reintentos: un corte no debe perder un calculo ya hecho."""
-        cmd = ["rsync", "-az", f"--timeout={TIEMPO_RSYNC}", "-e", "ssh " + " ".join(SSH_OPTS)]
+        cmd = ["rsync", "-az", f"--timeout={TIEMPO_RSYNC}",
+               "-e", "ssh " + " ".join(opts or SSH_OPTS_SUBIDA)]
         cmd += [f"--exclude={e}" for e in excluir] + [origen, destino]
         for intento in range(intentos):
             r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
@@ -267,7 +281,7 @@ class RemoteJob:
         self.ficha_sha256 = sha256_file(os.path.join(case_dir, FICHA))
         try:
             self._rsync(case_dir.rstrip("/") + "/", f"{self.host}:{self.job_dir}/",
-                        ["processor*", "*.log", "log.*", "*.foam"])
+                        ["processor*", "*.log", "log.*", "*.foam"], opts=SSH_OPTS_SUBIDA)
         finally:
             for nombre in ("mesh.msh", "job.json", "remote_job.py"):
                 ruta = os.path.join(case_dir, nombre)
@@ -364,7 +378,7 @@ class RemoteJob:
     def descargar(self, case_dir: str) -> None:
         """Trae los resultados al caso local, donde los lee 'Ver Resultados'."""
         self._rsync(f"{self.host}:{self.job_dir}/", case_dir.rstrip("/") + "/",
-                    EXCLUIR_BAJADA, INTENTOS_DESCARGA)
+                    EXCLUIR_BAJADA, INTENTOS_DESCARGA, opts=SSH_OPTS_BAJADA)
 
 
     def limpiar(self) -> None:

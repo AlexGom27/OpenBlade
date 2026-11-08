@@ -229,3 +229,49 @@ def test_a_job_waiting_in_the_server_queue_says_so_and_can_be_stopped(tmp_path):
     p.wait(25)
     assert json.loads((caso / "status.json").read_text())["state"] == "stopped"
     assert not (caso / "corrio").exists()
+
+
+def test_a_upload_does_not_share_the_connection_with_a_download(monkeypatch):
+    """Subidas, bajadas y consultas van por canales distintos.
+
+    Con un solo canal, la subida del paquete siguiente esperaba a que acabara la
+    descarga del anterior (1427 s medidos en el 6e6) y las consultas de estado se
+    quedaban sin respuesta mientras duraba un rsync.
+    """
+    from core import remote_runner as R
+
+    def canal(opts):
+        for o in opts:
+            if o.startswith("ControlPath="):
+                return o
+        return None
+
+    subida, bajada, consulta = canal(R.SSH_OPTS_SUBIDA), canal(R.SSH_OPTS_BAJADA), canal(R.SSH_OPTS)
+    assert subida and bajada and consulta
+    assert len({subida, bajada, consulta}) == 3
+    # Y las tres siguen llevando lo que evita que una conexion se cuelgue para siempre.
+    for opts in (R.SSH_OPTS, R.SSH_OPTS_SUBIDA, R.SSH_OPTS_BAJADA):
+        assert "ServerAliveInterval=15" in opts
+        assert "BatchMode=yes" in opts
+
+
+def test_the_upload_and_the_download_use_their_own_channel(monkeypatch, tmp_path):
+    from core import remote_runner as R
+
+    usados = []
+    monkeypatch.setattr(R.RemoteJob, "_rsync",
+                        lambda self, origen, destino, excluir, intentos=0, opts=None:
+                        usados.append(opts))
+    # El mkdir del servidor no entra en esta prueba: se da por hecho.
+    monkeypatch.setattr(R, "_ssh", lambda *a, **k: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    job = R.RemoteJob("u@h", "openblade_jobs/x")
+    caso = tmp_path / "caso"
+    caso.mkdir()
+    malla = tmp_path / "origen.msh"
+    malla.write_text("malla")
+    monkeypatch.setattr(R, "build_ficha", lambda *a, **k: {}, raising=False)
+    job.subir(str(caso), str(malla), 2, False, {})
+    job.descargar(str(caso))
+    assert usados[0] == R.SSH_OPTS_SUBIDA
+    assert usados[1] == R.SSH_OPTS_BAJADA
+    assert usados[0] != usados[1]
