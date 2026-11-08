@@ -53,19 +53,78 @@ def _version(paquete: str) -> Optional[str]:
         return None
 
 
-def program_version() -> Dict[str, Any]:
-    """Commit del programa y si la copia de trabajo tiene cambios sin guardar."""
+def _git(*args: str) -> Optional[str]:
+    """Salida de un git de solo lectura, o None si no se puede."""
     try:
-        commit = subprocess.run(["git", "-C", RAIZ, "rev-parse", "HEAD"], capture_output=True,
-                                text=True, stdin=subprocess.DEVNULL, timeout=20)
-        estado = subprocess.run(["git", "-C", RAIZ, "status", "--porcelain", "--", "core", "gui"],
-                                capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=20)
+        r = subprocess.run(["git", "-C", RAIZ] + list(args), capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=20)
     except (OSError, subprocess.SubprocessError):
-        return {"commit": None, "modificados": []}
-    if commit.returncode != 0:
-        return {"commit": None, "modificados": []}
-    return {"commit": commit.stdout.strip(),
-            "modificados": [l[3:] for l in estado.stdout.splitlines()]}
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+# --- que codigo hizo este paquete -----------------------------------------------
+# Un proceso que arranco con un commit sigue ejecutando el codigo que tiene cargado,
+# pero mientras corre alguien puede cambiar el disco y hacer commit: al subir se
+# leeria un HEAD que no es el que hizo el caso, y el remote_job.py copiado del disco
+# seria de otra version que el resto del paquete. Se fija una sola vez, al importar,
+# y de ahi salen tanto la ficha como el script que se envia al servidor.
+
+def _leer_script() -> Optional[bytes]:
+    try:
+        with open(os.path.join(RAIZ, "core", "remote_job.py"), "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _instantanea() -> Dict[str, Any]:
+    script = _leer_script()
+    estado = _git("status", "--porcelain", "--", "core", "gui")
+    return {"commit": _git("rev-parse", "HEAD"),
+            "modificados": [l[3:] for l in estado.splitlines()] if estado is not None else [],
+            "script": script,
+            "script_sha256": hashlib.sha256(script).hexdigest() if script else None,
+            "tomado": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+
+
+_ARRANQUE: Optional[Dict[str, Any]] = None
+
+
+def arranque() -> Dict[str, Any]:
+    """Lo que habia al importar el modulo: commit, modificados y remote_job.py."""
+    global _ARRANQUE
+    if _ARRANQUE is None:
+        try:
+            _ARRANQUE = _instantanea()
+        except OSError:
+            _ARRANQUE = {"commit": None, "modificados": [], "script": None,
+                         "script_sha256": None, "tomado": None}
+    return _ARRANQUE
+
+
+def script_servidor() -> Optional[bytes]:
+    """remote_job.py tal como se cargó, no como esté el disco ahora."""
+    return arranque()["script"]
+
+
+def program_version() -> Dict[str, Any]:
+    """Codigo del proceso que hace el caso, y aviso si el disco ya no coincide."""
+    a = arranque()
+    info: Dict[str, Any] = {"commit": a["commit"],
+                            "modificados": list(a["modificados"]),
+                            "tomado": a["tomado"],
+                            "remote_job_sha256": a["script_sha256"]}
+    # El disco cambio por debajo: se anota para que se note, sin falsear el commit.
+    disco = _git("rev-parse", "HEAD")
+    if disco and a["commit"] and disco != a["commit"]:
+        info["commit_disco"] = disco
+        en_disco = _leer_script()
+        if en_disco is not None:
+            actual = hashlib.sha256(en_disco).hexdigest()
+            if actual != a["script_sha256"]:
+                info["remote_job_disco_sha256"] = actual
+    return info
 
 
 def build_ficha(case_dir: str, params: Dict[str, Any],

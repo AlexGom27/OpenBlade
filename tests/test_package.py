@@ -1,7 +1,9 @@
 """La ficha identifica el paquete y un paquete alterado no se calcula."""
 
+import hashlib
 import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -180,3 +182,131 @@ def test_the_sheet_states_the_opening_of_the_trailing_edge():
     filas = dict(map(tuple, _tabla_ficha({"malla": {"abertura_borde_salida": 0.01}})))
     assert filas["Abertura del borde de salida"].startswith("1.00 %")
     assert "Abertura del borde de salida" not in dict(map(tuple, _tabla_ficha({"malla": {}})))
+
+
+# --- que codigo hizo el paquete: lo del arranque, no lo del disco -----------------
+
+def _simular_arranque(monkeypatch, commit, script, modificados=()):
+    """Deja fijada la instantanea de arranque del modulo, como al importarlo."""
+    from core import package as P
+
+    monkeypatch.setattr(P, "_ARRANQUE", {
+        "commit": commit, "modificados": list(modificados), "script": script,
+        "script_sha256": hashlib.sha256(script).hexdigest(),
+        "tomado": "2026-11-08T06:00:00Z"})
+
+
+def _git_que_dice(monkeypatch, commit):
+    """El disco responde con ese HEAD; el estado queda limpio."""
+    from core import package as P
+
+    monkeypatch.setattr(P, "_git", lambda *a: commit if a[:2] == ("rev-parse", "HEAD") else "")
+
+
+def test_ficha_records_the_code_that_loaded_not_the_head_on_disk(caso, monkeypatch):
+    """Un proceso vivo con codigo viejo no puede anotar el commit nuevo.
+
+    Se cambio el HEAD despues de arrancar: la ficha sigue diciendo cual ejecuta, y
+    ademas avisa de que el disco ya no coincide.
+    """
+    _simular_arranque(monkeypatch, "1817b2d" + "0" * 33, b"#!/usr/bin/env python3\nVIEJO\n")
+    _git_que_dice(monkeypatch, "05a6ad3" + "0" * 33)
+    ficha = build_ficha(str(caso), {})
+    assert ficha["programa"]["commit"].startswith("1817b2d")
+    assert ficha["programa"]["commit_disco"].startswith("05a6ad3")
+
+
+def test_a_matching_disk_adds_no_noise(caso, monkeypatch):
+    """Si el disco coincide, la ficha no lleva commit_disco ni ruido."""
+    sha = hashlib.sha256(b"x").hexdigest()
+    _simular_arranque(monkeypatch, "a" * 40, b"x")
+    _git_que_dice(monkeypatch, "a" * 40)
+    prog = build_ficha(str(caso), {})["programa"]
+    assert prog["commit"] == "a" * 40
+    assert "commit_disco" not in prog
+    assert prog["remote_job_sha256"] == sha
+
+
+def test_the_script_sent_is_the_one_in_memory(caso, monkeypatch, tmp_path):
+    """El remote_job.py del disco cambio: se envia el del arranque, no el de ahora."""
+    viejo = b"#!/usr/bin/env python3\n# el que se cargo al arrancar\n"
+    _simular_arranque(monkeypatch, "a" * 40, viejo)
+    _git_que_dice(monkeypatch, "a" * 40)
+    malla = tmp_path / "m.msh"
+    malla.write_bytes(b"malla")
+
+    job = RemoteJob("u@h", "openblade_jobs/x")
+    enviado = {}
+
+    def falso_rsync(self, origen, destino, excluir, intentos=0, opts=None):
+        enviado["script"] = open(os.path.join(origen, "remote_job.py"), "rb").read()
+        enviado["ficha"] = json.load(open(os.path.join(origen, "ficha.json")))
+
+    monkeypatch.setattr(RemoteJob, "_rsync", falso_rsync)
+    monkeypatch.setattr("core.remote_runner._ssh", lambda *a, **k: type(
+        "R", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+
+    job.subir(str(caso), str(malla), 8, False, {"max_iters": 100})
+    assert enviado["script"] == viejo
+    # Y la ficha declara ese mismo sha, no el del archivo del disco.
+    assert enviado["ficha"]["archivos"]["remote_job.py"] == sha256_file_bytes(viejo)
+    assert enviado["ficha"]["programa"]["remote_job_sha256"] == sha256_file_bytes(viejo)
+
+
+def sha256_file_bytes(datos):
+    return hashlib.sha256(datos).hexdigest()
+
+
+# --- la misma prueba, con un repositorio de verdad -------------------------------
+
+def _repo_temporal(tmp_path):
+    """Un repo minimo con core/remote_job.py, para cambiarle el HEAD de verdad."""
+    repo = tmp_path / "repo"
+    (repo / "core").mkdir(parents=True)
+    (repo / "core" / "__init__.py").write_text("")
+    (repo / "core" / "remote_job.py").write_text("print('v1')\n")
+    (repo / "gui").mkdir()
+    for orden in (["init", "-q", "-b", "main"], ["add", "-A"]):
+        subprocess.run(["git", "-C", str(repo)] + orden, check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qm", "v1"], check=True, capture_output=True)
+    return repo
+
+
+def _commitear(repo, texto):
+    (repo / "core" / "remote_job.py").write_text(texto)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qm", "v2"], check=True, capture_output=True)
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+
+
+def test_the_snapshot_survives_a_commit_made_while_the_process_lives(tmp_path, monkeypatch):
+    """Lo que de verdad pasaba: un commit despues de arrancar cambia la ficha.
+
+    Con el codigo de antes, la ficha anotaba el commit nuevo aunque el proceso
+    siguiera ejecutando el viejo. Aqui se comprueba el comportamiento, no el nombre
+    de una variable interna.
+    """
+    from core import package as P
+
+    repo = _repo_temporal(tmp_path)
+    monkeypatch.setattr(P, "RAIZ", str(repo))
+    monkeypatch.setattr(P, "_ARRANQUE", None)      # el modulo "arranca" aqui
+    al_arrancar = P.program_version()
+    script_al_arrancar = P.script_servidor()
+
+    nuevo = _commitear(repo, "print('v2')\n")     # otro commit, el proceso sigue vivo
+
+    despues = P.program_version()
+    assert despues["commit"] == al_arrancar["commit"], "la ficha anota el commit del disco"
+    assert despues["commit_disco"] == nuevo, "no se avisa de que el disco ya no coincide"
+    assert P.script_servidor() == script_al_arrancar, "se enviaria el script del disco"
+    # Y lo que se envia al servidor es ese texto, con su sha en la ficha.
+    (tmp_path / "caso" / "system").mkdir(parents=True)
+    (tmp_path / "caso" / "mesh.msh").write_bytes(b"malla")
+    ficha = P.build_ficha(str(tmp_path / "caso"), {})
+    assert ficha["programa"]["commit"] == al_arrancar["commit"]
+    assert ficha["programa"]["remote_job_sha256"] == \
+        hashlib.sha256(script_al_arrancar).hexdigest()

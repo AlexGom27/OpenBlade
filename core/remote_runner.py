@@ -258,7 +258,7 @@ class RemoteJob:
     def subir(self, case_dir: str, msh_file: str, nproc: int, transient: bool,
               params: Dict[str, Any]) -> None:
         """Sube el paquete con su ficha, sin lanzarlo."""
-        from core.package import FICHA, build_ficha, sha256_file
+        from core.package import FICHA, build_ficha, script_servidor, sha256_file
 
         # mkdir sin -p: si la carpeta ya existe es de otro trabajo y no se toca. Salvo que
         # sea de un intento anterior de este, que pudo crearla antes de cortarse la conexion.
@@ -277,9 +277,14 @@ class RemoteJob:
             json.dump({"nproc": nproc, "transient": transient,
                        "max_iters": int(params.get("max_iters") or 0),
                        "sin_potencial": bool(params.get("campo_inicial"))}, f)
-        shutil.copy2(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                  "remote_job.py"),
-                     os.path.join(case_dir, "remote_job.py"))
+        # El script que se ejecutara alli es el que tiene cargado este proceso, no el
+        # que haya en el disco: si alguien cambio y commiteo mientras el proceso vive,
+        # el del disco seria de otra version que el resto del paquete.
+        script = script_servidor()
+        if script is None:
+            raise RemoteError("No se pudo leer core/remote_job.py para enviarlo")
+        with open(os.path.join(case_dir, "remote_job.py"), "wb") as f:
+            f.write(script)
         build_ficha(case_dir, params, msh_file)
         self.ficha_sha256 = sha256_file(os.path.join(case_dir, FICHA))
         try:

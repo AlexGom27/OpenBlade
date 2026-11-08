@@ -62,14 +62,18 @@ class LocalJob:
     def subir(self, case_dir: str, msh_file: str, nproc: int, transient: bool,
               params: Dict[str, Any]) -> None:
         """El caso ya esta aqui: solo se completa el paquete y su ficha."""
-        from core.package import FICHA, build_ficha, sha256_file
+        from core.package import FICHA, build_ficha, script_servidor, sha256_file
 
         shutil.copy2(msh_file, self._ruta("mesh.msh"))
         with open(self._ruta("job.json"), "w") as f:
             json.dump({"nproc": nproc, "transient": transient,
                        "sin_potencial": bool(params.get("campo_inicial"))}, f)
-        shutil.copy2(os.path.join(os.path.dirname(os.path.abspath(__file__)), "remote_job.py"),
-                     self._ruta("remote_job.py"))
+        # El mismo remote_job.py que se enviaria a un servidor: el del arranque.
+        script = script_servidor()
+        if script is None:
+            raise RuntimeError("No se pudo leer core/remote_job.py")
+        with open(self._ruta("remote_job.py"), "wb") as f:
+            f.write(script)
         build_ficha(case_dir, params, msh_file)
         self.ficha_sha256 = sha256_file(self._ruta(FICHA))
 
