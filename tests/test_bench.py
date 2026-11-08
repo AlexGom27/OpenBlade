@@ -29,12 +29,25 @@ def test_ladson_uses_only_the_80_grit_series_and_not_the_180_grit_one():
     assert cd == pytest.approx(0.01503 + (0.01625 - 0.01503) * (14.0 - 13.08) / (14.22 - 13.08))
 
 
+def test_a_zone_is_matched_by_its_whole_title_not_by_a_piece_of_it():
+    # "80 grit" esta dentro de "180 grit": la zona se pide y se compara entera.
+    d = _zona(f"{REFS}/ladson_clcd.dat", "80 grit")
+    assert d.shape[0] == 17
+    assert d[:, 0].max() == pytest.approx(19.08)     # ultima fila de 80 granos
+    assert 18.21 not in d[:, 0]                      # 18.21 es de 180 granos
+    assert _zona(f"{REFS}/ladson_clcd.dat", "180 grit").shape[0] == 18
+
+
+def test_a_title_that_is_not_there_says_so_instead_of_returning_nothing():
+    with pytest.raises(ValueError, match="80 grits"):
+        _zona(f"{REFS}/ladson_clcd.dat", "80 grits")
+
+
 def test_reference_files_have_every_angle():
     for modelo in ("sst", "sa"):
-        for a in ("alpha=0\"", "alpha=10\"", "alpha=15\""):
-            assert _zona(f"{REFS}/tmr_n0012cp_cfl3d_{modelo}.dat", a).shape[0] > 100
-        for a in ("alpha=0,", "alpha=10,", "alpha=15,"):
-            assert _zona(f"{REFS}/tmr_n0012cf_cfl3d_{modelo}.dat", a).shape[0] > 100
+        for a in (0, 10, 15):
+            assert _zona(f"{REFS}/tmr_n0012cp_cfl3d_{modelo}.dat", f"alpha={a}").shape[0] > 100
+            assert _zona(f"{REFS}/tmr_n0012cf_cfl3d_{modelo}.dat", f"alpha={a}, upper surface").shape[0] > 100
 
 
 def test_default_bench_covers_both_models_and_the_domain_test():

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -73,21 +74,33 @@ def case_of_job(job: Job) -> BenchCase:
     return BenchCase(job.label, float(p["aoa"]), p["turbulence"], int(p["grid_level"]), float(p["farfield"]))
 
 
+def _titulo(linea: str) -> Optional[str]:
+    """Titulo t="..." de la linea de zona, o None si no lo lleva."""
+    m = re.search(r'\bt\s*=\s*"([^"]*)"', linea)
+    return m.group(1) if m else None
+
+
 def _zona(ruta: str, nombre: str) -> np.ndarray:
+    """Filas de la zona cuyo titulo es exactamente `nombre`.
+
+    Se compara el titulo entero y no un trozo: "80 grit" esta contenido en
+    "180 grit", y asi Ladson leia 35 filas de dos series mezcladas en vez de 17.
+    """
     filas, dentro = [], False
     with open(ruta) as f:
         for linea in f:
             if linea.startswith("zone"):
-                dentro = nombre in linea
+                dentro = _titulo(linea) == nombre
             elif dentro and linea.strip() and not linea.startswith(("#", "variables")):
                 filas.append([float(v) for v in linea.split()])
+    if not filas:
+        raise ValueError(f"{os.path.basename(ruta)}: no hay zona con el titulo {nombre!r}")
     return np.array(filas)
 
 
 def ladson(aoa: float, zona: str = "80 grit") -> Tuple[float, float]:
     """Cl y Cd de Ladson interpolados al angulo, en el tramo sin perdida."""
-    # Titulo completo entre comillas: "80 grit" tambien esta dentro de "180 grit"
-    d = _zona(os.path.join(REFS, "ladson_clcd.dat"), f't="{zona}"')
+    d = _zona(os.path.join(REFS, "ladson_clcd.dat"), zona)
     d = d[d[:, 0] < 17.5]
     return float(np.interp(aoa, d[:, 0], d[:, 1])), float(np.interp(aoa, d[:, 0], d[:, 2]))
 
@@ -108,8 +121,8 @@ def surface_comparison(case_dir: str, turbulencia: str, aoa: float, u_inf: float
 
     modelo = "sst" if turbulencia == SST else "sa"
     s = read_surface(case_dir, u_inf)
-    cp = _zona(os.path.join(REFS, f"tmr_n0012cp_cfl3d_{modelo}.dat"), f"alpha={aoa:g}\"")
-    cf = _zona(os.path.join(REFS, f"tmr_n0012cf_cfl3d_{modelo}.dat"), f"alpha={aoa:g},")
+    cp = _zona(os.path.join(REFS, f"tmr_n0012cp_cfl3d_{modelo}.dat"), f"alpha={aoa:g}")
+    cf = _zona(os.path.join(REFS, f"tmr_n0012cf_cfl3d_{modelo}.dat"), f"alpha={aoa:g}, upper surface")
     k = int(np.argmin(cp[:, 0]))
     a, b = cp[:k + 1][::-1], cp[k:]
     if np.interp(0.1, a[:, 0], a[:, 1]) > np.interp(0.1, b[:, 0], b[:, 1]):
