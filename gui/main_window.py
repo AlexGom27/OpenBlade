@@ -429,6 +429,10 @@ class MainWindow(QMainWindow):
         ultimo = None
         reenviar = []
         ajenos = []
+        sin_dueno = []
+        # Un trabajo anterior a esto no tiene archivo de dueno. Si hay una campana en la
+        # linea de ordenes, reenviarlo podria duplicar el paquete: se avisa y no se toca.
+        otro_cli = owner.hay_cli_vivo()
         for job in load_jobs()[-200:]:
             self.dispatcher.jobs[job.id] = job
             self.jobs_panel.add_job(job)
@@ -441,6 +445,9 @@ class MainWindow(QMainWindow):
                 ajenos.append((job, dueno))
                 continue
             if job.state == PENDIENTE or (job.state in ACTIVOS and not job.remote_dir):
+                if otro_cli and owner.leer(job) is None:
+                    sin_dueno.append(job)
+                    continue
                 # Se cerro la ventana antes de que saliera de esta maquina: vuelve a la cola.
                 job.state, job.step = PENDIENTE, ""
                 job.save()
@@ -454,6 +461,12 @@ class MainWindow(QMainWindow):
                      f"Se pueden ver, pero para detenerlos hay que usar el proceso que los lanzó.")
             for job, dueno in ajenos:
                 self.log(f"   {job.label}: {owner.describir(dueno)}")
+        if sin_dueno:
+            self.log(f"⏸️ Hay una campaña viva en la línea de órdenes y {len(sin_dueno)} paquete(s) "
+                     f"antiguos sin dueño anotado: no se reenvían, por si son suyos. Ciérrala o "
+                     f"espera a que acabe, y vuelve a abrir la ventana.")
+            for job in sin_dueno:
+                self.log(f"   {job.label}: {job.state}")
         if reenviar:
             self.log(f"📤 {len(reenviar)} paquetes no habían salido de esta computadora: vuelven a la cola.")
         for job in reenviar:

@@ -136,6 +136,32 @@ def de_otro(job) -> Optional[Dict[str, Any]]:
     return d
 
 
+def hay_cli_vivo() -> bool:
+    """Si hay un `python3 -m core.cli ...` vivo que pueda estar llevando trabajos.
+
+    Los trabajos lanzados antes de que existiera el archivo de dueno no lo
+    tienen. Con un proceso de la linea de ordenes vivo no se puede saber si
+    alguno es suyo, asi que se avisa en vez de reenviar a ciegas.
+    """
+    if os.name == "nt":
+        return False
+    try:
+        salida = subprocess.run(["ps", "-Ao", "pid=,command="], capture_output=True,
+                                text=True, timeout=10, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    for linea in salida.stdout.splitlines():
+        if "core.cli" not in linea:
+            continue
+        try:
+            pid = int(linea.split(None, 1)[0])
+        except (IndexError, ValueError):
+            continue
+        if pid != os.getpid() and _existe(pid):
+            return True
+    return False
+
+
 def describir(dueno: Dict[str, Any]) -> str:
     return f"lo lleva otro proceso (pid {dueno.get('pid')} en {dueno.get('maquina')})"
 

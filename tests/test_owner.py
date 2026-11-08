@@ -193,3 +193,46 @@ def test_a_job_owned_by_another_process_is_not_run(monkeypatch):
     finally:
         otro.kill()
         otro.wait()
+
+
+def test_a_job_with_no_owner_file_is_left_alone_while_a_cli_campaign_runs(monkeypatch):
+    """Lo lanzado antes de este arreglo no tiene dueno: con una campana viva, no se reenvia."""
+    job = new_job(case_params(aoa=6.0), "u@h", 2)
+    assert owner.leer(job) is None                  # trabajo antiguo, sin archivo de dueno
+    monkeypatch.setattr(owner, "hay_cli_vivo", lambda: True)
+
+    from gui import main_window as mw
+
+    ventana = mw.MainWindow.__new__(mw.MainWindow)
+    enviados, seguidos, dichos = [], [], []
+    ventana.dispatcher = type("D", (), {
+        "jobs": {}, "submit": enviados.append, "attach": seguidos.append})()
+    ventana.jobs_panel = type("P", (), {"add_job": staticmethod(lambda _j: None)})()
+    ventana.log = dichos.append
+    ventana._sync_machines = lambda: None
+    ventana._select_job = lambda _i: None
+
+    ventana._restore_jobs()
+
+    assert job.id not in {j.id for j in enviados}
+    assert any("sin dueño anotado" in t for t in dichos)
+
+
+def test_without_a_cli_campaign_an_old_pending_job_is_resent(monkeypatch):
+    job = new_job(case_params(aoa=6.0), "u@h", 2)
+    monkeypatch.setattr(owner, "hay_cli_vivo", lambda: False)
+
+    from gui import main_window as mw
+
+    ventana = mw.MainWindow.__new__(mw.MainWindow)
+    enviados = []
+    ventana.dispatcher = type("D", (), {
+        "jobs": {}, "submit": enviados.append, "attach": staticmethod(lambda _j: None)})()
+    ventana.jobs_panel = type("P", (), {"add_job": staticmethod(lambda _j: None)})()
+    ventana.log = lambda _t: None
+    ventana._sync_machines = lambda: None
+    ventana._select_job = lambda _i: None
+
+    ventana._restore_jobs()
+
+    assert job.id in {j.id for j in enviados}
