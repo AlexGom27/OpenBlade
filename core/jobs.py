@@ -24,7 +24,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from core import paths
+from core import owner, paths
 from core.remote_runner import FichaDistinta, LogParser, RemoteError, RemoteJob
 
 PENDIENTE = "pendiente"
@@ -442,6 +442,14 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
 
     runner = None
     try:
+        # Solo un proceso por trabajo: si otro lo lleva, no se toca y se avisa.
+        try:
+            owner.reclamar(job)
+        except owner.OwnerError as e:
+            # El job.json es del proceso que si lo lleva: aqui no se escribe nada.
+            job.error = str(e)
+            ev.log(job, f"⏸️ {e}. No se toca.")
+            return
         if not job.remote_dir:
             job.started = time.time()
             cambia(MALLANDO)
@@ -531,6 +539,9 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
         job.finished = time.time()
         ev.log(job, f"❌ {job.error}")
         cambia(FALLIDO)
+    finally:
+        # Cerrado el trabajo, el que venga detras (o una ventana al reabrir) puede tomarlo.
+        owner.liberar(job)
 
 
 @dataclass

@@ -17,7 +17,7 @@ from .plots import ResidualPlot, AeroPlot, PressurePlot
 from .workers import MeshWorker
 from .jobs_panel import JobsPanel
 
-from core import paths
+from core import owner, paths
 from core.geometry import NacaGeometry
 from core.jobs import (ACTIVOS, CORRIENDO, DETENIDO, Dispatcher, Events, FINALES, FALLIDO, LOCAL,
                        PENDIENTE, ensure_mesh, load_jobs, new_job, profile_name)
@@ -421,22 +421,39 @@ class MainWindow(QMainWindow):
         self.dispatcher.submit(job)
 
     def _restore_jobs(self) -> None:
-        """Al abrir: lista lo anterior y vuelve a seguir lo que sigue corriendo."""
+        """Al abrir: lista lo anterior y retoma solo lo que no lleva otro proceso.
+
+        La linea de comandos usa el mismo directorio de trabajos. Si la ventana
+        reenviara lo que ya esta en su cola, el paquete saldria dos veces.
+        """
         ultimo = None
         reenviar = []
+        ajenos = []
         for job in load_jobs()[-200:]:
+            self.dispatcher.jobs[job.id] = job
+            self.jobs_panel.add_job(job)
+            ultimo = job
+            if job.state in FINALES:
+                continue
+            dueno = owner.de_otro(job)
+            if dueno is not None:
+                # No se toca: se muestra quien lo lleva y se deja en paz.
+                ajenos.append((job, dueno))
+                continue
             if job.state == PENDIENTE or (job.state in ACTIVOS and not job.remote_dir):
                 # Se cerro la ventana antes de que saliera de esta maquina: vuelve a la cola.
                 job.state, job.step = PENDIENTE, ""
                 job.save()
                 reenviar.append(job)
-            self.dispatcher.jobs[job.id] = job
-            self.jobs_panel.add_job(job)
-            ultimo = job
-            if job.state in ACTIVOS:
+            elif job.state in ACTIVOS:
                 self.log(f"🔌 {job.label} seguía en {job.host}: se vuelve a seguir.")
                 self.dispatcher.attach(job)
         self._sync_machines()
+        if ajenos:
+            self.log(f"⏸️ {len(ajenos)} trabajos los lleva otro proceso: no se tocan. "
+                     f"Se pueden ver, pero para detenerlos hay que usar el proceso que los lanzó.")
+            for job, dueno in ajenos:
+                self.log(f"   {job.label}: {owner.describir(dueno)}")
         if reenviar:
             self.log(f"📤 {len(reenviar)} paquetes no habían salido de esta computadora: vuelven a la cola.")
         for job in reenviar:

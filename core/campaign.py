@@ -18,6 +18,7 @@ import numpy as np
 
 from core.defaults import DEFAULT_PARAMS, case_params
 from core.gci import study_from_levels
+from core import owner
 from core.jobs import (DESCARGANDO, DETENIDO, Dispatcher, Events, FALLIDO, FINALES, Job, Machine, load_jobs,
                        mesh_key, new_job)
 
@@ -260,14 +261,23 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
         return new_job(q, label=etiqueta)
 
     def enviar(trabajos: Iterable[Job]) -> None:
+        # Lo que ya lleva otro proceso desde aqui no se toca: dos duenos del mismo
+        # paquete lo mandan dos veces y escriben el mismo job.json.
+        ajenos = [j for j in trabajos if j.state not in FINALES and owner.de_otro(j) is not None]
+        for j in ajenos:
+            d.events.log(j, f"⏸️ {j.label}: {owner.describir(owner.leer(j))}. No se toca.")
+        if ajenos:
+            d.events.log(ajenos[0], f"⏸️ {len(ajenos)} trabajo(s) los lleva otro proceso: "
+                                    f"se dejan como estan; su resultado lo pondra quien los lanzó.")
+        propios = [j for j in trabajos if j not in ajenos]
         # Lo que sigue en su maquina ocupa su sitio antes de repartir lo demas.
-        for j in trabajos:
+        for j in propios:
             if j.remote_dir and j.state not in FINALES:
                 d.attach(j)
             elif j.state in FINALES:
                 d.register(j)
         # Primero lo rapido: la polar queda lista aunque las mallas finas tarden horas.
-        for j in sorted(trabajos, key=lambda j: int(j.params.get("grid_level", 2))):
+        for j in sorted(propios, key=lambda j: int(j.params.get("grid_level", 2))):
             if not j.remote_dir and j.state not in FINALES:
                 d.submit(j)
 
