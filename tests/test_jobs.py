@@ -572,3 +572,55 @@ def test_transition_runs_and_grid_levels_say_what_they_are():
     lm = new_job(case_params(aoa=2.0, reynolds=2.4e6, turbulence="k-Omega SST-LM Transición (RAS)"))
     assert lm.label == "0012_a2.0_Re2.4e6_LM"
     assert profile_name(case_params(profile_type="Archivo Custom (.txt, .csv)", file_path="/x/s809.dat")) == "s809"
+
+
+def test_jobs_sent_together_are_spread_before_they_start_meshing(monkeypatch):
+    """Un trabajo recien asignado sigue 'pendiente' hasta que su hilo malla: tambien ocupa.
+
+    Antes, ocho paquetes enviados de una vez iban todos a la primera maquina de la lista
+    y la otra se quedaba sin nada (campana del 2026-11-07).
+    """
+    soltar = threading.Event()
+    hosts = []
+
+    def lento(job, ev, should_detach=lambda: False, registrar=lambda _: None, poll_s=0,
+              stop_on_divergence=True):
+        hosts.append(job.host)
+        soltar.wait(5)          # sin cambiar de estado: como mientras se prepara la malla
+        job.state = TERMINADO
+
+    monkeypatch.setattr(J, "run_job", lento)
+    d = Dispatcher(poll_s=0)
+    d.set_machines([Machine("a@h", 9, 1), Machine("b@h", 10, 1)])
+    for a in range(8):
+        d.submit(new_job(case_params(aoa=float(a))))
+    time.sleep(0.3)
+    assert sorted(hosts.count(h) for h in ("a@h", "b@h")) == [4, 4]
+    soltar.set()
+    assert d.wait(5)
+
+
+def test_stop_jobs_stops_running_and_queued_jobs_on_their_server(monkeypatch):
+    from core.cli import stop_jobs
+    from core.jobs import DETENIDO
+    detenidos = []
+
+    class Remoto:
+        def __init__(self, job):
+            self.job = job
+
+        def detener(self):
+            detenidos.append(self.job.id)
+
+    monkeypatch.setattr(J, "make_runner", lambda job: Remoto(job))
+    corre = new_job(case_params(aoa=1.0), "a@h", 4)
+    corre.state, corre.remote_dir = CORRIENDO, "openblade_jobs/x"
+    corre.save()
+    hecho = new_job(case_params(aoa=2.0), "a@h", 4)
+    hecho.state = TERMINADO
+    hecho.save()
+    sin_enviar = new_job(case_params(aoa=3.0), "a@h", 4)
+    elegidos = {j.id: j for j in stop_jobs([corre.id, hecho.id, sin_enviar.id])}
+    assert detenidos == [corre.id]
+    assert elegidos[corre.id].state == DETENIDO and elegidos[sin_enviar.id].state == DETENIDO
+    assert elegidos[hecho.id].state == TERMINADO

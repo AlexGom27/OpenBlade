@@ -158,6 +158,34 @@ def _versiones_distintas() -> List[str]:
     return distintos
 
 
+def stop_jobs(patrones: List[str]) -> List[Job]:
+    """Detiene los trabajos cuyo id empieza por alguno de los patrones, corran o esperen en cola.
+
+    Es lo que hace el boton de detener de la ventana: en el servidor se manda TERM al grupo
+    de procesos de ese trabajo, y uno que espera ranura sale de la cola sin correr.
+    """
+    from core.jobs import DETENIDO, FINALES, LOCAL, load_jobs, make_runner
+    elegidos = [j for j in load_jobs() if any(j.id.startswith(p) for p in patrones)]
+    for j in elegidos:
+        if j.state in FINALES:
+            continue
+        if j.remote_dir and j.host != LOCAL:
+            make_runner(j).detener()
+        j.state = DETENIDO
+        j.save()
+    return elegidos
+
+
+def cmd_detener(args: argparse.Namespace) -> int:
+    elegidos = stop_jobs(args.trabajos)
+    if not elegidos:
+        print("Ningún trabajo empieza así")
+        return 1
+    for j in elegidos:
+        print(f"  {j.id}: {j.state}")
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Comprueba que todo esta listo para calcular, sin lanzar nada."""
     from core import paths
@@ -237,6 +265,10 @@ def main(argv: List[str] = None) -> int:
     polar.add_argument("--salida", default="polar", help="carpeta de resultados")
     polar.add_argument("ajustes", nargs="*", help="clave=valor sobre los valores por defecto")
     polar.set_defaults(fn=cmd_polar)
+
+    detener = sub.add_parser("detener", help="detiene trabajos en su maquina, corran o esperen en cola")
+    detener.add_argument("trabajos", nargs="+", help="id del trabajo o su comienzo (p. ej. la fecha de la campana)")
+    detener.set_defaults(fn=cmd_detener)
 
     args = p.parse_args(argv)
     return args.fn(args)

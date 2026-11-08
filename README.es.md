@@ -38,7 +38,7 @@ Lo que se ha validado, con qué tolerancias y lo que no cumple está en [docs/VA
 
 | Software | Versión mínima | Propósito |
 |---|---|---|
-| Python | 3.10+ | Motor de la aplicación |
+| Python | 3.11+ | Motor de la aplicación |
 | Docker Desktop | 4.0+ | Ejecutar OpenFOAM en Local sin compilar (no hace falta si solo se usan servidores) |
 | Git | 2.0+ | Descargar el código fuente |
 
@@ -229,7 +229,7 @@ python3 -m core.cli banco --maquinas usuario@a:10:1,usuario@b:8:1 --salida carpe
 python3 -m core.cli polar --maquinas usuario@a:10:1 --angulos 0,4,8 --gci 0,8 --urans reynolds=6e6
 ```
 
-`polar` lanza un paquete por ángulo, añade un GCI de tres mallas en los ángulos de `--gci` y deja `polar.csv`, `polar.json` y `polar.png`. Con `--urans` repite en transitorio los ángulos que no convergen, arrancando de su campo estacionario. Con `--continuar` retoma una campaña interrumpida: lo terminado no se repite y lo que sigue en su máquina se recoge.
+`polar` lanza un paquete por ángulo, añade un GCI de tres mallas en los ángulos de `--gci` y deja `polar.csv`, `polar.json` y `polar.png`. Con `--urans` repite en transitorio los ángulos que no convergen, arrancando de su campo estacionario. Con `--continuar` retoma una campaña interrumpida: lo terminado no se repite y lo que sigue en su máquina se recoge. `python3 -m core.cli detener <id o su comienzo>` detiene trabajos en su máquina, corran o esperen en cola, como el botón de detener de la ventana.
 
 Lo enviado sigue en los servidores aunque esta computadora se duerma, se cierre el programa o se cierre la sesión; al abrir de nuevo, los trabajos aparecen y se descargan. Dos cosas dependen todavía de esta computadora: la parada temprana (sin conexión, el cálculo llega al tope de iteraciones) y los niveles finos de un estudio de malla.
 

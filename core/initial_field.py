@@ -32,7 +32,7 @@ def latest_fields(case_dir: str) -> Optional[str]:
     return os.path.join(case_dir, max(tiempos)[1]) if tiempos else None
 
 
-def _expand(interior: str, nivel: int) -> str:
+def _expand(interior: str, nivel: int, refinar_cuerda: int = 0) -> str:
     """El interior de un campo de la malla inmediatamente mas gruesa, en la de este nivel.
 
     Las mallas son anidadas y sus celdas van por la rejilla, con i como indice rapido: cada
@@ -46,7 +46,7 @@ def _expand(interior: str, nivel: int) -> str:
     inicio = lineas.index("(")
     fin = len(lineas) - 1 - lineas[::-1].index(")")
     valores = lineas[inicio + 1:fin]
-    ni, nj = cells_of_level(nivel)
+    ni, nj = cells_of_level(nivel, refinar_cuerda)
     ni_g, nj_g = ni // 2, nj // 2
     if len(valores) != ni_g * nj_g:
         raise ValueError(f"El campo tiene {len(valores)} celdas y la malla gruesa {ni_g * nj_g}")
@@ -90,6 +90,7 @@ def start_from(origen: str, case_dir: str, msh_file: str, params: Optional[dict]
         if hallado is None or _INTERIOR.search(texto) is None:
             raise ValueError(f"No se encontró internalField en {campo}")
         with open(ruta, "w") as f:
-            interior = hallado.group(0) if nivel is None else _expand(hallado.group(0), nivel)
+            interior = hallado.group(0) if nivel is None else _expand(
+                hallado.group(0), nivel, int((params or {}).get("chord_refine", 0) or 0))
             f.write(_INTERIOR.sub(lambda _: interior, texto, count=1))
     return os.path.basename(tiempo)

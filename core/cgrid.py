@@ -339,10 +339,14 @@ def contour_from_params(params: Dict) -> Tuple[np.ndarray, np.ndarray, np.ndarra
     return naca4(str(params.get("naca", "0012")))
 
 
-def cells_of_level(nivel: int) -> Tuple[int, int]:
-    """Celdas de la rejilla de un nivel, a lo largo del contorno y normales a la pared."""
+def cells_of_level(nivel: int, refinar_cuerda: int = 0) -> Tuple[int, int]:
+    """Celdas de la rejilla de un nivel, a lo largo del contorno y normales a la pared.
+
+    `refinar_cuerda` multiplica solo las de lo largo del contorno, como en generate_cgrid.
+    """
     factor = 2.0 ** (nivel - NIVEL_BASE)
-    return int(2 * (CARAS_POR_LADO + CELDAS_ESTELA) * factor), int(CELDAS_NORMAL * factor)
+    a_lo_largo = 2.0 ** (nivel + int(refinar_cuerda) - NIVEL_BASE)
+    return int(2 * (CARAS_POR_LADO + CELDAS_ESTELA) * a_lo_largo), int(CELDAS_NORMAL * factor)
 
 
 def first_cell_of(params: Dict) -> float:

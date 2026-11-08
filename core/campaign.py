@@ -65,6 +65,11 @@ def grid_study_cases(params: Dict[str, Any], niveles: Sequence[int] = NIVELES_GC
     Cada nivel fino pide del orden del doble de iteraciones que el anterior: el tope se
     escala para que el mas fino no se quede a medias.
     """
+    from core.cgrid import NIVEL_MAX
+    refinar = int(params.get("chord_refine", 0) or 0)
+    if max(niveles) + refinar > NIVEL_MAX:
+        raise ValueError(f"Un estudio de malla hasta el nivel {max(niveles)} con la cuerda refinada {refinar} "
+                         f"veces pasa del nivel {NIVEL_MAX}: usa chord_refine={NIVEL_MAX - max(niveles)} o menos")
     tope = int(params.get("max_iters", DEFAULT_PARAMS["max_iters"]))
     return [dict(params, mesher="cgrid", grid_level=int(n), max_iters=int(tope * 2.0 ** (int(n) - NIVEL_BASE)))
             for n in sorted(niveles)]
@@ -316,6 +321,14 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
             "rans_sin_converger": sorted(transitorios)}
 
 
+def _nombre_perfil(base: Dict[str, Any]) -> str:
+    """Nombre del perfil para la exportacion: 'NACA 0012' o el del archivo de coordenadas."""
+    from core.jobs import profile_name
+    completo = case_params(**base)
+    nombre = profile_name(completo)
+    return nombre if "Custom" in completo.get("profile_type", "") else f"NACA {nombre}"
+
+
 def write_polar_report(resultado: Dict[str, Any], carpeta: str) -> str:
     """polar.json, polar.csv, polar_xfoil.txt y una figura de Cl y Cd con su banda de malla."""
     import matplotlib
@@ -330,7 +343,7 @@ def write_polar_report(resultado: Dict[str, Any], carpeta: str) -> str:
     write_polar_csv(resultado["filas"], os.path.join(carpeta, "polar.csv"))
     base = resultado.get("base") or {}
     write_polar_xfoil(resultado["filas"], os.path.join(carpeta, "polar_xfoil.txt"),
-                      f"NACA {base.get('naca')}", float(base.get("reynolds", 1e6)))
+                      _nombre_perfil(base), float(base.get("reynolds", 1e6)))
 
     filas = [f for f in resultado["filas"] if f["cl"] is not None]
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.5), constrained_layout=True)

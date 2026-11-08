@@ -43,7 +43,7 @@ What is validated, with which tolerances, and what does not pass is in [docs/VAL
 
 | Software | Version | Why |
 |---|---|---|
-| Python | 3.10 or newer | The application |
+| Python | 3.11 or newer | The application |
 | Docker | Desktop 4.0+ or Engine | OpenFOAM on your own computer. Not needed if you only use servers |
 | Git | 2.0+ | To get the code |
 | rsync | any | To send packages to servers |
@@ -167,7 +167,7 @@ Checks versions, disk space, Docker, access to each server and OpenFOAM, without
 python3 -m core.cli polar --maquinas user@a:8:2,user@b:8:2 --angulos 0,4,8,12 --gci 0,8 reynolds=6e6
 ```
 
-One package per angle, a three-level GCI at the angles in `--gci`, and `polar.csv`, `polar.json`, `polar.png` and `polar_xfoil.txt` as output. `--continuar` resumes an interrupted campaign.
+One package per angle, a three-level GCI at the angles in `--gci`, and `polar.csv`, `polar.json`, `polar.png` and `polar_xfoil.txt` as output. `--continuar` resumes an interrupted campaign. `python3 -m core.cli detener <id or its start>` stops jobs on their server, running or queued, as the stop button of the window does.
 
 ```bash
 python3 -m core.cli banco --maquinas user@a:8:2 --salida bench

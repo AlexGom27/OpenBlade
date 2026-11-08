@@ -297,3 +297,20 @@ def test_without_transition_model_the_xfoil_export_stays_fully_turbulent(tmp_pat
     ruta = tmp_path / "p.txt"
     write_polar_xfoil(polar_table([trabajo()]), str(ruta), "NACA 0012", 6e6)
     assert "xtrf =   0.000" in ruta.read_text()
+
+
+def test_a_grid_study_beyond_the_finest_level_is_refused_before_launching():
+    import pytest
+    from core.campaign import grid_study_cases
+    from core.defaults import case_params
+    with pytest.raises(ValueError, match="chord_refine=1"):
+        grid_study_cases(case_params(chord_refine=2))
+    assert len(grid_study_cases(case_params(chord_refine=1))) == 3
+
+
+def test_the_xfoil_export_names_the_profile(tmp_path):
+    from core.campaign import _nombre_perfil
+    assert _nombre_perfil({"reynolds": 6e6}) == "NACA 0012"
+    assert _nombre_perfil({"naca": "4412"}) == "NACA 4412"
+    assert _nombre_perfil({"profile_type": "Archivo Custom (.txt, .csv)",
+                           "file_path": "/x/naca63-3-418_abbott.dat"}) == "naca63-3-418_abbott"

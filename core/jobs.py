@@ -598,7 +598,10 @@ class Dispatcher:
         Lo que se descarga ya no cuenta: el servidor termino con ello. Contarlo mandaba
         todo a la otra maquina mientras esta, libre, solo enviaba resultados.
         """
-        return sum(1 for j in self.jobs.values() if j.host == host and j.state in OCUPAN
+        # Un trabajo recien asignado aun esta "pendiente" hasta que su hilo empieza a mallar:
+        # tambien cuenta. Sin esto, todo lo enviado de una vez caia en la primera maquina.
+        return sum(1 for j in self.jobs.values() if j.host == host
+                   and j.state not in FINALES and j.state != DESCARGANDO
                    and (j.id in self._hilos or j.remote_dir))
 
     def _maquina_libre(self, job: Job) -> Optional[str]:

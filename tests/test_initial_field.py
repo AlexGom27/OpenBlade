@@ -114,3 +114,16 @@ def test_expand_refuses_a_field_of_another_size():
     with pytest.raises(ValueError, match="celdas"):
         _expand("internalField   nonuniform List<scalar> \n2\n(\n1\n2\n)\n;", 2)
     assert _expand("internalField   uniform 0;", 2) == "internalField   uniform 0;"
+
+
+def test_a_coarser_field_with_chord_refinement_is_expanded_too():
+    """Estudio de malla con la cuerda refinada: el nivel 1 x4 tiene 4 veces mas celdas a lo largo."""
+    from core.cgrid import cells_of_level, generate_cgrid, naca4
+    from core.initial_field import _expand
+    assert cells_of_level(1, 2) == (896, 64) and cells_of_level(2, 2) == (1792, 128)
+    x, _ = generate_cgrid(naca4("0012"), 5e-6, 1, 50.0, refinar_cuerda=2)
+    assert (x.shape[0] - 1, x.shape[1] - 1) == cells_of_level(1, 2)
+    n = 896 * 64
+    interior = ("internalField   nonuniform List<scalar> \n%d\n(\n" % n + "\n".join("1" for _ in range(n))
+                + "\n)\n;")
+    assert _expand(interior, 2, 2).split("\n")[1] == str(4 * n)
