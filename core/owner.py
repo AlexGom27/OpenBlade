@@ -17,14 +17,21 @@ En ese caso se trata como libre y quien lo retoma lo anota.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import re
 import socket
 import subprocess
 import time
 from typing import Any, Dict, Optional
 
 ARCHIVO = "dueno.json"
+# Subcomandos que llevan trabajos: son los unicos que pueden tener uno en curso.
+LLEVAN_TRABAJOS = ("polar", "banco", "control")
+CANDADO = "dueno.lock"
+CANDADO_VIEJO = 30.0      # s: mas que esto dentro de la seccion critica = proceso muerto
+ESPERA_CANDADO = 2.0      # s: lo que se espera a que el otro acabe de anotar
 
 
 def _maquina() -> str:
@@ -126,12 +133,15 @@ def leer(job) -> Optional[Dict[str, Any]]:
     return d if isinstance(d, dict) else None
 
 
+def es_mio(dueno: Optional[Dict[str, Any]]) -> bool:
+    """Si el dueno anotado es este mismo proceso."""
+    return bool(dueno) and dueno.get("pid") == os.getpid() and dueno.get("maquina") == MAQUINA
+
+
 def de_otro(job) -> Optional[Dict[str, Any]]:
     """Dueno vivo que no es este proceso, o None si el trabajo esta libre."""
     d = leer(job)
-    if not d or not vivo(d):
-        return None
-    if d.get("pid") == os.getpid() and d.get("maquina") == MAQUINA:
+    if not d or not vivo(d) or es_mio(d):
         return None
     return d
 
@@ -151,11 +161,20 @@ def hay_cli_vivo() -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
     for linea in salida.stdout.splitlines():
-        if "core.cli" not in linea:
+        trozos = linea.split()
+        if len(trozos) < 3:
+            continue
+        # Tiene que ser un interprete Python: si no, el texto de un `sh -c` o de un editor
+        # que mencione el comando contaria como campana viva.
+        if not os.path.basename(trozos[1]).lower().startswith("python"):
+            continue
+        # `doctor`, `estado` y demas no llevan trabajos: no bloquean nada.
+        resto = " ".join(trozos[1:])
+        if not any(re.search(rf"-m\s+core\.cli\s+{c}\b", resto) for c in LLEVAN_TRABAJOS):
             continue
         try:
-            pid = int(linea.split(None, 1)[0])
-        except (IndexError, ValueError):
+            pid = int(trozos[0])
+        except ValueError:
             continue
         if pid != os.getpid() and _existe(pid):
             return True
@@ -166,17 +185,74 @@ def describir(dueno: Dict[str, Any]) -> str:
     return f"lo lleva otro proceso (pid {dueno.get('pid')} en {dueno.get('maquina')})"
 
 
+@contextlib.contextmanager
+def _candado(job):
+    """Deja pasar a un solo proceso a la vez por comprobar-y-anotar.
+
+    Sin esto, dos procesos que retoman a la vez leen "libre" los dos y los dos se
+    anotan: el paquete corre dos veces, que es justo lo que el archivo de dueno
+    viene a evitar. La seccion critica son microsegundos, asi que un candado de
+    mas de CANDADO_VIEJO segundos es de un proceso que murio dentro de ella.
+    """
+    ruta = os.path.join(job.folder, CANDADO)
+    arranque = time.time()
+    while True:
+        try:
+            fd = os.open(ruta, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            break
+        except FileExistsError:
+            try:
+                viejo = time.time() - os.stat(ruta).st_mtime > CANDADO_VIEJO
+            except OSError:
+                viejo = False        # se libero mientras mirábamos: se reintenta
+            if viejo:
+                try:
+                    os.remove(ruta)
+                except OSError:
+                    pass
+                continue
+            if time.time() - arranque > ESPERA_CANDADO:
+                raise OwnerError(f"{job.label}: otro proceso lo esta tomando ahora mismo") from None
+            time.sleep(0.01)
+    marca = f"{os.getpid()}:{time.time()}"
+    try:
+        os.write(fd, marca.encode())
+        yield
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        # Solo se quita el candado propio: si otro lo dio por muerto y creo el suyo,
+        # el de el no se toca.
+        try:
+            with open(ruta) as f:
+                sigue_siendo_mio = f.read() == marca
+        except OSError:
+            sigue_siendo_mio = False
+        if sigue_siendo_mio:
+            try:
+                os.remove(ruta)
+            except OSError:
+                pass
+
+
 def reclamar(job) -> Dict[str, Any]:
-    """Toma el trabajo. Falla si lo lleva otro proceso vivo."""
-    otro = de_otro(job)
-    if otro is not None:
-        raise OwnerError(f"{job.label}: {describir(otro)}")
-    d = yo()
+    """Toma el trabajo. Falla si lo lleva otro proceso vivo.
+
+    Comprobar y anotar van bajo el candado: si no, dos procesos que retoman a la
+    vez pasan los dos por "libre" y los dos se creen duenos.
+    """
     os.makedirs(job.folder, exist_ok=True)
-    tmp = _ruta(job) + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(d, f)
-    os.replace(tmp, _ruta(job))
+    with _candado(job):
+        otro = de_otro(job)
+        if otro is not None:
+            raise OwnerError(f"{job.label}: {describir(otro)}")
+        d = yo()
+        tmp = _ruta(job) + f".{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, _ruta(job))
     return d
 
 

@@ -444,10 +444,14 @@ class MainWindow(QMainWindow):
                 # No se toca: se muestra quien lo lleva y se deja en paz.
                 ajenos.append((job, dueno))
                 continue
+            # Sin archivo de dueno y con una campana viva, el trabajo puede ser suyo. Vale
+            # igual si aun no habia salido (se reenviaria) que si ya esta corriendo en su
+            # maquina (se le haria attach): en los dos casos habria dos procesos sobre el
+            # mismo paquete, descargando y escribiendo el mismo job.json.
+            if otro_cli and owner.leer(job) is None:
+                sin_dueno.append(job)
+                continue
             if job.state == PENDIENTE or (job.state in ACTIVOS and not job.remote_dir):
-                if otro_cli and owner.leer(job) is None:
-                    sin_dueno.append(job)
-                    continue
                 # Se cerro la ventana antes de que saliera de esta maquina: vuelve a la cola.
                 job.state, job.step = PENDIENTE, ""
                 job.save()
@@ -463,8 +467,8 @@ class MainWindow(QMainWindow):
                 self.log(f"   {job.label}: {owner.describir(dueno)}")
         if sin_dueno:
             self.log(f"⏸️ Hay una campaña viva en la línea de órdenes y {len(sin_dueno)} paquete(s) "
-                     f"antiguos sin dueño anotado: no se reenvían, por si son suyos. Ciérrala o "
-                     f"espera a que acabe, y vuelve a abrir la ventana.")
+                     f"antiguos sin dueño anotado: no se reenvían ni se siguen, por si son suyos. "
+                     f"Ciérrala o espera a que acabe, y vuelve a abrir la ventana.")
             for job in sin_dueno:
                 self.log(f"   {job.label}: {job.state}")
         if reenviar:

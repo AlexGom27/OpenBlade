@@ -263,12 +263,33 @@ def run_polar(machines: List[Machine], base: Dict[str, Any], angulos: Sequence[f
     def enviar(trabajos: Iterable[Job]) -> None:
         # Lo que ya lleva otro proceso desde aqui no se toca: dos duenos del mismo
         # paquete lo mandan dos veces y escriben el mismo job.json.
-        ajenos = [j for j in trabajos if j.state not in FINALES and owner.de_otro(j) is not None]
-        for j in ajenos:
-            d.events.log(j, f"⏸️ {j.label}: {owner.describir(owner.leer(j))}. No se toca.")
+        def _de_otro(j: Job) -> bool:
+            dueno = owner.de_otro(j)
+            if dueno is not None:
+                d.events.log(j, f"⏸️ {j.label}: {owner.describir(dueno)}. No se toca.")
+                return True
+            return False
+
+        ajenos = [j for j in trabajos if j.state not in FINALES and _de_otro(j)]
         if ajenos:
             d.events.log(ajenos[0], f"⏸️ {len(ajenos)} trabajo(s) los lleva otro proceso: "
                                     f"se dejan como estan; su resultado lo pondra quien los lanzó.")
+        # Lo lanzado antes de que existiera el archivo de dueno no lo tiene: con otra campana
+        # viva puede ser suyo. Da igual que aun no haya salido (se reenviaria) que que este
+        # corriendo en su maquina (se le haria attach): en los dos casos dos procesos sobre
+        # el mismo paquete. Se deja en paz, como se hace al abrir la ventana.
+        # Solo los que ya existian: los de esta corrida aun no se han reclamado y son mios.
+        previos_ids = {j.id for j in previos}
+        if owner.hay_cli_vivo():
+            huerfanos = [j for j in trabajos
+                         if j not in ajenos and j.id in previos_ids
+                         and j.state not in FINALES and owner.leer(j) is None]
+            for j in huerfanos:
+                ajenos.append(j)
+                d.events.log(j, f"⏸️ {j.label}: no lleva dueno anotado y hay otra campana viva. No se toca.")
+            if huerfanos:
+                d.events.log(huerfanos[0], f"⏸️ {len(huerfanos)} trabajo(s) antiguos sin dueno anotado: "
+                                           f"no se reenvian ni se siguen, por si los lleva la otra campana.")
         propios = [j for j in trabajos if j not in ajenos]
         # Lo que sigue en su maquina ocupa su sitio antes de repartir lo demas.
         for j in propios:

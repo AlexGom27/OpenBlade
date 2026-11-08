@@ -314,3 +314,88 @@ def test_the_xfoil_export_names_the_profile(tmp_path):
     assert _nombre_perfil({"naca": "4412"}) == "NACA 4412"
     assert _nombre_perfil({"profile_type": "Archivo Custom (.txt, .csv)",
                            "file_path": "/x/naca63-3-418_abbott.dat"}) == "naca63-3-418_abbott"
+
+
+def test_continuar_leaves_alone_a_running_job_with_no_owner_while_another_campaign_runs(monkeypatch):
+    """El mismo hueco que en la ventana, por la linea de ordenes.
+
+    `polar --continuar` retoma lo que quedo a medias. Un trabajo activo con remote_dir
+    y sin dueno.json (anterior al archivo de dueno) caia en `attach`, y en run_job
+    `reclamar` salia bien porque no habia archivo: dos procesos seguian el mismo
+    paquete, descargaban y escribian el mismo job.json.
+    """
+    import core.campaign as C
+    from core import owner
+    from core.jobs import CORRIENDO, load_jobs
+
+    enviados, seguidos, dichos = [], [], []
+
+    class Falso:
+        events = type("E", (), {"log": staticmethod(lambda j, t: dichos.append(t))})()
+
+        def __init__(self, *a, **k):
+            pass
+
+        def set_machines(self, m):
+            pass
+
+        def submit(self, j):
+            enviados.append(j.label)
+
+        def attach(self, j):
+            seguidos.append(j.label)
+
+        def wait(self):
+            pass
+
+        def register(self, j):
+            pass
+
+    monkeypatch.setattr(C, "Dispatcher", Falso)
+    C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0], [])
+    por_etiqueta = {j.label: j for j in load_jobs()}
+    a4 = por_etiqueta["polar_a4"]
+    a4.state, a4.remote_dir = CORRIENDO, "openblade_jobs/x"
+    a4.save()
+    assert owner.leer(a4) is None
+
+    # Otra campana viva en la linea de ordenes: el trabajo puede ser suyo.
+    monkeypatch.setattr(owner, "hay_cli_vivo", lambda: True)
+    enviados.clear()
+    C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0], [], continuar=True)
+    assert "polar_a4" not in seguidos
+    assert "polar_a4" not in enviados
+    assert any("sin due" in t for t in dichos)
+
+
+def test_continuar_still_sends_what_it_created_when_another_campaign_runs(monkeypatch):
+    """No se pasa de freno: lo que esta corrida crea es suyo, aunque no tenga dueno aun."""
+    import core.campaign as C
+    from core import owner
+
+    enviados, seguidos = [], []
+
+    class Falso:
+        def __init__(self, *a, **k):
+            pass
+
+        def set_machines(self, m):
+            pass
+
+        def submit(self, j):
+            enviados.append(j.label)
+
+        def attach(self, j):
+            seguidos.append(j.label)
+
+        def wait(self):
+            pass
+
+        def register(self, j):
+            pass
+
+    monkeypatch.setattr(C, "Dispatcher", Falso)
+    monkeypatch.setattr(owner, "hay_cli_vivo", lambda: True)
+    C.run_polar([], {"reynolds": 6e6}, [2.0, 4.0, 6.0], [])
+    assert enviados == ["polar_a2", "polar_a4", "polar_a6"]
+    assert seguidos == []
