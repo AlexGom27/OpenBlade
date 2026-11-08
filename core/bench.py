@@ -86,7 +86,8 @@ def _zona(ruta: str, nombre: str) -> np.ndarray:
 
 def ladson(aoa: float, zona: str = "80 grit") -> Tuple[float, float]:
     """Cl y Cd de Ladson interpolados al angulo, en el tramo sin perdida."""
-    d = _zona(os.path.join(REFS, "ladson_clcd.dat"), zona)
+    # Titulo completo entre comillas: "80 grit" tambien esta dentro de "180 grit"
+    d = _zona(os.path.join(REFS, "ladson_clcd.dat"), f't="{zona}"')
     d = d[d[:, 0] < 17.5]
     return float(np.interp(aoa, d[:, 0], d[:, 1])), float(np.interp(aoa, d[:, 0], d[:, 2]))
 

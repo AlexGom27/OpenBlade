@@ -22,6 +22,13 @@ def test_ladson_is_interpolated_at_the_angle():
     assert ladson(0.0)[1] == pytest.approx(0.00809, abs=1e-5)
 
 
+def test_ladson_uses_only_the_80_grit_series_and_not_the_180_grit_one():
+    # 13.08° y 14.22° del tramo de 80 granos; con la serie de 180 mezclada, 14° daba Cd 0.01520
+    cl, cd = ladson(14.0)
+    assert cl == pytest.approx(1.3455 + (1.4365 - 1.3455) * (14.0 - 13.08) / (14.22 - 13.08))
+    assert cd == pytest.approx(0.01503 + (0.01625 - 0.01503) * (14.0 - 13.08) / (14.22 - 13.08))
+
+
 def test_reference_files_have_every_angle():
     for modelo in ("sst", "sa"):
         for a in ("alpha=0\"", "alpha=10\"", "alpha=15\""):
