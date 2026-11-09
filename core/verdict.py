@@ -124,6 +124,23 @@ def tramo_final(x: List[float]) -> Tuple[float, float]:
     return sum(x[n - w:]) / w, sum(x[n - 2 * w:n - w]) / w
 
 
+def veredicto_de_series(cd: List[float], cl: List[float], transient: bool = False) -> Verdict:
+    """El veredicto de una corrida a partir de sus series, sin ficha ni case.
+
+    Es el mismo `evaluate`, construido con lo minimo que necesita. Existe para que el
+    vigilante que recorta la corrida juzgue con el criterio del veredicto y no con uno
+    propio: antes aprobaba la deriva con tramos de un decimo de la corrida y el
+    veredicto la medía entre quintos, asi que el recorte cerraba corridas que despues
+    salian NO CONVERGIDO.
+    """
+    if not cd or len(cd) != len(cl):
+        return Verdict(SIN_DATOS, "Sin fuerzas suficientes para juzgar", transient)
+    h = ForceHistory(columns={"Time": [float(i) for i in range(len(cd))],
+                              "Cl": list(cl), "Cd": list(cd), "Cm": [0.0] * len(cd)},
+                     sources=[])
+    return evaluate(h, transient=transient)
+
+
 def _inicio_ventana(h: ForceHistory, transient: bool) -> Tuple[int, int]:
     """Indices donde empiezan la ventana anterior y la evaluada."""
     n = len(h)

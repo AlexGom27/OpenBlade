@@ -157,7 +157,14 @@ def cmd_polar(args: argparse.Namespace) -> int:
                   continuar=args.continuar)
     print("\nFigura:", write_polar_report(r, args.salida))
     for f in r["filas"]:
-        cl = "" if f["cl"] is None else f"Cl {f['cl']:.4f} ± {f['banda_cl'] or 0:.4f}  Cd {f['cd']:.5f} ± {f['banda_cd'] or 0:.5f}"
+        if f["cl"] is None:
+            # Un punto que no converge no da numeros a proposito: darlos sin banda los
+            # haria pasar por buenos. Pero tiene que decir por que, o el resumen mudo
+            # no deja ver si es divergencia, falta de filas o deriva.
+            motivo = f.get("razon") or "sin resultado utilizable"
+            print(f"  α={f['aoa']:6.2f}  {str(f['veredicto']):14s} {motivo}")
+            continue
+        cl = f"Cl {f['cl']:.4f} ± {f['banda_cl'] or 0:.4f}  Cd {f['cd']:.5f} ± {f['banda_cd'] or 0:.5f}"
         cl += "  (oscila con media estable)" if f.get("oscila") else ""
         print(f"  α={f['aoa']:6.2f}  {str(f['veredicto']):14s} {cl}")
     return 0

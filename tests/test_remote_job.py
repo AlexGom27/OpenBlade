@@ -31,6 +31,16 @@ def test_the_server_and_the_mac_agree_on_when_to_stop():
     assert R.TOL_RANGO_CL == v.TOL_RANGO_CL
     assert R.TOL_DERIVA_CD == v.TOL_DERIVA_CD
     assert R.TOL_DERIVA_CL == v.TOL_DERIVA_CL
+    # Las dos miden la deriva con el mismo tramo que el veredicto: un quinto de la
+    # corrida. Con tramos mas cortos una rampa lenta parece quieta y se recorta antes
+    # de tiempo.
+    from core.verdict import FRACCION_TRAMO
+    assert R.FRACCION_TRAMO == FRACCION_TRAMO
+    # Y ademas las dos preguntan al veredicto: el recorte no puede cerrar una corrida
+    # que el juicio final da por NO CONVERGIDA.
+    import inspect
+    for fn in (R._Convergencia.convergio, J._Vigilancia.convergio):
+        assert "veredicto_de_series" in inspect.getsource(fn), fn
 
 
 def _serie(n, cd=0.0088, cl=0.861, ruido_cd=0.0, ruido_cl=0.0):
@@ -91,13 +101,15 @@ def test_the_watcher_cuts_the_run_when_the_forces_settle(tmp_path, monkeypatch):
     (caso / "system" / "controlDict").write_text("endTime         40000;\n")
     monkeypatch.chdir(caso)
 
+    # Deriva al principio y quieto despues: converge en la 13000, como el control real.
+    # La rampa tiene que aplanarse de verdad: con el criterio del veredicto (tramos de
+    # un quinto, no de un decimo) una rampa que sigue bajando no converge nunca.
     lineas = []
     for i in range(14000):
         lineas.append(f"Time = {i}")
-        # Deriva al principio y quieto despues: converge en la 13000, como el control real.
-        cd = 0.0088 + 0.001 * max(0, 11000 - i) / 11000 + 1e-5 * (i % 7)
+        cd = 0.00898 - 0.0001 * min(1.0, i / 8000.0) + 1e-7 * (i % 7)
         lineas.append(f"    Cd: {cd}")
-        lineas.append(f"    Cl: {0.861 + 1e-4 * (i % 5)}")
+        lineas.append(f"    Cl: {0.861 + 1e-5 * (i % 5)}")
     (caso / "run.log").write_text("\n".join(lineas) + "\n")
 
     class Proceso:
@@ -112,7 +124,16 @@ def test_the_watcher_cuts_the_run_when_the_forces_settle(tmp_path, monkeypatch):
 
     monkeypatch.setattr(R.time, "sleep", lambda _s: None)
     R.vigilar_y_parar(Proceso(), 40000)
-    assert "endTime         16000;" in (caso / "system" / "controlDict").read_text()
+    texto = (caso / "system" / "controlDict").read_text()
+    # Se recorta al multiplo fijo que toca; lo que importa es que recorte y que el
+    # veredicto con lo que hay hasta ahi sea aceptable.
+    assert "endTime         4000;" in texto, texto
+
+    from core.verdict import CONVERGIDO, veredicto_de_series
+    v = veredicto_de_series([i and (0.00898 - 0.0001 * min(1.0, i / 8000.0) + 1e-7 * (i % 7))
+                             for i in range(1, 4001)],
+                            [0.861 + 1e-5 * (i % 5) for i in range(1, 4001)])
+    assert v.state == CONVERGIDO, v.reason
 
 
 def test_a_transient_run_is_never_cut(monkeypatch):
@@ -238,3 +259,78 @@ def test_shortening_never_lengthens_through_the_real_run(monkeypatch):
     ordenes.clear()
     RR.RemoteJob.terminar_en(RR.RemoteJob("u@h", "openblade_jobs/x"), 16000)
     assert not any("sed -i" in c for c in ordenes)
+
+
+# --- el recorte no puede dejar un veredicto peor que no recortar ----------------
+
+def _rampa(n, inicio=0.009, paso=1.628e-8):
+    """Cd bajando poco a poco: con tramos de un decimo parece quieto, con quintos no.
+
+    Es la forma de los dos trabajos del 9-nov: 20261109_071444_polar_a0_c8b1 dio
+    0.147 % con el criterio viejo de la vigilancia y 0.405 % con el del veredicto.
+    """
+    return [inicio - paso * i for i in range(n)]
+
+
+def test_the_watcher_never_cuts_a_run_the_verdict_would_reject():
+    """La propiedad que importa: recortar no puede empeorar el juicio final.
+
+    La vigilancia es mas estricta que el veredicto (mismo tramo, tolerancia menor), asi
+    que puede no recortar una corrida que el veredicto habria aceptado; lo que no puede
+    es recortar una que el veredicto rechaza. Antes medía la deriva en tramos de un
+    decimo: aprobaba con 0.147 % lo que el veredicto ve como 0.405 %.
+    """
+    from core.verdict import CONVERGIDO, veredicto_de_series
+
+    for n in (8000, 11000, 13000):
+        cd = _rampa(n)
+        v = R._Convergencia()
+        v.cd, v.cl, v.n = cd, [0.861] * n, n
+        if v.convergio():
+            final = veredicto_de_series(cd[:v.final_previsto()] if v.final_previsto() <= n else cd,
+                                        [0.861] * min(v.final_previsto(), n))
+            assert final.state == CONVERGIDO, (
+                f"a {n} la vigilancia recorto y el veredicto con lo recortado dice "
+                f"{final.state}: {final.reason}")
+
+    # Y con estos datos la vigilancia no recorta donde el veredicto rechaza.
+    cd = _rampa(11000)
+    v = R._Convergencia()
+    v.cd, v.cl, v.n = cd, [0.861] * len(cd), len(cd)
+    assert veredicto_de_series(cd, [0.861] * len(cd)).state != CONVERGIDO
+    assert not v.convergio()
+
+
+def test_a_cut_that_the_verdict_rejects_is_lengthened_and_the_run_goes_on(tmp_path, monkeypatch):
+    """Al llegar al final recortado, si el veredicto no pasa se alarga y se sigue.
+
+    Es la garantia que faltaba: recortar nunca puede empeorar el resultado.
+    """
+    caso = tmp_path / "case"
+    (caso / "system").mkdir(parents=True)
+    (caso / "system" / "controlDict").write_text("endTime         40000;\n")
+    monkeypatch.chdir(caso)
+    # run.log con una serie que el veredicto NO acepta (a partir de ~10000).
+    lineas = []
+    for i in range(1, 12001):
+        lineas += [f"Time = {i}", f"    Cd: {0.009 - 1.628e-8 * i}", "    Cl: 0.861"]
+    (caso / "run.log").write_text("\n".join(lineas) + "\n")
+
+    assert not R.veredicto_pasa(), "la serie de prueba tiene que ser NO CONVERGIDO"
+    # Con el final ya alcanzado y el veredicto en contra, se alarga hasta max_iters.
+    R.alargar_final(11000, 40000)
+    assert "endTime         40000;" in (caso / "system" / "controlDict").read_text()
+
+
+def test_a_cut_that_the_verdict_accepts_is_left_alone(tmp_path, monkeypatch):
+    """Si el veredicto acepta lo recortado, no se toca nada."""
+    caso = tmp_path / "case"
+    (caso / "system").mkdir(parents=True)
+    (caso / "system" / "controlDict").write_text("endTime         4000;\n")
+    monkeypatch.chdir(caso)
+    lineas = []
+    for i in range(1, 4001):
+        lineas += [f"Time = {i}", f"    Cd: {0.00898 - 1e-9 * i + 1e-7 * (i % 7)}", "    Cl: 0.861"]
+    (caso / "run.log").write_text("\n".join(lineas) + "\n")
+    assert R.veredicto_pasa(), "esta serie converge con el criterio del veredicto"
+    assert "endTime         4000;" in (caso / "system" / "controlDict").read_text()

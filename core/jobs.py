@@ -275,8 +275,7 @@ class _Vigilancia:
     MARGEN = 2000
     TOL_RANGO_CD = 0.008
     TOL_RANGO_CL = 0.005
-    # Cambio de la media entre tramos de la corrida (verdict.tramo_final), algo mas estricto
-    # que el del veredicto: una corrida que termina antes de tiempo sale CONVERGIDO.
+    # Mismo tramo que el veredicto (un quinto de la corrida) y tolerancia mas estricta.
     TOL_DERIVA_CD = 0.002
     TOL_DERIVA_CL = 0.001
 
@@ -331,7 +330,14 @@ class _Vigilancia:
         if abs(reciente - previo) / media_cd >= self.TOL_DERIVA_CD:
             return False
         reciente, previo = tramo_final(self.cl)
-        return abs(reciente - previo) < self.TOL_DERIVA_CL * max(abs(media_cl), 0.1)
+        if abs(reciente - previo) >= self.TOL_DERIVA_CL * max(abs(media_cl), 0.1):
+            return False
+        # Ademas de lo anterior, el trabajo tiene que salir CONVERGIDO con el criterio
+        # con el que se juzga al terminar: con solo estas comprobaciones el recorte
+        # cerraba corridas que el veredicto daba por NO CONVERGIDAS.
+        from core.verdict import CONVERGIDO, veredicto_de_series
+        v = veredicto_de_series(self.cd, self.cl)
+        return v.state == CONVERGIDO and not v.oscila
 
 
 # Lo que dice ssh o rsync cuando falla la conexion, no el trabajo
