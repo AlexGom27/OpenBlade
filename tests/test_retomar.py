@@ -102,3 +102,42 @@ def test_a_job_owned_by_another_live_process_is_not_touched(monkeypatch):
     otra_vez = next(j for j in J.load_jobs() if j.id == job.id)
     assert otra_vez.state == FALLIDO
     assert not runner.descargado
+
+
+@pytest.mark.parametrize("si_terminado", [False, True])
+def test_a_package_waiting_for_a_slot_is_not_downloaded(monkeypatch, si_terminado):
+    """En cola.sh el paquete escribe state running con step "en cola".
+
+    Antes caia en la rama del rc: rc ausente se tomaba por 0 e imprimia
+    "terminado; se descarga", sin necesidad de --si-terminado. Descargar eso trae
+    una carpeta a medio preparar y lo da por bueno. Lo que manda es el estado.
+    """
+    job, runner = _un_fallido_como_los_de_hoy(
+        monkeypatch, {"state": "running", "step": "en cola", "rc": None})
+    # run_job se sustituye por un centinela: lo que se prueba es la decision de
+    # descargar, y con el codigo viejo seguiria el paquete hasta el final.
+    seguidos = []
+    monkeypatch.setattr(J, "run_job", lambda j, *a, **k: seguidos.append(j.id))
+    cmd_retomar(Args([job.id], si_terminado=si_terminado))
+    otra_vez = next(j for j in J.load_jobs() if j.id == job.id)
+    assert otra_vez.state == FALLIDO, "se toco un paquete que esperaba ranura"
+    assert not seguidos, "se puso a seguirlo: lo daria por bueno"
+
+
+def test_a_state_we_do_not_know_is_left_alone(monkeypatch):
+    """Un estado nuevo o raro no se descarga por si acaso."""
+    job, runner = _un_fallido_como_los_de_hoy(monkeypatch, {"state": "preparando", "rc": 0})
+    cmd_retomar(Args([job.id], si_terminado=True))
+    otra_vez = next(j for j in J.load_jobs() if j.id == job.id)
+    assert otra_vez.state == FALLIDO
+    assert not runner.descargado
+
+
+def test_a_stopped_run_is_not_downloaded_as_if_it_had_finished(monkeypatch):
+    """stopped es final, pero no es un calculo terminado: se avisa y no se descarga."""
+    job, runner = _un_fallido_como_los_de_hoy(
+        monkeypatch, {"state": "stopped", "step": "solver", "rc": 143})
+    cmd_retomar(Args([job.id], si_terminado=True))
+    otra_vez = next(j for j in J.load_jobs() if j.id == job.id)
+    assert otra_vez.state == FALLIDO
+    assert not runner.descargado

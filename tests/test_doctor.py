@@ -53,3 +53,24 @@ def test_what_the_program_imports_on_demand_is_in_the_requirements():
         lista = f.read()
     for paquete in ("imageio", "imageio-ffmpeg", "reportlab", "pyvistaqt", "gmsh"):
         assert f"{paquete}==" in lista
+
+
+def test_the_message_points_to_the_command_that_exists(monkeypatch, capsys):
+    """Decia «polar --continuar», que no recupera un control ni un banco.
+
+    Desde 692ba49 existe «retomar», que es lo que corresponde y funciona para
+    cualquier campana.
+    """
+    _preparar(monkeypatch, lambda h: {"rsync": True, "python3": True, "openfoam": "/opt",
+                                      "nucleos": 20, "carga": 3.0})
+    from core.defaults import case_params
+    from core.jobs import CORRIENDO, new_job
+
+    j = new_job(case_params(), "u@a", 4)
+    j.state, j.remote_dir = CORRIENDO, "openblade_jobs/x"
+    j.save()
+
+    cli.cmd_doctor(argparse.Namespace(hosts="u@a"))
+    salida = capsys.readouterr().out
+    assert "core.cli retomar" in salida, salida
+    assert "polar --continuar" not in salida, "sigue mandando a la orden vieja"

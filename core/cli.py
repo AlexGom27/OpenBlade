@@ -80,17 +80,42 @@ def cmd_correr(args: argparse.Namespace) -> int:
     return 0 if (job.analysis or {}).get("verdict", {}).get("state") == "CONVERGIDO" else 1
 
 
-def cmd_control(args: argparse.Namespace) -> int:
-    from core.control import run_control
-
-    angulos = tuple(float(a) for a in args.angulos.split(","))
-    r = run_control(args.hosts.split(","), args.procesos, angulos, _Consola())
+def _resumen_control(r: Dict[str, Any]) -> bool:
+    """Imprime las compuertas y dice si alguna falla."""
     falla = False
     for angulo, filas in r["por_angulo"].items():
         print(f"\nα = {angulo:g}")
         for f in filas:
             falla |= not f["ok"]
             print(f"  {f['n']}  {'pasa ' if f['ok'] else 'FALLA'}  {f['compuerta']}: {f['detalle']}")
+    return falla
+
+
+def cmd_control(args: argparse.Namespace) -> int:
+    if args.evaluar:
+        # Solo mirar: no se lanza ni se envia nada.
+        from core.control import ControlIncompleto, evaluar_guardados
+
+        try:
+            r = evaluar_guardados(args.evaluar)
+        except ControlIncompleto as e:
+            print(str(e))
+            return 2
+        falla = _resumen_control(r)
+        if args.salida:
+            with open(args.salida, "w") as f:
+                json.dump(r, f, indent=1, ensure_ascii=False)
+        return 1 if falla else 0
+
+    from core.control import run_control
+
+    hosts = [h for h in args.hosts.split(",") if h]
+    if not hosts:
+        print("Falta --hosts, o usa --evaluar PREFIJO para no lanzar nada")
+        return 2
+    angulos = tuple(float(a) for a in args.angulos.split(","))
+    r = run_control(hosts, args.procesos, angulos, _Consola())
+    falla = _resumen_control(r)
     if args.salida:
         with open(args.salida, "w") as f:
             json.dump(r, f, indent=1, ensure_ascii=False)
@@ -186,6 +211,10 @@ def cmd_detener(args: argparse.Namespace) -> int:
     return 0
 
 
+# Lo que remote_job.py escribe en status.json cuando ya no va a seguir.
+ESTADOS_FINALES_MAQUINA = ("done", "failed", "stopped")
+
+
 def cmd_retomar(args: argparse.Namespace) -> int:
     """Termina y descarga trabajos que se quedaron a medias, sin volver a calcular.
 
@@ -223,12 +252,22 @@ def cmd_retomar(args: argparse.Namespace) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"  {j.id}: no se pudo preguntar a {j.host}: {str(e)[:100]}")
             continue
-        if est.get("state") == "running":
-            if args.si_terminado:
-                print(f"  {j.id}: sigue calculando en {j.host}; se deja")
-                continue
-        elif int(est.get("rc") or 0) != 0:
-            print(f"  {j.id}: en {j.host} falló de verdad (rc {est.get('rc')}): {str(est.get('error'))[:80]}")
+        # Solo se descarga lo que la maquina da por terminado. "running" no lo es: ni
+        # calculando ni esperando ranura en cola.sh, que escribe "en cola" con state
+        # running. Mirar el rc no basta: ausente o 0 no significan terminado.
+        estado = est.get("state")
+        if estado == "done":
+            pass
+        elif estado == "running":
+            print(f"  {j.id}: sigue en {j.host} ({est.get('step') or 'sin paso'}"
+                  f"{', en cola' if est.get('step') == 'en cola' else ''}); se deja")
+            continue
+        elif estado in ESTADOS_FINALES_MAQUINA:
+            print(f"  {j.id}: en {j.host} falló (rc {est.get('rc')}): {str(est.get('error'))[:80]}")
+            continue
+        else:
+            # Un estado que no conocemos no se toca: no vaya a ser una cola.
+            print(f"  {j.id}: {j.host} informa «{estado}», que no es final; se deja")
             continue
         print(f"  {j.id}: terminado en {j.host}; se descarga")
         j.state, j.error, j.finished = "descargando", "", None
@@ -282,7 +321,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"  ----  {s.get('fisicos', s['nucleos'])} núcleos ({s['nucleos']} hilos), carga {s['carga']:.1f}")
     a_medias = [j.label for j in load_jobs() if j.state not in FINALES]
     if a_medias:
-        print(f"Trabajos a medias: {len(a_medias)}. Se retoman al abrir la ventana, o con polar --continuar.")
+        print(f"Trabajos a medias: {len(a_medias)}. Se retoman al abrir la ventana, "
+              f"o con «python3 -m core.cli retomar <id> --si-terminado».")
     print("Todo listo." if not problemas else f"{problemas} problema(s).")
     return 1 if problemas else 0
 
@@ -303,9 +343,11 @@ def main(argv: List[str] = None) -> int:
     correr.set_defaults(fn=cmd_correr)
 
     control = sub.add_parser("control", help="caso de control con sus compuertas")
-    control.add_argument("--hosts", required=True, help="maquinas separadas por comas")
+    control.add_argument("--hosts", default="", help="maquinas separadas por comas (no hace falta con --evaluar)")
     control.add_argument("--procesos", type=int, default=8)
     control.add_argument("--angulos", default="0,8")
+    control.add_argument("--evaluar", default="", metavar="PREFIJO",
+                         help="solo evaluar una campana ya calculada (p. ej. 20261108_174028), sin lanzar nada")
     control.add_argument("--salida", default="", help="JSON con el resultado")
     control.set_defaults(fn=cmd_control)
 

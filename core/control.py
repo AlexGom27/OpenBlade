@@ -69,6 +69,54 @@ def run_control(hosts: List[str], nproc: int = 8, angulos: Tuple[float, ...] = (
             "trabajos": {f"{a:g}@{h}": j.id for (a, h), j in trabajos.items()}}
 
 
+def evaluar_guardados(prefijo: str) -> Dict[str, Any]:
+    """Las compuertas de una campana de control ya calculada, sin lanzar nada.
+
+    Repetir `control` recalcula los paquetes: no hace falta para volver a mirar unos
+    resultados que ya estan descargados. Aqui se cargan los trabajos de esa campana y
+    se evaluan igual, agrupados por angulo y por maquina.
+    """
+    from core.jobs import FINALES, load_jobs
+
+    todos = [j for j in load_jobs() if j.id.startswith(prefijo) and j.label.startswith("control_a")]
+    if not todos:
+        raise ControlIncompleto(f"Ningún trabajo de control empieza por {prefijo}")
+
+    # angulo y maquina salen de la etiqueta: control_a8_100.85.66.123
+    por_angulo: Dict[float, Dict[str, Job]] = {}
+    for j in todos:
+        try:
+            _, angulo_txt, host = j.label.split("_", 2)
+            angulo = float(angulo_txt.lstrip("a"))
+        except (ValueError, IndexError):
+            raise ControlIncompleto(f"{j.id}: no se puede leer el ángulo de «{j.label}»") from None
+        por_angulo.setdefault(angulo, {})[host] = j
+
+    faltan = []
+    for angulo, trabajos in sorted(por_angulo.items()):
+        if len(trabajos) < 2:
+            faltan.append(f"α={angulo:g}: solo {len(trabajos)} máquina(s) ({', '.join(trabajos)})")
+        for host, j in sorted(trabajos.items()):
+            if j.state not in FINALES:
+                faltan.append(f"α={angulo:g} en {host}: {j.state}")
+            elif not j.analysis:
+                faltan.append(f"α={angulo:g} en {host}: sin resultado descargado ({j.state})")
+    if faltan:
+        raise ControlIncompleto("Faltan paquetes por terminar o descargar:\n  " +
+                                "\n  ".join(faltan) +
+                                "\nSe recuperan con: python3 -m core.cli retomar <id> --si-terminado")
+
+    return {"por_angulo": {a: evaluate_gates(a, [trabajos[h] for h in sorted(trabajos)])
+                           for a, trabajos in sorted(por_angulo.items())},
+            "trabajos": {f"{a:g}@{h}": j.id
+                         for a, trabajos in sorted(por_angulo.items())
+                         for h, j in sorted(trabajos.items())}}
+
+
+class ControlIncompleto(RuntimeError):
+    """No estan todos los paquetes de la campana, o les falta el resultado."""
+
+
 def evaluate_gates(angulo: float, trabajos: List[Job]) -> List[Dict[str, Any]]:
     """Las compuertas de un angulo, a partir de lo que dejaron sus trabajos."""
     filas: List[Dict[str, Any]] = []
