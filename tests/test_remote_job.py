@@ -41,6 +41,20 @@ def test_the_server_and_the_mac_agree_on_when_to_stop():
     import inspect
     for fn in (R._Convergencia.convergio, J._Vigilancia.convergio):
         assert "veredicto_de_series" in inspect.getsource(fn), fn
+    # El vigilante del servidor lleva el veredicto portado a mano (en el servidor no
+    # existe el paquete core). Sus constantes tienen que ser las de core.verdict.
+    from core import verdict as V
+    assert R.VENTANA == V.VENTANA
+    assert R.V_MIN_FILAS == V.MIN_FILAS
+    assert R.V_ARRANQUE == V.ARRANQUE
+    assert R.V_TOL_RANGO == V.TOL_RANGO
+    assert R.V_TOL_DERIVA == V.TOL_DERIVA
+    assert R.V_TOL_DERIVA_CL == V.TOL_DERIVA_CL
+    assert R.V_CL_REF == V.CL_REF
+    assert R.V_TOL_CL_ABS == V.TOL_CL_ABS
+    assert R.V_TOL_CM_ABS == V.TOL_CM_ABS
+    assert R.V_CL_IMPOSIBLE == V.CL_IMPOSIBLE
+    assert R.V_CD_IMPOSIBLE == V.CD_IMPOSIBLE
 
 
 def _serie(n, cd=0.0088, cl=0.861, ruido_cd=0.0, ruido_cl=0.0):
@@ -334,3 +348,178 @@ def test_a_cut_that_the_verdict_accepts_is_left_alone(tmp_path, monkeypatch):
     (caso / "run.log").write_text("\n".join(lineas) + "\n")
     assert R.veredicto_pasa(), "esta serie converge con el criterio del veredicto"
     assert "endTime         4000;" in (caso / "system" / "controlDict").read_text()
+
+
+# --- el vigilante del servidor, de verdad, sin OpenBlade -------------------------
+# Estas pruebas ejecutan remote_job.py en un subproceso con `python3 -I`, desde una
+# carpeta temporal donde no existe el paquete core: es la unica forma de ver lo que
+# pasa en el servidor. Con core en el path, un `from core.verdict import ...` que alli
+# falla pasaria desapercibido, que es como se colo el defecto.
+
+def _copiar_para_servidor(destino):
+    """Deja remote_job.py solo, como lo deja el envio al servidor."""
+    import shutil
+    import pathlib
+    origen = pathlib.Path(R.__file__).resolve()
+    destino.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(origen, destino / "remote_job.py")
+    return destino / "remote_job.py"
+
+
+def _correr_sin_core(caso, guion):
+    """Ejecuta un guion con `python3 -I` en el caso, sin core en el path."""
+    import subprocess
+    import sys
+    envoltorio = (
+        "import importlib.util, sys, json\n"
+        "assert not any(p for p in sys.path if p and __import__('os').path.isdir("
+        "__import__('os').path.join(p, 'core'))), 'core sigue en el path'\n"
+        "spec = importlib.util.spec_from_file_location('rj', 'remote_job.py')\n"
+        "R = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(R)\n"
+    ) + guion
+    return subprocess.run([sys.executable, "-I", "-c", envoltorio], cwd=caso,
+                          capture_output=True, text=True, timeout=120)
+
+
+def test_the_server_watcher_really_cuts_without_the_core_package(tmp_path):
+    """En el servidor no hay paquete core: aun asi el vigilante tiene que recortar.
+
+    El defecto: `convergio()` hacia `from core.verdict import ...` y, con ImportError,
+    devolvia False. En el servidor eso es siempre, asi que nunca recortaba: si la red
+    se cae, solo recorta la Mac, la otra maquina llega a max_iters y la compuerta del
+    control vuelve a fallar.
+    """
+    caso = tmp_path / "caso"
+    _copiar_para_servidor(caso)
+    (caso / "system").mkdir()
+    (caso / "system" / "controlDict").write_text("endTime         40000;\n")
+    guion = (
+        "v = R._Convergencia()\n"
+        "for i in range(4000):\n"
+        "    v.cl.append(0.861); v.cd.append(0.00898); v.n += 1\n"
+        "    if v.n % 1000 == 0 and v.convergio():\n"
+        "        print('recorta en', v.n, v.final_previsto()); break\n"
+        "else:\n"
+        "    print('NO RECORTO')\n"
+    )
+    r = _correr_sin_core(caso, guion)
+    assert r.returncode == 0, r.stderr
+    assert "recorta en 1000" in r.stdout, r.stdout + r.stderr
+
+
+def test_the_server_verdict_matches_the_real_one_on_many_series():
+    """El veredicto portado y core.verdict tienen que decidir lo mismo.
+
+    El port es una copia a mano: si core.verdict cambia y el port no, el servidor
+    recortaria con otro criterio que el juicio final.
+    """
+    import random
+    from core.verdict import veredicto_de_series as de_verdad
+
+    rng = random.Random(20261109)
+    casos = []
+    for _ in range(60):
+        n = rng.choice([80, 150, 400, 1000, 3000, 4000])
+        tipo = rng.choice(["quieta", "rampa", "oscila", "pico", "negativo"])
+        cd, cl = [], []
+        for i in range(n):
+            if tipo == "quieta":
+                a, b = 0.0088 + rng.gauss(0, 1e-7), 0.861 + rng.gauss(0, 1e-6)
+            elif tipo == "rampa":
+                a, b = 0.009 - 1.6e-8 * i, 0.861 + 1e-7 * i
+            elif tipo == "oscila":
+                a, b = 0.0088 + 3e-4 * (-1) ** i, 0.861 + 0.01 * (-1) ** i
+            elif tipo == "pico":
+                a, b = 0.0088, (9.0 if i == n // 2 else 0.861)
+            else:
+                a, b = -0.001 + 1e-9 * i, 0.861
+            cd.append(a)
+            cl.append(b)
+        casos.append((cd, cl))
+
+    for cd, cl in casos:
+        estado, oscila = R.veredicto_de_series(cd, cl)
+        v = de_verdad(cd, cl)
+        assert estado == v.state, (len(cd), estado, v.state, v.reason)
+        # `oscila` solo lo usa el vigilante cuando el estado es NO CONVERGIDO.
+        if estado == "NO CONVERGIDO":
+            assert oscila == v.oscila, (len(cd), oscila, v.oscila, v.reason)
+
+
+def test_a_cut_is_reverted_before_the_solver_reaches_the_new_end(tmp_path, monkeypatch):
+    """La decision se toma antes de llegar al final, no cuando el solver ya salio.
+
+    OpenFOAM escribe y sale en la misma iteracion en que alcanza endTime, asi que
+    esperar a que run.log llegue para juzgar llega tarde: el solver ya termino y no hay
+    nada que alargar. Aqui el solver sale exactamente al llegar a endTime y run.log
+    crece con el, como en el servidor. Con el codigo anterior el recorte se quedaba sin
+    revertir y el trabajo terminaba NO CONVERGIDO.
+    """
+    caso = tmp_path / "case"
+    (caso / "system").mkdir(parents=True)
+    (caso / "system" / "controlDict").write_text("endTime         40000;\n")
+    monkeypatch.chdir(caso)
+
+    def cd_en(i):
+        # Quieta hasta la 2000, sube hasta la 8000 y se aplana. En la 1000 el vigilante
+        # la da por convergida y recorta a 4000; el veredicto sobre esas 4000 filas NO
+        # pasa, asi que hay que alargar. Dejada llegar a 40000, converge. Es el caso de
+        # los nueve trabajos: corridas sanas recortadas demasiado pronto.
+        if i <= 2000:
+            return 0.0090
+        if i <= 8000:
+            return 0.0090 + 4e-7 * (i - 2000)
+        return 0.0090 + 4e-7 * 6000
+
+    (caso / "run.log").write_text("")
+
+    class Solver:
+        """Avanza 100 iteraciones por sondeo y sale justo al llegar al endTime."""
+
+        iteracion = 0
+
+        def poll(self):
+            import re as _re
+            final = int(_re.search(r"endTime\s+(\d+)",
+                                   (caso / "system" / "controlDict").read_text()).group(1))
+            if self.iteracion >= final:
+                return 0          # sale justo al llegar, como OpenFOAM
+            return None
+
+    solver = Solver()
+
+    def final_actual():
+        import re as _re
+        return int(_re.search(r"endTime\s+(\d+)",
+                              (caso / "system" / "controlDict").read_text()).group(1))
+
+    def avanzar(_s):
+        # Un solver real para en su endTime y solo avanza si no salio ya. Ademas run.log
+        # va un sondeo por detras: cuando el solver sale al llegar al final, la ultima
+        # linea escrita todavia no incluye esa iteracion. Ese retraso es justo lo que
+        # hace que juzgar "al llegar" llegue tarde.
+        if solver.poll() is not None:
+            return
+        nuevo = min(solver.iteracion + 1000, 40000, final_actual())
+        with open("run.log", "a") as f:
+            for i in range(solver.iteracion + 1, nuevo + 1):
+                if nuevo >= final_actual() and i > nuevo - 1000:
+                    break
+                f.write(f"Time = {i}\n    Cd: {cd_en(i)}\n    Cl: 0.861\n")
+        solver.iteracion = nuevo
+
+    monkeypatch.setattr(R.time, "sleep", avanzar)
+    R.vigilar_y_parar(solver, 40000)
+
+    import re as _re
+    final = int(_re.search(r"endTime\s+(\d+)",
+                           (caso / "system" / "controlDict").read_text()).group(1))
+    # Se juzga con core.verdict y no con el port: esta prueba es sobre cuando se
+    # decide, y tiene que fallar por eso y no por el port.
+    from core.verdict import veredicto_de_series as de_verdad
+    estado = de_verdad([cd_en(i) for i in range(1, final + 1)], [0.861] * final).state
+    assert final == 40000, (
+        f"se quedo en {final}: el recorte no se revirtio y el trabajo termino antes "
+        "de que la corrida convergiera")
+    assert estado == "CONVERGIDO", (final, estado)

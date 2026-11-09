@@ -14,6 +14,7 @@ from __future__ import annotations
 import glob
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -112,14 +113,15 @@ MINIMO = 1000
 VENTANA = 500
 TOL_RANGO_CD = 0.008
 TOL_RANGO_CL = 0.005
-# Deriva en tramos de un decimo de la corrida. Mas estricta que la del veredicto (que usa
-# quintos), y por eso no basta sola: con tramos cortos una rampa lenta parece quieta.
-TOL_DERIVA_CD = 0.002
-TOL_DERIVA_CL = 0.001
 # Mismo tramo que el veredicto: un quinto de la corrida. Con tramos mas cortos una rampa
 # lenta parece quieta (medido: 0.147 % con un decimo frente a 0.405 % con un quinto en
 # 20261109_071444_polar_a0_c8b1), y el recorte cerraba corridas que el veredicto rechaza.
 FRACCION_TRAMO = 5
+# Tolerancias de deriva de este vigilante, mas estrictas que las del veredicto (0.3 % y
+# 0.0015). No basta con ellas: solo miran los dos ultimos tramos y no el estado de la
+# ventana final, asi que van siempre junto al veredicto.
+TOL_DERIVA_CD = 0.002
+TOL_DERIVA_CL = 0.001
 
 
 def _tramo_final(x):
@@ -129,6 +131,82 @@ def _tramo_final(x):
     if w < 1:
         return None, None
     return sum(x[n - w:]) / w, sum(x[n - 2 * w:n - w]) / w
+
+
+# --- el veredicto, portado para que el vigilante funcione sin OpenBlade -------------
+# remote_job.py se ejecuta suelto en el servidor (`python3 remote_job.py`, sin el
+# paquete core). Un `from core.verdict import ...` alli falla por definicion, y con el
+# fallo silencioso el vigilante del servidor queda inerte: nunca recorta, la otra
+# maquina sigue hasta max_iters y el caso de control deja de coincidir. Subir verdict.py
+# tampoco vale: con `python3 -I` el directorio del script no esta en sys.path, y habria
+# que meter dos ficheros mas en el paquete (y su sha en la ficha) para ganar nada.
+# Se porta el juicio de una corrida estacionaria -las transitorias no se recortan nunca-
+# y la equivalencia con core.verdict se ata por prueba.
+CONVERGIDO = "CONVERGIDO"
+NO_CONVERGIDO = "NO CONVERGIDO"
+DIVERGIDO = "DIVERGIDO"
+SIN_DATOS = "SIN DATOS"
+# Mismos valores que core.verdict; la prueba de equivalencia los ata.
+V_MIN_FILAS = 100
+V_ARRANQUE = 0.2
+V_TOL_RANGO = 0.01
+V_TOL_DERIVA = 0.003
+V_TOL_DERIVA_CL = 0.0015
+V_CL_REF = 0.1
+V_TOL_CL_ABS = 0.002
+V_TOL_CM_ABS = 0.002
+V_CL_IMPOSIBLE = 5.0
+V_CD_IMPOSIBLE = 5.0
+
+
+def _media_amplitud(valores):
+    return sum(valores) / len(valores), (max(valores) - min(valores)) / 2.0
+
+
+def veredicto_de_series(cd, cl):
+    """El veredicto de una corrida estacionaria, sin el paquete core: (estado, oscila).
+
+    Mismas comprobaciones y en el mismo orden que core.verdict.veredicto_de_series, que
+    es el que juzga el trabajo al terminar. No incluye la rama transitoria (esas
+    corridas no se recortan) ni la de Cm: el veredicto de referencia se construye con
+    Cm = 0, asi que esa comprobacion nunca decide.
+    """
+    n = len(cd)
+    if not cd or n != len(cl):
+        return SIN_DATOS, False
+    if not all(math.isfinite(x) for x in cl) or not all(math.isfinite(x) for x in cd):
+        return DIVERGIDO, False
+    if n < V_MIN_FILAS:
+        return NO_CONVERGIDO, False
+    w = min(VENTANA, n // 2)
+    ventana_cl, ventana_cd = cl[n - w:], cd[n - w:]
+    m_cl, a_cl = _media_amplitud(ventana_cl)
+    m_cd, a_cd = _media_amplitud(ventana_cd)
+    if (max(abs(x) for x in ventana_cl) > V_CL_IMPOSIBLE
+            or max(abs(x) for x in ventana_cd) > V_CD_IMPOSIBLE):
+        return DIVERGIDO, False
+    if any(x < 0 for x in ventana_cd):
+        return DIVERGIDO, False
+    # Un pico a mitad de camino y luego sereno no es de fiar. En el arranque es normal.
+    for i in range(int(V_ARRANQUE * n), n):
+        if abs(cl[i]) > V_CL_IMPOSIBLE or abs(cd[i]) > V_CD_IMPOSIBLE:
+            return NO_CONVERGIDO, False
+    rango_cd = 100.0 * 2 * a_cd / abs(m_cd) if m_cd else math.inf
+    cd_reciente, cd_previa = _tramo_final(cd)
+    if cd_reciente is None:
+        return NO_CONVERGIDO, False
+    deriva_cd = (100.0 * abs(cd_reciente - cd_previa) / abs(cd_reciente)
+                 if cd_reciente else math.inf)
+    cl_reciente, cl_previa = _tramo_final(cl)
+    if deriva_cd > 100.0 * V_TOL_DERIVA:
+        return NO_CONVERGIDO, False
+    if abs(cl_reciente - cl_previa) > V_TOL_DERIVA_CL * max(abs(cl_reciente), V_CL_REF):
+        return NO_CONVERGIDO, False
+    if rango_cd > 100.0 * V_TOL_RANGO:
+        return NO_CONVERGIDO, True
+    if 2 * a_cl > max(V_TOL_RANGO * abs(m_cl), V_TOL_CL_ABS):
+        return NO_CONVERGIDO, True
+    return CONVERGIDO, False
 
 
 class _Convergencia:
@@ -168,16 +246,11 @@ class _Convergencia:
             return False
         # Y ademas el trabajo tiene que salir CONVERGIDO con el criterio con el que se
         # juzga al terminar. Sin esto el recorte cerraba corridas que despues salian NO
-        # CONVERGIDO: la vigilancia medía la deriva en tramos de un decimo y el veredicto
-        # entre quintos, asi que el tramo que aprobaba no era el que se juzgaba.
-        # Se importa aqui porque este fichero se ejecuta suelto en el servidor, donde no
-        # hay paquete `core`: solo lo tiene el interprete que lo corre desde OpenBlade.
-        try:
-            from core.verdict import CONVERGIDO, veredicto_de_series
-        except ImportError:
-            return False
-        v = veredicto_de_series(self.cd, self.cl)
-        return v.state == CONVERGIDO and not v.oscila
+        # CONVERGIDO: la vigilancia medía la deriva con otro tramo que el veredicto, asi
+        # que el tramo que aprobaba no era el que se juzgaba. El veredicto va portado
+        # aqui dentro: en el servidor no existe el paquete core.
+        estado, oscila = veredicto_de_series(self.cd, self.cl)
+        return estado == CONVERGIDO and not oscila
 
 
 def correr_vigilado(cmd, env, log, max_iters, transient):
@@ -201,10 +274,18 @@ def vigilar_y_parar(proceso, max_iters):
 
     Se llama desde un hilo aparte: el solver no se entera de nada hasta que se le
     reescribe endTime, y entonces OpenFOAM termina solo, escribiendo sus campos.
+
+    La decision se toma EN el momento de detectar la convergencia, no al llegar al
+    final recortado: OpenFOAM escribe y sale en la misma iteracion en que alcanza
+    endTime, asi que al llegar ya no hay nada que revertir. Por eso, antes de recortar,
+    se juzga con el veredicto la historia hasta ese punto; y despues se sigue juzgando
+    cada CADA_CONVERGENCIA, que deja MARGEN vueltas de sobra: si el veredicto deja de
+    pasar antes de llegar, se alarga hasta max_iters y el calculo continua.
     """
     vigia = _Convergencia()
     posicion = 0
     resto = ""
+    recortado_a = None
     while proceso.poll() is None:
         time.sleep(2.0)
         try:
@@ -216,7 +297,6 @@ def vigilar_y_parar(proceso, max_iters):
             continue
         if not datos:
             continue
-        revertido = False
         for linea in (resto + datos).split("\n")[:-1]:
             for nombre, patron in _RE_FUERZA.items():
                 m = patron.match(linea)
@@ -231,24 +311,37 @@ def vigilar_y_parar(proceso, max_iters):
                     vigia.n += 1
                 else:
                     vigia.cd.append(valor)
-            if vigia.n and vigia.n % 100 == 0 and vigia.convergio():
+            if not vigia.n or vigia.n % 100:
+                continue
+            if recortado_a is None:
+                if not vigia.convergio():
+                    continue
                 final = vigia.final_previsto()
                 if final >= max_iters:
                     return
-                original = leer_final()
+                # Decidir antes de recortar: recortar y luego juzgar llega tarde.
+                if not _pasa_hasta(vigia, vigia.n):
+                    guardar_estado(recorte_evitado=vigia.n)
+                    continue
                 recortar_final(final)
+                recortado_a = final
                 guardar_estado(convergio_en=vigia.n, final=final)
-                if not esperar_final_y_comprobar(proceso, final, max_iters, original):
-                    # El recorte dejo un veredicto que no pasa: se alarga y se sigue
-                    # vigilando. Un recorte nunca puede empeorar el resultado. No se
-                    # vuelve a intentar: ya se sabe que con esos datos no pasa.
-                    guardar_estado(recorte_revertido=True)
-                    revertido = True
-                    break
+            elif vigia.n % CADA_CONVERGENCIA == 0:
+                # Ya recortado, con MARGEN por delante: si el juicio deja de pasar,
+                # se alarga y el calculo sigue. Recortar nunca empeora el resultado.
+                if _pasa_hasta(vigia, vigia.n):
+                    continue
+                alargar_final(recortado_a, max_iters)
+                guardar_estado(recorte_revertido=vigia.n, final=int(max_iters))
                 return
-        if revertido:
-            return
         resto = (resto + datos).split("\n")[-1]
+
+
+def _pasa_hasta(vigia, n):
+    """El veredicto sobre la historia hasta la iteracion n."""
+    k = min(n, len(vigia.cd), len(vigia.cl))
+    estado, oscila = veredicto_de_series(vigia.cd[:k], vigia.cl[:k])
+    return estado == CONVERGIDO and not oscila
 
 
 def leer_final():
@@ -261,49 +354,8 @@ def leer_final():
         return None
 
 
-def esperar_final_y_comprobar(proceso, final, max_iters, original, margen_s=600):
-    """Espera a que el solver llegue al final recortado y mira si el veredicto pasa.
-
-    Devuelve True si el veredicto con la corrida recortada es aceptable. Si no, deja
-    endTime en marcha hasta max_iters (o donde estaba, si era menor) para que el
-    calculo continue, y devuelve False. El solver no se mata: solo se le alarga el final.
-    """
-    limite = time.time() + margen_s
-    while time.time() < limite:
-        if proceso.poll() is not None:
-            # El solver ya termino con el final recortado: se juzga lo que dejo.
-            return veredicto_pasa()
-        time.sleep(2.0)
-        if (leer_final() or 0) > final:
-            return True          # alguien lo alargo ya: no hay nada que revertir
-        if not lee_iteraciones(final):
-            continue
-        if veredicto_pasa():
-            return True
-        alargar_final(original, max_iters)
-        guardar_estado(final=int(max_iters))
-        return False
-    return True
-
-
-def lee_iteraciones(final):
-    """Si run.log ya llego a la iteracion del final recortado."""
-    try:
-        with open("run.log", errors="replace") as f:
-            f.seek(max(0, os.path.getsize("run.log") - 20000))
-            ultimo = None
-            for linea in f:
-                m = re.match(r"^Time = ([0-9.eE+-]+)", linea)
-                if m:
-                    ultimo = float(m.group(1))
-        return ultimo is not None and ultimo >= final
-    except (OSError, ValueError):
-        return False
-
-
 def veredicto_pasa():
     """El mismo juicio que hara core.verdict al terminar, sobre run.log."""
-    from core.verdict import CONVERGIDO, veredicto_de_series
     cd, cl = [], []
     try:
         with open("run.log", errors="replace") as f:
@@ -316,10 +368,8 @@ def veredicto_pasa():
                     (cl if nombre == "Cl" else cd).append(valor)
     except (OSError, ValueError):
         return False
-    if not cd or not cl:
-        return False
-    v = veredicto_de_series(cd, cl)
-    return v.state == CONVERGIDO and not v.oscila
+    estado, oscila = veredicto_de_series(cd, cl)
+    return estado == CONVERGIDO and not oscila
 
 
 def alargar_final(original, max_iters):
