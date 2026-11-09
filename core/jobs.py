@@ -510,7 +510,14 @@ def run_job(job: Job, ev: Events, should_detach: Callable[[], bool] = lambda: Fa
                 final = vigia.final_previsto()
                 if final < int(job.params.get("max_iters", 0)):
                     ev.log(job, f"✅ Las fuerzas ya no cambian en la iteración {vigia.n}: termina en la {final}.")
-                    runner.terminar_en(final)
+                    # Recortar es una optimizacion: el servidor decide lo mismo por su
+                    # cuenta (core/remote_job.py). Si esta llamada falla, el calculo
+                    # sigue y vale; perder el trabajo por no poder acortarlo, no.
+                    try:
+                        runner.terminar_en(final)
+                    except Exception as e:  # noqa: BLE001
+                        ev.log(job, f"⚠️ No se pudo acortar el cálculo en la máquina: "
+                                    f"{str(e)[:120]}. El servidor lo acorta por su cuenta.")
 
         est = follow(runner, evento, lambda p: cambia(CORRIENDO, p), should_detach, poll_s,
                      lambda aviso: ev.log(job, aviso))

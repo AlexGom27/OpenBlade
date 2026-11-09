@@ -147,12 +147,12 @@ def test_the_mac_never_lengthens_a_final_the_server_already_shortened(monkeypatc
 
     ordenes = []
 
+    # _run devuelve texto, no el proceso: el doble tiene que imitar eso o la prueba
+    # pasa con un codigo que en el servidor revienta.
     class Falso:
         def _run(self, comando, timeout=0):
             ordenes.append(comando)
-            if comando.startswith("grep"):
-                return type("R", (), {"stdout": "endTime         13000;\n", "returncode": 0})()
-            return type("R", (), {"stdout": "", "returncode": 0})()
+            return "endTime         13000;\n" if comando.startswith("grep") else ""
 
     RR.RemoteJob.terminar_en(Falso(), 16000)
     assert not any("sed -i" in c for c in ordenes)
@@ -161,9 +161,7 @@ def test_the_mac_never_lengthens_a_final_the_server_already_shortened(monkeypatc
     class Falso2(Falso):
         def _run(self, comando, timeout=0):
             ordenes.append(comando)
-            if comando.startswith("grep"):
-                return type("R", (), {"stdout": "endTime         40000;\n", "returncode": 0})()
-            return type("R", (), {"stdout": "", "returncode": 0})()
+            return "endTime         40000;\n" if comando.startswith("grep") else ""
 
     RR.RemoteJob.terminar_en(Falso2(), 16000)
     assert any("endTime         16000;" in c for c in ordenes)
@@ -203,3 +201,40 @@ def test_the_package_tells_the_server_the_iteration_limit(tmp_path, monkeypatch)
     assert visto["max_iters"] == 40000
     assert visto["transient"] is False
     assert not os.path.exists(caso / "job.json")      # no se queda en el caso
+
+
+def test_shortening_the_run_works_through_the_real_run(monkeypatch):
+    """El caso tal cual fallo: terminar_en por el _run de verdad, con _ssh simulado.
+
+    _run devuelve el texto de stdout, no un CompletedProcess. El doble anterior
+    devolvia un objeto con .stdout y ocultaba que en la maquina real esto reventaba
+    con "'str' object has no attribute 'stdout'": el trabajo se marcaba fallido
+    despues de haber convergido, y no se descargaba.
+    """
+    from core import remote_runner as RR
+
+    ordenes = []
+
+    def falso_ssh(host, comando, timeout=0):
+        ordenes.append(comando)
+        salida = "endTime         40000;\n" if "grep" in comando else ""
+        return type("R", (), {"stdout": salida, "stderr": "", "returncode": 0})()
+
+    monkeypatch.setattr(RR, "_ssh", falso_ssh)
+    RR.RemoteJob.terminar_en(RR.RemoteJob("u@h", "openblade_jobs/x"), 16000)
+
+    assert any("grep" in c for c in ordenes)
+    assert any("endTime         16000;" in c for c in ordenes), "no se recorto"
+
+
+def test_shortening_never_lengthens_through_the_real_run(monkeypatch):
+    """Y si el servidor ya recorto mas, no se alarga: tampoco por el _run real."""
+    from core import remote_runner as RR
+
+    ordenes = []
+    monkeypatch.setattr(RR, "_ssh", lambda h, c, timeout=0: type(
+        "R", (), {"stdout": "endTime         13000;\n" if "grep" in c else "",
+                  "stderr": "", "returncode": 0})())
+    ordenes.clear()
+    RR.RemoteJob.terminar_en(RR.RemoteJob("u@h", "openblade_jobs/x"), 16000)
+    assert not any("sed -i" in c for c in ordenes)

@@ -376,9 +376,10 @@ class RemoteJob:
         puede estar desconectada justo cuando convergen las fuerzas. Nunca se alarga:
         si alli ya se recorto mas, se deja como esta.
         """
-        r = self._run("grep -m1 '^endTime' system/controlDict 2>/dev/null", timeout=30)
+        # _run devuelve ya el texto de stdout, no el proceso: pedirle .stdout revienta.
+        texto = self._run("grep -m1 '^endTime' system/controlDict 2>/dev/null", timeout=30)
         actual = None
-        for trozo in (r.stdout or "").replace(";", " ").split():
+        for trozo in (texto or "").replace(";", " ").split():
             try:
                 actual = int(float(trozo))
             except ValueError:

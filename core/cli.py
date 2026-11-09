@@ -186,6 +186,65 @@ def cmd_detener(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retomar(args: argparse.Namespace) -> int:
+    """Termina y descarga trabajos que se quedaron a medias, sin volver a calcular.
+
+    Sirve para lo que la ventana hace al abrirse, desde la linea de ordenes. Un trabajo
+    fallido con el calculo ya hecho en su maquina (rc 0 en su status.json) se vuelve a
+    seguir y se descarga; no se envia otra vez. Con --si-terminado solo se miran los que
+    su maquina da por terminados, para no esperar a los que siguen calculando.
+    """
+    from core import owner
+    from core.jobs import FINALES, LOCAL, load_jobs, make_runner, run_job
+
+    elegidos = [j for j in load_jobs() if j.id.startswith(tuple(args.trabajos))]
+    if not elegidos:
+        print("Ningún trabajo empieza así")
+        return 1
+    pendientes = []
+    for j in elegidos:
+        if not j.remote_dir:
+            print(f"  {j.id}: no llegó a enviarse; se relanza con su campaña")
+            continue
+        if j.state not in FINALES:
+            print(f"  {j.id}: {j.state}, se sigue como está")
+            pendientes.append(j)
+            continue
+        if j.host == LOCAL:
+            print(f"  {j.id}: local; no hay nada que recuperar de una máquina")
+            continue
+        dueno = owner.de_otro(j)
+        if dueno is not None:
+            print(f"  {j.id}: {owner.describir(dueno)}. No se toca.")
+            continue
+        # Lo que decide es lo que diga su maquina, no lo que creyera la Mac al fallar.
+        try:
+            est = make_runner(j).estado()
+        except Exception as e:  # noqa: BLE001
+            print(f"  {j.id}: no se pudo preguntar a {j.host}: {str(e)[:100]}")
+            continue
+        if est.get("state") == "running":
+            if args.si_terminado:
+                print(f"  {j.id}: sigue calculando en {j.host}; se deja")
+                continue
+        elif int(est.get("rc") or 0) != 0:
+            print(f"  {j.id}: en {j.host} falló de verdad (rc {est.get('rc')}): {str(est.get('error'))[:80]}")
+            continue
+        print(f"  {j.id}: terminado en {j.host}; se descarga")
+        j.state, j.error, j.finished = "descargando", "", None
+        j.save()
+        pendientes.append(j)
+
+    if not pendientes:
+        print("Nada que retomar.")
+        return 0
+    for j in pendientes:
+        print(f"  {j.id}: siguiendo")
+        run_job(j, _Consola(), poll_s=5.0)
+        print(f"  {j.id}: {j.state}" + (f" ({j.error})" if j.error else ""))
+    return 0 if all(j.state not in ("fallido",) for j in pendientes) else 1
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Comprueba que todo esta listo para calcular, sin lanzar nada."""
     from core import paths
@@ -265,6 +324,13 @@ def main(argv: List[str] = None) -> int:
     polar.add_argument("--salida", default="polar", help="carpeta de resultados")
     polar.add_argument("ajustes", nargs="*", help="clave=valor sobre los valores por defecto")
     polar.set_defaults(fn=cmd_polar)
+
+    retomar = sub.add_parser("retomar", help="termina y descarga trabajos a medias, sin recalcular")
+    retomar.add_argument("trabajos", nargs="+",
+                         help="id del trabajo o su comienzo (p. ej. 20261108_174028)")
+    retomar.add_argument("--si-terminado", action="store_true",
+                         help="solo los que su maquina ya da por terminados")
+    retomar.set_defaults(fn=cmd_retomar)
 
     detener = sub.add_parser("detener", help="detiene trabajos en su maquina, corran o esperen en cola")
     detener.add_argument("trabajos", nargs="+", help="id del trabajo o su comienzo (p. ej. la fecha de la campana)")

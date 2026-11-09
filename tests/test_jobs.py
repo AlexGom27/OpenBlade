@@ -649,3 +649,101 @@ def test_loading_jobs_never_reads_the_real_data_dir(_datos_de_prueba_en_tmp):
     job = new_job(case_params(), "", 0, label="c0")
     assert job.id in {j.id for j in load_jobs()}
     assert os.path.realpath(J.jobs_dir()).startswith(os.path.realpath(tempfile.gettempdir()))
+
+
+# --- recortar es una optimizacion: si falla, el trabajo sigue ---------------------
+
+def _run_job_con_convergencia(monkeypatch, falla_al_recortar):
+    """Ejecuta run_job con un servidor simulado que converge y luego termina.
+
+    Devuelve el trabajo, los avisos registrados y cuantas veces se intento recortar.
+    """
+    from core.remote_runner import RemoteError
+
+    class Runner:
+        job_dir = "openblade_jobs/x"
+        ficha_sha256 = None
+
+        def __init__(self):
+            self.recortes = 0
+            self.descargado = False
+            self.limpiado = False
+
+        def subir(self, *a, **k):
+            raise AssertionError("el trabajo ya existe: no debe subirse otra vez")
+
+        def estado(self):
+            return {"state": "done", "rc": 0, "error": "", "step": 3}
+
+        def comprobar_ficha(self, est):
+            pass
+
+        def leer_log(self):
+            return ""
+
+        def terminar_en(self, iteracion):
+            self.recortes += 1
+            if falla_al_recortar == "remote":
+                raise RemoteError("fallo simulado al recortar")
+            if falla_al_recortar:
+                raise falla_al_recortar
+
+        def descargar(self, case_dir):
+            self.descargado = True
+
+        def limpiar(self):
+            self.limpiado = True
+
+    runner = Runner()
+    monkeypatch.setattr(J, "make_runner", lambda job: runner)
+
+    def falso_follow(r, on_event, on_step, should_stop, poll_s=4.0, on_notice=None):
+        # El log del servidor: 2000 filas con las fuerzas ya quietas -> converge.
+        for i in range(1, 2001):
+            on_event(("force", "Cd", 0.00884, i, 0.0))
+            on_event(("force", "Cl", 0.0, i, 0.0))
+        return {"rc": 0, "error": "", "step": 3}
+
+    monkeypatch.setattr(J, "follow", falso_follow)
+
+    job = new_job(case_params(), "u@h", 4)
+    job.state, job.remote_dir, job.remote_dir = J.CORRIENDO, "openblade_jobs/x", "openblade_jobs/x"
+    avisos = []
+
+    class Ev(J.Events):
+        def log(self, j, texto):
+            avisos.append(texto)
+
+        def force(self, *a):
+            pass
+
+        def residual(self, *a):
+            pass
+
+    J.run_job(job, Ev())
+    return job, avisos, runner
+
+
+@pytest.mark.parametrize("fallo", [
+    AttributeError("'str' object has no attribute 'stdout'"),   # el de hoy, tal cual
+    "remote",                                                   # y uno de red
+])
+def test_a_failure_while_shortening_the_run_does_not_fail_the_job(monkeypatch, fallo):
+    """El fallo real de hoy: tras converger, recortar revienta y el trabajo se pierde.
+
+    El servidor ya recorta por su cuenta, asi que no poder hacerlo desde la Mac solo
+    cuesta tiempo de calculo, no el resultado: se avisa y se sigue hasta descargar.
+    """
+    job, avisos, runner = _run_job_con_convergencia(monkeypatch, falla_al_recortar=fallo)
+    assert runner.recortes == 1, "se intento recortar"
+    assert job.state == TERMINADO, f"el trabajo debio terminar bien, quedo en {job.state}: {job.error}"
+    assert runner.descargado, "no se descargo el resultado"
+    assert any("No se pudo acortar" in a for a in avisos), avisos
+
+
+def test_shortening_normally_leaves_no_warning(monkeypatch):
+    """Sin fallo no se avisa: el aviso no puede salir siempre."""
+    job, avisos, runner = _run_job_con_convergencia(monkeypatch, falla_al_recortar=None)
+    assert runner.recortes == 1
+    assert job.state == TERMINADO
+    assert not any("No se pudo acortar" in a for a in avisos), avisos
