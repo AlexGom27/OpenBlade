@@ -8,6 +8,69 @@ Validation figures quoted below come from `docs/VALIDACION.md`, which this relea
 updates to the `bb27cca` campaign: every number in the manuscript now comes from one
 commit.
 
+## [1.0.3] — 2026-11-24
+
+**Documentation only; code identical to v1.0.2.** No file that executes has changed:
+`core/`, `gui/`, `tests/` and `docker/` are byte-for-byte the same as v1.0.2, so the
+figures a user gets from this release are exactly those of v1.0.2. No new runs: every
+number comes from the existing `bb27cca` campaign. 430 tests pass and 3 are skipped, the
+same as v1.0.2.
+
+### Fixed
+
+- `docs/VALIDACION.md`: the main polar table mixed two Ladson data sets. Rows 0°–12°
+  used the 80-grit series and rows 14°–17° used the 180-grit one, so the drag
+differences above 12° were overstated. All rows now use 80 grit, which is what the
+  program has always done (`core/bench.py`, `ladson(aoa, zona="80 grit")`) and what the
+  manuscript reports. Drag from 14° to 17° is 8.2 % to 12.8 % above Ladson, not 10.5 %
+  to 15.0 %; lift changes by less than a tenth and no conclusion moves. The summary row
+  and the limits section were updated to match.
+- `docs/VALIDACION.md`: the polar command said `--gci 0,10,15`. The `bb27cca` campaign
+  used `--gci 0,10,14,15`, which is also what the manuscript reports.
+- `docs/VALIDACION.md`: the 14° drag band in the polar table was the interpolated one
+  (±0.053 in Cl and ±0.0031 in Cd). It is now the measured study band (±0.0259 and
+  ±0.00228).
+
+### Added
+
+- `docs/VALIDACION.md`: the NACA 4412 at Re = 3×10⁶ against Pinkerton, at his effective
+  angle. It was a pending test and is now done: lift is 8.1 % to 15.5 % high and the
+  5 % tolerance fails at all five angles (0°, 2°, 4°, 6° and 8°), the same excess seen
+  against Abbott at 6×10⁶.
+- `docs/VALIDACION.md`: the maximum y+ (1.63) next to the mean (0.69) in the grid-level
+  table, both from the NACA 0012 level 2 at 10°.
+- `docs/VALIDACION.md`: a precise description of the verdict as `core/verdict.py`
+  implements it —drift between the last two fifths with runs of at least 500
+  iterations, Cd mean under 0.3 %, Cl mean under 0.15 % of max(|Cl|, 0.1); ranges over
+  the last 500 iterations, Cd under 1 %, Cl and Cm under 1 % or 0.002; DIVERGIDO above
+  |Cl| or |Cd| = 5 or with negative Cd— and the statement that residuals do not enter
+  the verdict.
+- `docs/VALIDACION.md`: gmsh meshes added to the list of what is not validated, next to
+  k-ε, k-ω, Spalart–Allmaras and FSI.
+
+### Changed
+
+- `docs/VALIDACION.md` §9: who stops a run. With `bb27cca` the server-side watcher
+  (`core/remote_job.py`, `veredicto_de_series`) stops the run when the drag and lift
+  checks pass, without looking at the pitching moment; the moment is checked on the Mac
+  when the results arrive. The 1e-6 `residualControl` can also end a run on its own, and
+  that run is still judged by its forces.
+- `CITATION.cff`: version 1.0.3, released 2026-11-24. The v1.0.3 DOI does not exist until
+  Zenodo creates it on release, so the file keeps the concept DOI
+  (10.5281/zenodo.24028939) and adds v1.0.2 = 10.5281/zenodo.24488753 to the list.
+- `README.md` and `README.es.md`: the citation note now lists v1.0.2
+  (10.5281/zenodo.24488753) and says that v1.0.3 is the same code with corrected
+  documentation.
+
+### Not in this release
+
+The code fixes found while reviewing the campaign move to v1.0.4: re-downloading
+`constant/polyMesh`, the shared SSH control channel per host, non-atomic writes of
+`controlDict`, a failed download marking a finished run as failed, solver-only timings in
+`job.json`, back-off for the repeated "no response" notice, a visible label for
+unvalidated models, `banda_origen` in `polar.json`, and recording when the GCI order is
+capped.
+
 ## [1.0.2] — 2026-11-23
 
 No changes to the analysis code: the mesh, the case files, the solver setup and the

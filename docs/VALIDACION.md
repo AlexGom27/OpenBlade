@@ -8,8 +8,8 @@ Todo lo de este documento salió del programa: malla y caso generados en la Mac,
 
 | Qué | Estado |
 |---|---|
-| Cl del NACA 0012, Re=6e6, de 4° a 17° (otros Reynolds en §7) | A menos de 1.7 % de Ladson, y de 1.2 % de 6° a 17°. A 2° difiere 0.010 (+4.9 %) |
-| Cd del NACA 0012 en la malla por defecto | De −4.1 a +4.0 % frente a Ladson hasta 12°, dentro de su banda de malla (de ±7 a ±13 %), y en parte por compensación de errores (§6); de +10 a +15 % de 14° a 17° |
+| Cl del NACA 0012, Re=6e6, de 4° a 17° (otros Reynolds en §7) | A menos de 1.7 % de Ladson, y de 1.0 % de 6° a 17°. A 2° difiere 0.010 (+4.9 %) |
+| Cd del NACA 0012 en la malla por defecto | De −4.1 a +4.0 % frente a Ladson hasta 12°, dentro de su banda de malla (de ±7 a ±13 %), y en parte por compensación de errores (§6); de +8.2 a +12.8 % de 14° a 17° |
 | Cd frente a NASA TMR, malla extrapolada | −1.0 % a 10°. A 15°, +2.1 %, con un orden bajo que lo hace poco firme (§6) |
 | Pérdida | **No la predice.** Ladson cae a Cl≈1.0 a 18°; SST da 1.60 |
 | Reproducibilidad entre máquinas | Mismo paquete y procesos, fuerzas idénticas byte a byte en los dos servidores, en corridas completas a α=0 y α=8 (§7) |
@@ -22,7 +22,7 @@ Todo lo de este documento salió del programa: malla y caso generados en la Mac,
 ## 2. Cómo repetirlo
 
 ```bash
-python3 -m core.cli polar --maquinas usuario@a:10:2,usuario@b:9:2 --angulos 0,2,4,6,8,10,12,14,15,16,17,18 --gci 0,10,15 --salida polar reynolds=6e6
+python3 -m core.cli polar --maquinas usuario@a:10:2,usuario@b:9:2 --angulos 0,2,4,6,8,10,12,14,15,16,17,18 --gci 0,10,14,15 --salida polar reynolds=6e6
 ```
 
 ```bash
@@ -37,11 +37,11 @@ python3 -m core.cli control --hosts usuario@a,usuario@b --procesos 8
 
 NACA 0012 de cuerda 1, Re=6×10⁶, U=15 m/s, flujo incompresible. Tu=0.052 % y νt/ν=0.009, los de TMR. k-ω SST con la pared resuelta. Malla C propia, anidada, fija en todos los ángulos (se gira el flujo), de radio 200 cuerdas:
 
-| Nivel | Puntos | Celdas | y+ medio a 10° |
-|---|---|---|---|
-| 1 | 225×65 | 14 336 | 1.46 |
-| 2, por defecto | 449×129 | 57 344 | 0.69 |
-| 3 | 897×257 | 229 376 | 0.34 |
+| Nivel | Puntos | Celdas | y+ medio a 10° | y+ máximo a 10° |
+|---|---|---|---|---|
+| 1 | 225×65 | 14 336 | 1.46 | |
+| 2, por defecto | 449×129 | 57 344 | 0.69 | 1.63 |
+| 3 | 897×257 | 229 376 | 0.34 | |
 
 **Referencias.** Ladson, NASA TM 4074, Re=6×10⁶, grano 80, M=0.15. NASA TMR, *2D NACA 0012 Airfoil Validation*: CFL3D, FUN3D y NTS en 897×257, M=0.15.
 
@@ -51,22 +51,24 @@ NACA 0012 de cuerda 1, Re=6×10⁶, U=15 m/s, flujo incompresible. Tu=0.052 % y 
 
 ## 4. Polar (nivel 2)
 
-La banda es la de malla, calculada con GCI a 0°, 10° y 15° e interpolada entre ellos. Fuera de esos ángulos no se da banda.
+La banda es la de malla, calculada con GCI a 0°, 10°, 14° y 15° e interpolada entre ellos. Fuera de esos ángulos no se da banda. La lista de qué filas son medidas y cuáles interpoladas está al final de esta sección.
 
 | α | Veredicto | Cl | ± | Ladson | Dif. | Cd | ± | Ladson | Dif. |
 |---|---|---|---|---|---|---|---|---|---|
-| 0 | CONVERGIDO | 0.0000 | 0.0000 | −0.0072 | | 0.00784 | 0.00057 | 0.00809 | −3.2 % |
-| 2 | CONVERGIDO | 0.2173 | 0.0017 | 0.2071 | +4.9 % | 0.00794 | 0.00062 | 0.00816 | −2.6 % |
+| 0 | CONVERGIDO | 0.0000 | 0.0000 | −0.0072 | | 0.00784 | 0.00057 | 0.00809 | −3.1 % |
+| 2 | CONVERGIDO | 0.2173 | 0.0017 | 0.2071 | +4.9 % | 0.00794 | 0.00062 | 0.00816 | −2.7 % |
 | 4 | CONVERGIDO | 0.4345 | 0.0034 | 0.4272 | +1.7 % | 0.00829 | 0.00069 | 0.00823 | +0.7 % |
-| 6 | CONVERGIDO | 0.6504 | 0.0051 | 0.6448 | +0.9 % | 0.00891 | 0.00079 | 0.00882 | +0.9 % |
+| 6 | CONVERGIDO | 0.6504 | 0.0051 | 0.6448 | +0.9 % | 0.00891 | 0.00079 | 0.00882 | +1.0 % |
 | 8 | CONVERGIDO | 0.8615 | 0.0067 | 0.8557 | +0.7 % | 0.00988 | 0.00094 | 0.01028 | −3.9 % |
 | 10 | CONVERGIDO | 1.0656 | 0.0084 | 1.0586 | +0.7 % | 0.01142 | 0.00115 | 0.01191 | −4.1 % |
 | 12 | CONVERGIDO | 1.2584 | 0.0310 | 1.2493 | +0.7 % | 0.01374 | 0.00181 | 0.01321 | +4.0 % |
-| 14 | CONVERGIDO | 1.4301 | 0.0536 | 1.4250 | +0.4 % | 0.01732 | 0.00282 | 0.01520 | +14.0 % |
-| 15 | CONVERGIDO | 1.5010 | 0.0649 | 1.4993 | +0.1 % | 0.01989 | 0.00356 | 0.01800 | +10.5 % |
-| 16 | oscila | 1.5579 | | 1.5647 | −0.4 % | 0.02335 | | 0.02090 | +11.7 % |
-| 17 | oscila | 1.5970 | | 1.6160 | −1.2 % | 0.02828 | | 0.02460 | +15.0 % |
+| 14 | CONVERGIDO | 1.4301 | 0.0259 | 1.4189 | +0.8 % | 0.01732 | 0.00228 | 0.01601 | +8.2 % |
+| 15 | CONVERGIDO | 1.5010 | 0.0649 | 1.4938 | +0.5 % | 0.01989 | 0.00356 | 0.01831 | +8.6 % |
+| 16 | oscila | 1.5579 | | 1.5563 | +0.1 % | 0.02335 | | 0.02126 | +9.8 % |
+| 17 | oscila | 1.5970 | | 1.6057 | −0.5 % | 0.02828 | | 0.02506 | +12.8 % |
 | 18 | oscila | 1.6047 | | ≈1.0, en pérdida | | 0.03641 | | 0.188 | |
+
+**Corrección del 2026-11-24: las columnas de Ladson de 14° a 17° eran de la serie de grano 180.** La tabla estaba construida con la serie de grano 80 en 0°–12° y con la de 180 en 14°–17°, así que las diferencias de Cd de esas cuatro filas estaban sobrestimadas. El programa (`core/bench.py`, `ladson(aoa, zona="80 grit")`) siempre usó la de 80; la mezcla era del documento. Con la serie correcta, Cd a 14°–17° queda de +8.2 a +12.8 % sobre Ladson, no de +10.5 a +15.0 %. En Cl el cambio es de menos de una décima y no altera nada de lo dicho. La banda de 14° pasa a ser la del estudio propio (§7), no la interpolada.
 
 Ladson está interpolado entre sus ángulos medidos. «Oscila» es NO CONVERGIDO con media estable: Cd varía 1.1–1.5 % en las últimas 500 iteraciones, y se da su media. α=18 arrancó de α=17; los demás, del flujo potencial. En frío, α=18 no llega a estabilizarse en 40 000 iteraciones (su media de Cd aún cambia 4.5 %), pero acaba en el mismo punto: Cl 1.6040 y Cd 0.03645, frente a 1.6047 y 0.03641. No hay señal de dos soluciones.
 
@@ -131,7 +133,6 @@ A α=15 en 897×257, desde el flujo potencial el cálculo revienta hacia la iter
 **Perfil con curvatura (M).** NACA 4412, nivel 2, Re=6×10⁶: α=0 da Cl 0.455, Cd 0.00831, Cm −0.098; α=8 da Cl 1.280, Cd 0.01172, Cm −0.088. Leído de un archivo de coordenadas con 6 decimales, la vía de cualquier perfil propio, α=8 da Cl 1.2803, Cd 0.01170, Cm −0.0875: difiere 0.004 % en Cl y 0.2 % en Cd. Frente a Coles y Wadcock (α=13.87, Re=1.52×10⁶): Cl 1.638 oscilando, Cp RMS 0.20 en extradós y 0.15 en intradós, pico −7.04 frente a −6.21. Sin tolerancia fijada.
 
 **Otros modelos a α=4 (M).** Solo comprueban que corren desde el programa. Ninguno está validado.
-
 | Modelo | Malla | Cl | Cd | Estado |
 |---|---|---|---|---|
 | SST | nivel 2 | 0.4345 | 0.00829 | CONVERGIDO |
@@ -175,7 +176,18 @@ Todos CONVERGIDOS salvo lo indicado arriba. La tendencia es correcta, pero es un
 
 El ruido con la capa límite desarrollada indica que el acoplamiento presión-velocidad no aguanta esos Δt. Estas pruebas usan el bloque PIMPLE sin subir (`nOuterCorrectors 2`, sin relajación). A α≤18 el estacionario no diverge, así que la polar no ha necesitado URANS.
 
-**Parada y veredicto.** La deriva se mide entre los dos últimos quintos de la corrida. Reproducido sobre historias reales, la parada temprana queda a menos de 0.02 % de corridas mucho más largas a 10° y 15°, y a 0.1 % a 0°. Con ventanas fijas de 500 iteraciones, 897×257 parecía convergida con Cd aún 1 % alto.
+**Parada y veredicto.** Quien decide que una corrida estacionaria ya no cambia es **el vigilante del servidor** (`core/remote_job.py`, `veredicto_de_series`): lee `run.log` mientras el solver corre y, cuando pasan a la vez la comprobación de arrastre y la de sustentación, adelanta `endTime` en el `controlDict` para que OpenFOAM termine solo, sin matarlo. Ese juicio **no mira el momento**: lleva sus propias copias de la ventana, los tramos y los umbrales, atadas por una prueba a las de `core.verdict._Vigilancia`. El momento se revisa después, en la Mac, cuando llegan los resultados: `core.verdict` es el que emite el veredicto definitivo, y puede dar NO CONVERGIDO a una corrida que el servidor acortó. Además, el `residualControl` de 1e-6 (`system/fvSolution`) puede terminar una corrida por su cuenta; los residuos no entran en el veredicto, así que esa corrida se juzga igual por sus fuerzas.
+
+La deriva se mide entre los dos últimos quintos de la corrida, con tramos de al menos 500 iteraciones cada uno; con ventanas fijas de 500 iteraciones, 897×257 parecía convergida con Cd aún 1 % alto. Reproducido sobre historias reales, la parada temprana queda a menos de 0.02 % de corridas mucho más largas a 10° y 15°, y a 0.1 % a 0°.
+
+**Cómo se decide el veredicto.** Lo que sigue es `core/verdict.py` tal como está en v1.0.2; los valores entre paréntesis son sus constantes.
+
+1. **Sin datos o datos imposibles.** Sin filas de fuerzas, SIN DATOS. Con menos de 100 filas (`MIN_FILAS`), NO CONVERGIDO: no alcanza para juzgar. NaN o infinito, DIVERGIDO. |Cl| o |Cd| por encima de 5 (`CL_IMPOSIBLE`, `CD_IMPOSIBLE`) en la ventana final, o un pico así después del 20 % inicial de la corrida (`ARRANQUE`), DIVERGIDO. Cd negativo en alguna fila de la ventana, DIVERGIDO. Una excepción de punto flotante en el log, DIVERGIDO.
+2. **Deriva entre tramos.** Se comparan la media del último quinto de la corrida y la del anterior, con tramos de al menos 500 iteraciones (`VENTANA`) y tantos como un quinto de la corrida (`FRACCION_TRAMO` = 5). La media de **Cd** no puede cambiar más de **0.3 %** (`TOL_DERIVA`), y la de **Cl** más de **0.15 % de max(|Cl|, 0.1)** (`TOL_DERIVA_CL`, `CL_REF`). Esta comprobación es la que detecta una deriva lenta que el rango de una ventana no ve.
+3. **Rango en la ventana final** (las últimas 500 iteraciones, o la mitad de la corrida si es más corta). Cd: `(max−min)/|media| < 1 %` (`TOL_RANGO`). Cl y Cm: amplitud total menor que 1 % de la media o 0.002 en absoluto (`TOL_CL_ABS`; en Cm `TOL_CM_ABS`). Si falla solo esta, el veredicto es NO CONVERGIDO **con la marca «oscila»**, que indica que la media ya es estable aunque el punto no sirva para publicar.
+4. **Residuos.** No entran en el veredicto. Una corrida que converge de residuos y no de fuerzas sigue siendo NO CONVERGIDO, y al revés.
+
+En transitorio cambian dos cosas: la ventana es el último 25 % del tiempo simulado y la deriva se mide entre periodos enteros, no entre quintos; la tolerancia de deriva de Cd pasa a 1 % (`TOL_DERIVA_TRANS`). Con ventanas fijas de 500 iteraciones, 897×257 parecía convergida con Cd aún 1 % alto.
 
 **Caso de control (M).** Mismo paquete en los dos servidores, 8 procesos, lanzado desde el programa. Pasa todas las compuertas:
 
@@ -185,6 +197,10 @@ El ruido con la capa límite desarrollada indica que el acoplamiento presión-ve
 | 8 | 13 001 | 0.8615 | 0.00987 | `8bd26dd455ac` en ambos | 0 en todas las filas |
 
 Las fichas coinciden en archivos, parámetros y versiones; la malla es `c2ed1a996956` en los dos. Los tiempos de la polar medida aparte, sola en los dos servidores y con la misma versión (v1.0.2, bb27cca), están en §7: 20 trabajos en 120 min, un punto de nivel 2 convergido de 16 a 48 min con subida y descarga. La cifra anterior, «de 16 a 24 minutos con otra corrida simultánea», correspondía a campañas anteriores al 23-nov y no vale como costo de cómputo. Los dos servidores tienen el mismo procesador y la misma compilación de OpenFOAM: con otro procesador no está medido.
+
+**8 contra 9 procesos (M).** `control_p8` (11-nov) y `control_p9_bb27cca` (10-nov), las dos con bb27cca, mismo paquete y misma malla `c2ed1a996956`. Las compuertas de ambos casos pasan en los dos recuentos: |Cl| a 0° es ±0.00000 en las dos máquinas, el rango de Cd en la ventana es 0.04 % a 0° y 0.64 % a 8° con 8 procesos, y 0.04 % y 0.27 % con 9. Los coeficientes coinciden hasta los cuatro decimales que guarda el informe: a 8°, Cl 0.8615 y Cd 0.00987 con 8 procesos, Cl 0.8614 y Cd 0.00989 con 9.
+
+Lo que cambia es el md5 de las fuerzas: `42c7aa517468` y `8bd26dd455ac` con 8 procesos, `081459ce6243` y `64d158ebaed8` con 9. Es decir, **la historia no es idéntica entre 8 y 9 procesos**, aunque sí lo sea entre las dos máquinas con el mismo número de procesos. La igualdad byte a byte de la fila de arriba vale para el mismo número de procesos, y así está declarado en §7.
 
 **Reproducibilidad.** Local (Docker emulado) y `openblade2`, 2 procesos y 300 iteraciones: fuerzas idénticas, md5 `6086045a3719`. Es una prueba corta, y el resultado vale para el mismo número de procesos. Un clon nuevo con un entorno nuevo da la misma malla: sha256 `c2ed1a996956` en el nivel 2, con numpy 2.4.0 y 2.4.6.
 
@@ -243,6 +259,18 @@ Cl no cumple en ningún punto; Cd y Cm cumplen en todos.
 Con transición Cl sube en vez de bajar, porque la capa límite laminar es más delgada; Cd en cambio se acerca al medido por Ehrmann (≈0.006–0.007 entre Cl 0.3 y 0.8), que SST sobrestima. La malla tampoco es: a 4°, Cl cambia 0.2 % del nivel 1 al 3 en los dos perfiles (4412: 0.881, 0.876, 0.874; GCI 0.13 %). Con SST, a este Reynolds el 63₃-418 queda a +2.4 y +3.3 % en Cl a 4° y 8°. El ángulo de sustentación nula coincide (4412: −4.25° frente a −4.13°; 63₃-418: −3.11° frente a −3.08°). Lo que difiere es la pendiente: 0.105 frente a 0.100 por grado en el 4412, y 0.114 frente a 0.098 en el 63₃-418. No se ha determinado si viene del modelo, de la lectura de las figuras o de las correcciones de túnel del experimento.
 
 **Tolerancias fijadas el 2026-11-03, antes de correr.** NACA 63₃-418, Re=2.4×10⁶, frente a Ehrmann (`validation/refs/ehrmann_63418_re2.4e6.dat`), α de 2° a 10°: SST, Cl ≤5 %; SST-LM con Tu≈0.24 % en el perfil, Cd ≤15 % a Cl de 0.2 a 1.0. Estudio de malla de SST-LM a 4°.
+
+**NACA 4412 a Re=3×10⁶ frente a Pinkerton (M).** Era una prueba pendiente y ya está hecha: `naca4412_re3e6_sst`, nivel 2, SST, la misma malla que a 6×10⁶. La referencia es `validation/refs/pinkerton_4412_tr563.dat`, túnel de densidad variable, Re≈3×10⁶, sección central corregida al ángulo efectivo α₀ (αᵢ = 1.54 cₗ, columna del informe). Cl de Pinkerton interpolado a α₀:
+
+| α | Cl OpenBlade | Veredicto | Cl Pinkerton (α₀) | Dif. | ¿≤5 %? |
+|---|---|---|---|---|---|
+| 0 | 0.4458 | CONVERGIDO | 0.3859 | +15.5 % | **no** |
+| 2 | 0.6548 | CONVERGIDO | 0.5838 | +12.2 % | **no** |
+| 4 | 0.8606 | CONVERGIDO | 0.7861 | +9.5 % | **no** |
+| 6 | 1.0642 | oscila con media estable | 0.9843 | +8.1 % | **no** |
+| 8 | 1.2566 | CONVERGIDO | 1.1418 | +10.1 % | **no** |
+
+**Falla en los cinco ángulos**, entre +8.1 y +15.5 %. Es el mismo exceso que frente a Abbott a 6×10⁶ (+6 a +11 %): el modelo sobrestima la pendiente de sustentación del 4412, y el exceso no desaparece al bajar el Reynolds a 3×10⁶. Como en Abbott, la diferencia es mayor a 0° y menor en la zona lineal. No se ha determinado la causa. La tabla no se había publicado antes porque la corrida no se había hecho con v1.0.2.
 
 **Resultado frente a esas tolerancias (M).** NACA 63₃-418, Re=2.4×10⁶, nivel 2, frente a Ehrmann:
 
@@ -314,7 +342,7 @@ A 0° y Re=3×10⁶ la transición queda a +0.03–0.05 de la de Ehrmann (0.50, 
 2. **Estudio de malla de la transición a 0°.** La misma configuración con (0.6 %, 500), niveles 1 a 3, α=0, además del de 4°. Criterio: inicio de la transición a 0.02 de la cuerda o menos entre los niveles 2 y 3. Se informa la banda GCI de Cd.
 
 **Corrección del 2026-11-07, antes de ver resultados.** El punto 2 no se puede correr así: el nivel 3 con la cuerda refinada ×4 pasa del nivel más fino del mallador (4), y el estudio de malla con la cuerda refinada no arrancaba el nivel 2 del campo del nivel 1 (`cells_of_level` no contaba el refinado; corregido). Pasa a: niveles 1 a 3 con la cuerda refinada ×2, a 0° y a 4°; su nivel 3 tiene a lo largo de la cuerda el mismo espaciado que el nivel 2 ×4 de la polar. Mismo criterio. El estudio de 4° de §7 (0.406, 0.413 y 0.406) no fue de tres niveles con ×4: fueron el nivel 2 con ×2 y ×4 y el nivel 3 con ×2. Además, el despachador mandaba a la primera máquina de la lista todos los paquetes enviados a la vez (corregido): la tanda lanzada a las 18:02 se detuvo y se repite con el código corregido.
-3. **NACA 4412 frente a Pinkerton al mismo Reynolds.** Re=3×10⁶, SST, nivel 2, α=0, 2, 4, 6 y 8, frente al Cl de Pinkerton interpolado en su ángulo efectivo α_o (`validation/refs/pinkerton_4412_tr563.dat`). Criterio: Cl a 5 % o menos, como frente a Abbott. Las corridas del 4412 de arriba son a 6×10⁶.
+3. ~~**NACA 4412 frente a Pinkerton al mismo Reynolds.**~~ **Hecho** (§7, tabla propia): Re=3×10⁶, SST, nivel 2, α=0, 2, 4, 6 y 8, frente al Cl de Pinkerton interpolado en su ángulo efectivo α_o. Criterio: Cl a 5 % o menos, como frente a Abbott. **Falla en los cinco ángulos**, de +8.1 a +15.5 %.
 4. **Repetición con una sola versión.** Las campañas de §4 a §7 salieron de unos 20 commits distintos entre el 2026-10-31 y el 2026-11-06. Se repiten con las mismas entradas y tolerancias; las fichas registran el commit de este registro, que en `core/` y `gui/` es idéntico a v1.0.1. Si un resultado cambia, se anota aquí junto al anterior.
 
 **Qué Tu llega al perfil y cuál dispara el aviso (M).** `turbulence_at_profile` (`core/cgrid.py`) estima con el decaimiento de SST qué turbulencia queda al llegar al perfil. A Re=6×10⁶ y 200 cuerdas de dominio:
@@ -348,7 +376,9 @@ Los tiempos van de `started` a `finished` en `job.json` e incluyen subida y desc
 
 La interpolación entre 10° y 15° resultaba conservadora: la banda real a 14° es la mitad en Cl. El Cl es oscilatorio (el nivel 1 salta 0.00209 en la ventana) y su banda es la de 3× el mayor salto, sin extrapolar; el Cd es monótono, con orden 0.93 y extrapolado 0.01914. La fila de la polar a 14° deja de ser interpolada y pasa a ser medida.
 
-**Qué filas de la polar llevan banda interpolada (M).** La banda de Cl y Cd de cada fila sale de los estudios de malla a 0°, 10°, 14° y 15° e **interpolada entre ellos**: las filas de 2°, 4°, 6°, 8° y 12° no tienen estudio propio, y 16°, 17° y 18° no llevan banda porque no convergen. `polar.json` todavía no dice cuál es cuál; escribirlo (`banda_origen`) cambia el código que genera el archivo y va en v1.0.3. Hasta entonces, esta es la lista de referencia.
+**Bandas medidas e interpoladas en la polar (§4).** Medidas: 0°, 10°, 14° y 15°, que son los ángulos con estudio de malla propio. Interpoladas entre los estudios vecinos: 2°, 4°, 6°, 8° y 12°. Sin banda: 16°, 17° y 18°, porque no convergen. En `polar.json` las cuatro primeras llevan la banda del estudio de ese ángulo y las cinco siguientes una interpolación entre los dos estudios que las rodean; hasta que `banda_origen` exista (v1.0.4) el archivo no distingue unas de otras.
+
+**Qué filas de la polar llevan banda interpolada (M).** La banda de Cl y Cd de cada fila sale de los estudios de malla a 0°, 10°, 14° y 15° e **interpolada entre ellos**: las filas de 2°, 4°, 6°, 8° y 12° no tienen estudio propio, y 16°, 17° y 18° no llevan banda porque no convergen. `polar.json` todavía no dice cuál es cuál; escribirlo (`banda_origen`) cambia el código que genera el archivo y va en v1.0.4. Hasta entonces, esta es la lista de referencia.
 
 **Sensibilidad del veredicto (M).** Sobre las 63 corridas SST de la campaña de v1.0.2, 49 CONVERGIDO, recalculando el veredicto con `core/verdict.py` sin modificarlo (`sensibilidad_veredicto_bb27cca.txt`):
 
@@ -371,11 +401,11 @@ Las corridas previas al 2026-10-31 tienen estos defectos, y sus documentos lleva
 ## 9. Límites declarados
 
 - No predice la pérdida: SST sigue a Cl 1.60 a 18°, donde el experimento cae a 1.0.
-- A partir de 14° Cd está 10–15 % por encima de Ladson, y refinar la malla aumenta la diferencia.
+- A partir de 14° Cd está 8–13 % por encima de Ladson (serie de grano 80), y refinar la malla aumenta la diferencia.
 - Nivel 2 sirve para Cl. Para Cd a menos de 5 % de TMR, nivel 3.
 - La banda de malla de Cl a 15° es grande (±4.3 %) porque el nivel 1 es pobre ahí.
 - Transitorio a Re alto con y+<1: no validado.
-- k-ε con ley de pared y k-ω: solo comprobados en funcionamiento.
+- k-ε con ley de pared y k-ω, Spalart–Allmaras y mallas gmsh: solo comprobados en funcionamiento, sin tolerancias. La malla propia (C anidada) es la única con estudios de malla; una malla de gmsh no se ha comparado contra nada.
 - SST-LM: el programa avisa si la turbulencia de entrada se disipa antes del perfil. Cd depende de la que llega, de −32 a +19 % frente a la transición libre de Ladson. Sin Tu medida es una calibración, no una validación. La entrada por defecto se disipa antes de llegar al perfil.
 - Fuera del NACA 0012 no hay tolerancias.
 - Interacción fluido-estructura (Análisis FSI): experimental. El benchmark de Turek y Hron no se completó porque el acoplamiento diverge; no usar sus resultados.
