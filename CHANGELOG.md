@@ -29,10 +29,9 @@ collected, 430 passing and 3 skipped, the same as v1.0.2.
   used `--gci 0,10,14,15`, which is also what the manuscript reports.
 - `docs/VALIDACION.md`: a paragraph on the 8-versus-9-process comparison (`control_p8`
   against `control_p9_bb27cca`). The force histories differ from the first iteration
-  (different md5) while the converged means agree to the fourth decimal; the exact
-  figures quoted in the manuscript (6×10⁻⁵ in Cl, 0.15 % in Cd) could not be re-derived
-  from the report files, which store four decimals, so the document bounds them instead
-  of repeating them unverified.
+  (different md5), while the converged means at 8° are Cl 0.8615 and 0.8614 and Cd
+  0.00987 and 0.00989, inside the 0.6 % range of Cd in the window. Those report values
+  are the ones the manuscript uses.
 - `docs/VALIDACION.md`: the polar section states which rows carry a measured band (0°,
   10°, 14°, 15°) and which an interpolated one (2°, 4°, 6°, 8°, 12°), and the stale
   "GCI at 0°, 10° and 15°" line is corrected.

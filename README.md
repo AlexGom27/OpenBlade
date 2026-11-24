@@ -204,7 +204,7 @@ The interface is in Spanish.
 
 ## How to cite
 
-Cite the archived version you used: v1.0.3 has the same code as v1.0.2 with corrected documentation, and both are [10.5281/zenodo.24488753](https://doi.org/10.5281/zenodo.24488753) for v1.0.2 (the v1.0.3 DOI is created on release); v1.0.1 is [10.5281/zenodo.24045781](https://doi.org/10.5281/zenodo.24045781) and v1.0.0 is [10.5281/zenodo.24028940](https://doi.org/10.5281/zenodo.24028940), and [10.5281/zenodo.24028939](https://doi.org/10.5281/zenodo.24028939) always points to the latest version. The details are in [CITATION.cff](CITATION.cff).
+Cite the archived version you used: v1.0.2 is [10.5281/zenodo.24488753](https://doi.org/10.5281/zenodo.24488753); v1.0.3 has the same code with corrected documentation and gets its own DOI on release. v1.0.1 is [10.5281/zenodo.24045781](https://doi.org/10.5281/zenodo.24045781) and v1.0.0 is [10.5281/zenodo.24028940](https://doi.org/10.5281/zenodo.24028940), and [10.5281/zenodo.24028939](https://doi.org/10.5281/zenodo.24028939) always points to the latest version. The details are in [CITATION.cff](CITATION.cff).
 
 ## License
 

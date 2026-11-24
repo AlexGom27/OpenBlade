@@ -206,7 +206,7 @@ Lo que los archivos prueban:
 - **Los coeficientes coinciden hasta donde el informe guarda.** A 8°: Cl 0.8615 y Cd 0.00987 con 8 procesos, Cl 0.8614 y Cd 0.00989 con 9. A 0° el Cl es ±0.00000 en los dos recuentos y el Cd 0.00784 en ambos.
 - **Rango de Cd en la ventana:** 0.04 % a 0° y 0.64 % a 8° con 8 procesos; 0.04 % y 0.27 % con 9.
 
-Lo que los archivos **no** permiten confirmar es la cifra exacta del artículo: el informe guarda cuatro decimales, así que la diferencia de Cl a 8° está acotada por ±1×10⁻⁴ (el artículo dice 6×10⁻⁵, compatible pero no demostrado) y la de Cd por 0.10–0.30 % (el artículo dice 0.15 %, también compatible). Para cerrar esas dos cifras hacen falta las historias de fuerzas completas, que en la campaña de v1.0.2 están en los trabajos crudos y no se pudieron leer al escribir esto; quedan pendientes de comprobar. Lo que sí queda establecido, y es lo que sostiene la fila de la Tabla 4, es que **las historias difieren desde la primera iteración y las medias convergidas coinciden hasta la cuarta cifra decimal, muy por debajo del rango de Cd en la ventana**.
+En resumen: **las historias difieren desde la primera iteración y las medias convergidas a 8° son Cl 0.8615 y 0.8614, Cd 0.00987 y 0.00989, dentro del rango de Cd en la ventana (0.64 % con 8 procesos)**. Esa es la comparación que sostiene la fila de la Tabla 4, y es la que usa el artículo.
 
 **Reproducibilidad.** Local (Docker emulado) y `openblade2`, 2 procesos y 300 iteraciones: fuerzas idénticas, md5 `6086045a3719`. Es una prueba corta, y el resultado vale para el mismo número de procesos. Un clon nuevo con un entorno nuevo da la misma malla: sha256 `c2ed1a996956` en el nivel 2, con numpy 2.4.0 y 2.4.6.
 
