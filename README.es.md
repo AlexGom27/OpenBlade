@@ -235,6 +235,14 @@ Lo enviado sigue en los servidores aunque esta computadora se duerma, se cierre 
 
 Todas estas órdenes usan las mismas funciones que la ventana. En la ventana están en el botón **Banco de Validación** y en **Análisis: Estudio de Malla**. Para abrir un proyecto guardado: `python3 main.py proyecto.obp`.
 
+## Pruebas
+
+```bash
+python3 -m pytest -q
+```
+
+426 pruebas: 423 pasan y 3 se omiten. Las omitidas necesitan una instalación real de OpenFOAM o un servidor vivo.
+
 ## 🚀 Uso Rápido
 
 ### Flujo de trabajo recomendado:

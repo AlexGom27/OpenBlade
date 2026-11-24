@@ -1,5 +1,7 @@
 # Validación de OpenBlade
 
+Todas las cifras de este documento salen de la campaña de **v1.0.2 (commit `bb27cca`)**, guardada en `resultados_v1.0.2_bb27cca/` del proyecto: cada flujo comprobaba antes de cada paso que el código seguía en `bb27cca` limpio. Las campañas anteriores están en `archivo_versiones_anteriores/` y no sirven como validación (§8).
+
 Todo lo de este documento salió del programa: malla y caso generados en la Mac, cálculo con OpenFOAM 12 en los servidores, y veredicto y ficha de cada paquete. Los archivos de resultados (polar, banco, control) se generan con las órdenes de §2 y no se guardan en el repositorio. Las campañas anteriores al 2026-10-31 no sirven como validación (§8).
 
 ## 1. Resumen
@@ -182,7 +184,7 @@ El ruido con la capa límite desarrollada indica que el acoplamiento presión-ve
 | 0 | 16 001 | 0.0000 | 0.00784 | `42c7aa517468` en ambos | 0 en todas las filas |
 | 8 | 13 001 | 0.8615 | 0.00987 | `8bd26dd455ac` en ambos | 0 en todas las filas |
 
-Las fichas coinciden en archivos, parámetros y versiones; la malla es `c2ed1a996956` en los dos. Cada corrida, con otra simultánea en la misma máquina, tardó de 16 a 24 minutos con subida y descarga. Los dos servidores tienen el mismo procesador y la misma compilación de OpenFOAM: con otro procesador no está medido.
+Las fichas coinciden en archivos, parámetros y versiones; la malla es `c2ed1a996956` en los dos. Los tiempos de la polar medida aparte, sola en los dos servidores y con la misma versión (v1.0.2, bb27cca), están en §7: 20 trabajos en 120 min, un punto de nivel 2 convergido de 16 a 48 min con subida y descarga. La cifra anterior, «de 16 a 24 minutos con otra corrida simultánea», correspondía a campañas anteriores al 23-nov y no vale como costo de cómputo. Los dos servidores tienen el mismo procesador y la misma compilación de OpenFOAM: con otro procesador no está medido.
 
 **Reproducibilidad.** Local (Docker emulado) y `openblade2`, 2 procesos y 300 iteraciones: fuerzas idénticas, md5 `6086045a3719`. Es una prueba corta, y el resultado vale para el mismo número de procesos. Un clon nuevo con un entorno nuevo da la misma malla: sha256 `c2ed1a996956` en el nivel 2, con numpy 2.4.0 y 2.4.6.
 
@@ -255,7 +257,9 @@ Con transición Cl sube en vez de bajar, porque la capa límite laminar es más 
 
 SST cumple Cl en 3 de 5 ángulos; a 10° el experimento ya se aparta de la zona lineal (Ehrmann: «diverge de Abbott después de 9°») y SST no predice esa caída. SST-LM cumple Cd en los 3 puntos dentro del rango (−11 a −12 %), mientras que SST lo sobrestima de 49 a 62 % en esos mismos ángulos. Pero el estudio de malla de SST-LM a 4° no da banda: los niveles 1 y 2 oscilan, y Cd va de 0.00738 a 0.00773 y luego a 0.00653 (nivel 3), sin convergencia monótona. Además, el mismo caso del nivel 2 dio Cd 0.00716 arrancando del flujo potencial y 0.00773 arrancando del nivel 1: el punto de arranque mueve el resultado un 8 %. **SST-LM sigue sin validar:** acierta Cd en el nivel 2, pero la malla y el arranque lo mueven tanto como la tolerancia.
 
-**Malla a lo largo de la cuerda para SST-LM (M).** NACA 63₃-418, Re=2.4×10⁶, 4°: con la cuerda refinada (dx/c de 0.01 y 0.005 en la zona de transición) la transición del extradós queda en 0.406 y 0.413 de la cuerda, y en 0.406 en el nivel 3; Cd 0.00637, 0.00625 y 0.00653, todos CONVERGIDOS. Sin refinar saltaba de 0.29 a 0.33 y Cd de 0.00716 a 0.00773 según el arranque. La transición ya no depende de la malla, pero Cd queda 21 % por debajo de Ehrmann al mismo Cl, fuera de la tolerancia de 15 %. Ehrmann advierte que su modelo, modular, tiene más arrastre que el de Abbott.
+**Malla a lo largo de la cuerda para SST-LM (M).** NACA 63₃-418, Re=2.4×10⁶, 4°: con la cuerda refinada (dx/c de 0.01 y 0.005 en la zona de transición) la transición del extradós queda en 0.406 y 0.413 de la cuerda, y en 0.406 en el nivel 3; Cd 0.00637, 0.00625 y 0.00653, todos CONVERGIDOS. Sin refinar saltaba de 0.29 a 0.33 y Cd de 0.00717 a 0.00773 según el arranque, un **7.8 %**. La transición ya no depende de la malla, pero Cd queda 21 % por debajo de Ehrmann al mismo Cl, fuera de la tolerancia de 15 %. Ehrmann advierte que su modelo, modular, tiene más arrastre que el de Abbott.
+
+**El estudio con la cuerda refinada ×2 no da banda (M).** `lm_x2_gci`, el mismo caso con la cuerda refinada solo ×2, da Cd 0.00662, 0.00638 y 0.00647 en los niveles 1, 2 y 3: **no es monótono**, el nivel 2 queda por debajo del 1 y del 3, así que no hay orden que estimar y no se informa banda. Es un estudio distinto del ×4 de arriba, que sí converge; no lo sustituye y no se usa para la banda de la polar.
 
 **Tolerancias fijadas el 2026-11-04, antes de correr.** NACA 63₃-418 con SST-LM, cuerda refinada ×4, Tu≈0.1 % en el perfil, frente a Özçakmak et al. (2018), túnel sin rejilla (Tu 0.1 %): posición de la transición en el extradós a menos de 0.05 de la cuerda, a Re=3×10⁶ (0° a 6°) y 6×10⁶ (2° y 4°). La turbulencia de 1.2 % con rejilla no se prueba: con un dominio de 200 cuerdas llegaría al perfil solo con viscosidades de entrada fuera de lo razonable.
 
@@ -312,6 +316,50 @@ A 0° y Re=3×10⁶ la transición queda a +0.03–0.05 de la de Ehrmann (0.50, 
 **Corrección del 2026-11-07, antes de ver resultados.** El punto 2 no se puede correr así: el nivel 3 con la cuerda refinada ×4 pasa del nivel más fino del mallador (4), y el estudio de malla con la cuerda refinada no arrancaba el nivel 2 del campo del nivel 1 (`cells_of_level` no contaba el refinado; corregido). Pasa a: niveles 1 a 3 con la cuerda refinada ×2, a 0° y a 4°; su nivel 3 tiene a lo largo de la cuerda el mismo espaciado que el nivel 2 ×4 de la polar. Mismo criterio. El estudio de 4° de §7 (0.406, 0.413 y 0.406) no fue de tres niveles con ×4: fueron el nivel 2 con ×2 y ×4 y el nivel 3 con ×2. Además, el despachador mandaba a la primera máquina de la lista todos los paquetes enviados a la vez (corregido): la tanda lanzada a las 18:02 se detuvo y se repite con el código corregido.
 3. **NACA 4412 frente a Pinkerton al mismo Reynolds.** Re=3×10⁶, SST, nivel 2, α=0, 2, 4, 6 y 8, frente al Cl de Pinkerton interpolado en su ángulo efectivo α_o (`validation/refs/pinkerton_4412_tr563.dat`). Criterio: Cl a 5 % o menos, como frente a Abbott. Las corridas del 4412 de arriba son a 6×10⁶.
 4. **Repetición con una sola versión.** Las campañas de §4 a §7 salieron de unos 20 commits distintos entre el 2026-10-31 y el 2026-11-06. Se repiten con las mismas entradas y tolerancias; las fichas registran el commit de este registro, que en `core/` y `gui/` es idéntico a v1.0.1. Si un resultado cambia, se anota aquí junto al anterior.
+
+**Qué Tu llega al perfil y cuál dispara el aviso (M).** `turbulence_at_profile` (`core/cgrid.py`) estima con el decaimiento de SST qué turbulencia queda al llegar al perfil. A Re=6×10⁶ y 200 cuerdas de dominio:
+
+| Entrada | Tu estimada en el perfil | ¿Avisa? (`TU_PERFIL_MIN` = 0.05 %) |
+|---|---|---|
+| Por defecto: Tu 0.052 %, νt/ν 0.009 | 0.0005 % | sí |
+| Tu 0.2 %, νt/ν 1 | 0.0062 % | sí |
+| Tu 0.6 %, νt/ν 1000 | 0.22 % | no |
+
+El paso de 0.2 % a 0.0062 % que cita la tabla anterior es **con Tu 0.2 % de entrada**, no con la entrada por defecto: con la de fábrica la turbulencia llega aún más disipada, 0.0005 %. Las dos entradas quedan por debajo del mínimo de 0.05 %, así que el aviso salta también con la entrada por defecto, y eso es lo correcto: con Tu sin medida el Cd de SST-LM es una calibración, no un resultado.
+
+**Tiempo de la polar, medido aparte (M).** NACA 0012, Re=6×10⁶, SST, lanzada el 23-nov de 11:30 a 13:30 con v1.0.2 (bb27cca), sola en los dos servidores y sin `--continuar`, 2 corridas de 9 o 10 procesos por máquina:
+
+| Qué | Tiempo |
+|---|---|
+| Los 20 trabajos de la polar | 120 min |
+| Punto de nivel 2 convergido (0° a 15°) | de 16 a 48 min, mediana 31 |
+| Nivel 1 | de 3 a 9 min |
+| Nivel 3 | de 49 a 71 min |
+| 16° a 18°, que no convergen | de 41 a 86 min |
+
+Los tiempos van de `started` a `finished` en `job.json` e incluyen subida y descarga. Reemplazan los «16 a 24 minutos» de las campañas anteriores, que compartieron servidor con otros flujos. Los coeficientes son los mismos del artículo (a 10°, Cl 1.0656 y Cd 0.01142) y a 18° vuelve a no dar valor (4.39 % de deriva).
+
+**Estudio de malla a 14° (M).** La banda del estudio medido en ese ángulo es menor que la que antes se interpolaba entre 10° y 15°:
+
+| α | Niveles 1, 2, 3 | Cl ± | Cd ± | Interpolada antes |
+|---|---|---|---|---|
+| 14 | 1.42150 / 1.43013 / 1.42642 (Cl) | ±0.0259 (±1.81 %) | — | ±0.053 |
+| 14 | 0.015670 / 0.017320 / 0.018186 (Cd) | — | ±0.00228 | ±0.0031 |
+
+La interpolación entre 10° y 15° resultaba conservadora: la banda real a 14° es la mitad en Cl. El Cl es oscilatorio (el nivel 1 salta 0.00209 en la ventana) y su banda es la de 3× el mayor salto, sin extrapolar; el Cd es monótono, con orden 0.93 y extrapolado 0.01914. La fila de la polar a 14° deja de ser interpolada y pasa a ser medida.
+
+**Qué filas de la polar llevan banda interpolada (M).** La banda de Cl y Cd de cada fila sale de los estudios de malla a 0°, 10°, 14° y 15° e **interpolada entre ellos**: las filas de 2°, 4°, 6°, 8° y 12° no tienen estudio propio, y 16°, 17° y 18° no llevan banda porque no convergen. `polar.json` todavía no dice cuál es cuál; escribirlo (`banda_origen`) cambia el código que genera el archivo y va en v1.0.3. Hasta entonces, esta es la lista de referencia.
+
+**Sensibilidad del veredicto (M).** Sobre las 63 corridas SST de la campaña de v1.0.2, 49 CONVERGIDO, recalculando el veredicto con `core/verdict.py` sin modificarlo (`sensibilidad_veredicto_bb27cca.txt`):
+
+| Umbral | ×0.5 | ×2 |
+|---|---|---|
+| Ventana (500 it.) | 3 cambian, ninguno de nivel 3 | 1 cambia |
+| Rango en la ventana (1 %) | **15 cambian** | 5 cambian |
+| Deriva de Cd (0.3 %) | 1 cambia | 0 |
+| Deriva de Cl (0.15 %) | 0 | 0 |
+
+Ningún nivel 3 cambia de veredicto con ningún umbral, ni siquiera duplicando la ventana: por eso 500 iteraciones bastan ahí. El umbral que de verdad decide es el del rango del 1 %, y al estrecharlo a 0.5 % rechaza 15 de las 49 corridas convergentes. Una corrida que solo cumple con el tope del 1 % tiene un rango de Cd de entre 0.5 y 1 % en la ventana, lo que acota la incertidumbre de iteración del valor publicado.
 
 ## 8. Por qué lo anterior no sirve
 
