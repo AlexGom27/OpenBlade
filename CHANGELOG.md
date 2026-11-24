@@ -13,23 +13,33 @@ commit.
 **Documentation only; code identical to v1.0.2.** No file that executes has changed:
 `core/`, `gui/`, `tests/` and `docker/` are byte-for-byte the same as v1.0.2, so the
 figures a user gets from this release are exactly those of v1.0.2. No new runs: every
-number comes from the existing `bb27cca` campaign. 430 tests pass and 3 are skipped, the
-same as v1.0.2.
+number comes from the existing `bb27cca` campaign. The suite is unchanged: 433 tests
+collected, 430 passing and 3 skipped, the same as v1.0.2.
 
 ### Fixed
 
 - `docs/VALIDACION.md`: the main polar table mixed two Ladson data sets. Rows 0°–12°
   used the 80-grit series and rows 14°–17° used the 180-grit one, so the drag
-differences above 12° were overstated. All rows now use 80 grit, which is what the
+  differences above 12° were overstated. All rows now use 80 grit, which is what the
   program has always done (`core/bench.py`, `ladson(aoa, zona="80 grit")`) and what the
   manuscript reports. Drag from 14° to 17° is 8.2 % to 12.8 % above Ladson, not 10.5 %
   to 15.0 %; lift changes by less than a tenth and no conclusion moves. The summary row
   and the limits section were updated to match.
 - `docs/VALIDACION.md`: the polar command said `--gci 0,10,15`. The `bb27cca` campaign
   used `--gci 0,10,14,15`, which is also what the manuscript reports.
-- `docs/VALIDACION.md`: the 14° drag band in the polar table was the interpolated one
-  (±0.053 in Cl and ±0.0031 in Cd). It is now the measured study band (±0.0259 and
-  ±0.00228).
+- `docs/VALIDACION.md`: a paragraph on the 8-versus-9-process comparison (`control_p8`
+  against `control_p9_bb27cca`). The force histories differ from the first iteration
+  (different md5) while the converged means agree to the fourth decimal; the exact
+  figures quoted in the manuscript (6×10⁻⁵ in Cl, 0.15 % in Cd) could not be re-derived
+  from the report files, which store four decimals, so the document bounds them instead
+  of repeating them unverified.
+- `docs/VALIDACION.md`: the polar section states which rows carry a measured band (0°,
+  10°, 14°, 15°) and which an interpolated one (2°, 4°, 6°, 8°, 12°), and the stale
+  "GCI at 0°, 10° and 15°" line is corrected.
+- `docs/VALIDACION.md`: a note in the 2026-11-03 entry pointing to the Pinkerton table at
+  the matching Reynolds number, so the historical +17 %/+11 % (which compared
+  Re = 3×10⁶ data against 6×10⁶ runs) is not read as a like-for-like result. The
+  original record is kept.
 
 ### Added
 
