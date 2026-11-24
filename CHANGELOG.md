@@ -20,12 +20,15 @@ from this version.
 - `CHANGELOG.md` (this file).
 - Regression tests with real force histories from the `bb27cca` campaign
   (`tests/test_regresion_v102.py`, with fixtures in `tests/fixtures/`): NACA 0012 at
-  Re = 6×10⁶, level 2, at 0° and 10°, and the three mesh levels of the 14° and 10°
-  grid studies. They pin the coefficients (Cl 1.0656 and Cd 0.01142 at 10°; Cd 0.00784
-  at 0°), the verdict, the GCI order (1.30 at 10°), the extrapolated values and both
-  uncertainty bands. `banda` is the band of the finest level (±3.86 % on Cd) and
-  `banda_media` the band of the mesh actually used for the polar (10.01 %); the tests
-  keep them apart because confusing them was a real defect found in review.
+  Re = 6×10⁶, level 2, at 0°, 10° and 14°, and the three mesh levels of the 10° and 14°
+  grid studies. Over a fixed history the computation is deterministic, so the exact
+  values the code produces are pinned at `rel=1e-9` —verdict, n_rows, Cl, Cd, Cm, the
+  GCI order, the extrapolated value and both uncertainty bands— and, in separate
+  assertions, that those values rounded are the ones the manuscript publishes. A shift
+  of a single row in the averaging window is enough to fail them. `banda` is the band of
+  the finest level (3.85 % on Cd at 10°) and `banda_media` the band of the mesh actually
+  used for the polar (9.99 %); the tests keep them apart because confusing them was a
+  real defect found in review.
 - `tests/test_sensibilidad_veredicto.py`: the verdict is stable when its window or drift
   thresholds move, and the range threshold (1 % of the window) is the one that actually
   decides. Narrowing it to 0.5 % rejects a run whose Cd range is 0.8 %, which is how the
@@ -44,7 +47,7 @@ from this version.
 - `docs/VALIDACION.md` explains what turbulence actually reaches the airfoil: the
   0.0062 % figure is with Tu = 0.2 % at the inlet, not with the default
   (Tu = 0.052 %, νt/ν = 0.009, which arrives at 0.0005 %).
-- README: current test count (426 collected: 423 passing, 3 skipped, 9 of them new in
+- README: current test count (433 collected: 430 passing, 3 skipped, 16 of them new in
   this release).
 
 ### Fixed
@@ -62,11 +65,11 @@ but not for Cd within 5 % of TMR; SST-LM drag is not validated; k-ε, k-ω,
 Spalart-Allmaras and FSI are not validated and the interface does not label them as
 such yet (planned for v1.0.3).
 
-## [1.0.1] — 2026-11-0x
+## [1.0.1] — 2026-11-07
 
 Earlier release; see the Git history and the archived version at
 [10.5281/zenodo.24045781](https://doi.org/10.5281/zenodo.24045781).
 
-## [1.0.0] — 2026-11-0x
+## [1.0.0] — 2026-11-06
 
 First public release: [10.5281/zenodo.24028940](https://doi.org/10.5281/zenodo.24028940).

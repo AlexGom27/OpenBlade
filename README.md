@@ -187,7 +187,7 @@ Runs the same package on each server and checks that the forces match.
 python3 -m pytest -q
 ```
 
-426 tests: 423 pass and 3 are skipped. The skips are cases that need a real OpenFOAM
+433 tests: 430 pass and 3 are skipped. The skips are cases that need a real OpenFOAM
 install or a live server.
 
 ## Troubleshooting
